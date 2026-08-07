@@ -7,7 +7,7 @@ annotations outlive the tool that collected them.
 **May import:** ``labels``, the standard library, and its own optional
 storage drivers.
 
-**May not import:** ``auto_labeller``, ``modelling``, Label Studio, or any ML
+**May not import:** ``strata.labeller``, ``modelling``, Label Studio, or any ML
 framework.
 
 Two read paths, neither of which streams:
