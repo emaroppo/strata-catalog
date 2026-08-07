@@ -7,11 +7,11 @@ directory be swapped for Postgres and a bucket without a consumer noticing.
 
 import json
 import shutil
-from collections.abc import Iterable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-from sqlalchemy import and_, create_engine, delete, insert, select, update
+from sqlalchemy import and_, create_engine, delete, event, insert, select, update
 from sqlalchemy.engine import Engine
 
 from strata.labels import Choices, ClassificationSchema
@@ -55,6 +55,17 @@ class Catalog:
         root = Path(root)
         root.mkdir(parents=True, exist_ok=True)
         engine = create_engine(f"sqlite:///{root / 'catalog.db'}")
+
+        @event.listens_for(engine, "connect")
+        def _pragmas(dbapi_connection, _record):
+            # A full fsync per commit is what makes a bulk import crawl, and
+            # this index is rebuildable from the blobs and the source it came
+            # from. WAL also lets a reader run while an import is going.
+            cursor = dbapi_connection.cursor()
+            cursor.execute("PRAGMA journal_mode=WAL")
+            cursor.execute("PRAGMA synchronous=NORMAL")
+            cursor.close()
+
         catalog = cls(engine, LocalBackend(root / "blobs"))
         catalog.create_all()
         return catalog
@@ -73,12 +84,17 @@ class Catalog:
         subtype: str = "plain",
         group_id: str | None = None,
         metadata: dict | None = None,
+        on_sample: Callable[[Path], None] | None = None,
     ) -> list[int]:
         """Register files, storing their bytes and returning their sample ids.
 
         Idempotent on content: a file whose bytes are already catalogued
         returns the existing id rather than a duplicate, which is what makes
         re-running ingest over a growing directory safe.
+
+        The whole batch is one transaction — a commit per file costs an
+        fsync each and turns an import into a crawl — so ``on_sample`` is how
+        a caller reports progress without breaking that up.
         """
         ids: list[int] = []
         with self.engine.begin() as conn:
@@ -90,6 +106,8 @@ class Catalog:
                 ).scalar_one_or_none()
                 if existing is not None:
                     ids.append(existing)
+                    if on_sample is not None:
+                        on_sample(path)
                     continue
                 location = self.blobs.put(path, checksum)
                 ids.append(
@@ -106,6 +124,8 @@ class Catalog:
                         )
                     ).inserted_primary_key[0]
                 )
+                if on_sample is not None:
+                    on_sample(path)
         return ids
 
     # ------------------------------------------------------------------
@@ -179,6 +199,48 @@ class Catalog:
                 conn, sample_id, label_set_id, state=t.SKIPPED, value=None, source="human"
             )
             self._reindex_classes(conn, sample_id, label_set_id, set())
+
+    def annotate_many(
+        self,
+        label_set_id: int,
+        items: Iterable[tuple[int, Choices | None]],
+        source: str = "human",
+        on_item: Callable[[int], None] | None = None,
+    ) -> tuple[int, int]:
+        """Record many annotations in one transaction; return (annotated, skipped).
+
+        A ``None`` value means skipped, mirroring the column: there is no
+        answer, as against an empty value, which is the answer "nothing
+        here". Bulk because a commit per annotation costs an fsync, and the
+        schema is fetched once rather than per row.
+        """
+        _, schema = self._label_set_by_id(label_set_id)
+        annotated = skipped = 0
+        with self.engine.begin() as conn:
+            for sample_id, value in items:
+                if value is None:
+                    self._upsert_annotation(
+                        conn, sample_id, label_set_id, state=t.SKIPPED, value=None, source=source
+                    )
+                    self._reindex_classes(conn, sample_id, label_set_id, set())
+                    skipped += 1
+                else:
+                    schema.validate_value(value)
+                    self._upsert_annotation(
+                        conn,
+                        sample_id,
+                        label_set_id,
+                        state=t.ANNOTATED,
+                        value=json.loads(value.model_dump_json()),
+                        source=source,
+                    )
+                    self._reindex_classes(
+                        conn, sample_id, label_set_id, schema.classes_asserted(value)
+                    )
+                    annotated += 1
+                if on_item is not None:
+                    on_item(sample_id)
+        return annotated, skipped
 
     def _upsert_annotation(self, conn, sample_id, label_set_id, *, state, value, source):
         where = and_(
