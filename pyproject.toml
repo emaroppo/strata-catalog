@@ -5,6 +5,7 @@ description = "The labelled data catalog: samples, storage, grouping, annotation
 requires-python = ">=3.13"
 dependencies = [
     "strata-labels",
+    "sqlalchemy>=2.0",
 ]
 
 # Storage backends are optional: the local one needs nothing beyond the

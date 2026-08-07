@@ -22,5 +22,28 @@ tars in object storage; the index is SQLite or Postgres against one schema.
 The local pair needs no infrastructure, which is what keeps the repository
 runnable by someone who just cloned it.
 
-Empty until Phase 2 — see ``docs/roadmap.md``.
+Phase 2 built the local half: SQLite index, a directory of blobs, ingest and
+``materialise``. The S3 backend and Postgres are later phases behind the same
+interface.
 """
+
+from .blobs import BlobBackend, LocalBackend, Location, checksum_of
+from .catalog import Catalog, CatalogError, SampleRow
+from .manifest import FILES_DIR, MANIFEST_NAME, Manifest, ManifestSample
+from .split import SplitError, assign
+
+__all__ = [
+    "FILES_DIR",
+    "MANIFEST_NAME",
+    "BlobBackend",
+    "Catalog",
+    "CatalogError",
+    "LocalBackend",
+    "Location",
+    "Manifest",
+    "ManifestSample",
+    "SampleRow",
+    "SplitError",
+    "assign",
+    "checksum_of",
+]
