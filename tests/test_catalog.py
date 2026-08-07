@@ -307,3 +307,53 @@ def test_an_unsplittable_ratio_is_recorded_rather_than_hidden(catalog, files, tm
 def test_an_unknown_dataset_is_an_error(catalog, tmp_path):
     with pytest.raises(CatalogError, match="No dataset"):
         catalog.materialise(999, tmp_path / "out")
+
+
+# ----------------------------------------------------------------------
+# Re-ingest
+# ----------------------------------------------------------------------
+
+
+def test_re_ingesting_backfills_a_group(catalog, files, label_set):
+    # A project that predates [data] kind ingests ungrouped; correcting the
+    # setting and re-running has to fix it, or the mistake means a rebuild
+    paths = files(3)
+    catalog.ingest(paths, media="image")
+    assert {s.group_id for s in catalog.unlabelled(label_set)} == {None}
+
+    catalog.ingest(paths, media="image", subtype="frames", group_id="vid1")
+    assert {s.group_id for s in catalog.unlabelled(label_set)} == {"vid1"}
+
+
+def test_re_ingesting_updates_the_subtype(catalog, files, label_set):
+    paths = files(2)
+    catalog.ingest(paths, media="image")
+    catalog.ingest(paths, media="image", subtype="frames", group_id="vid1")
+    assert {s.subtype for s in catalog.unlabelled(label_set)} == {"frames"}
+
+
+def test_re_ingesting_does_not_duplicate(catalog, files):
+    paths = files(4)
+    first = catalog.ingest(paths, media="image")
+    assert catalog.ingest(paths, media="image", group_id="vid1") == first
+
+
+def test_re_ingesting_leaves_annotations_alone(catalog, files, label_set):
+    [sample_id] = catalog.ingest(files(1), media="image")
+    catalog.annotate(sample_id, label_set, Choices(values=["cat"]))
+    catalog.ingest(files(1), media="image", group_id="vid1")
+    assert catalog.annotation_of(sample_id, label_set) == Choices(values=["cat"])
+
+
+def test_regrouping_cannot_disturb_a_dataset_already_built(catalog, files, label_set, tmp_path):
+    paths = files(10)
+    ids = catalog.ingest(paths, media="image")
+    annotate_all(catalog, ids, label_set)
+    first = catalog.materialise(catalog.create_dataset("d", label_set), tmp_path / "v1")
+    before = {s.id: s.val for s in _manifest(first).samples}
+
+    # Membership is materialised, so a later regroup is invisible to a
+    # version that already exists
+    catalog.ingest(paths, media="image", subtype="frames", group_id="vid1")
+    after = {s.id: s.val for s in _manifest(first).samples}
+    assert after == before

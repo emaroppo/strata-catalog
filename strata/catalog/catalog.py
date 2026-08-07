@@ -92,6 +92,12 @@ class Catalog:
         returns the existing id rather than a duplicate, which is what makes
         re-running ingest over a growing directory safe.
 
+        A known sample has its ``subtype``, ``group_id`` and ``metadata``
+        brought up to date rather than left alone, so correcting how a
+        corpus is described is one re-run rather than a rebuild. Regrouping
+        cannot disturb a dataset already built: membership is materialised
+        into ``dataset_member``, so only later versions see the change.
+
         The whole batch is one transaction — a commit per file costs an
         fsync each and turns an import into a crawl — so ``on_sample`` is how
         a caller reports progress without breaking that up.
@@ -105,6 +111,11 @@ class Catalog:
                     select(t.sample.c.id).where(t.sample.c.checksum == checksum)
                 ).scalar_one_or_none()
                 if existing is not None:
+                    conn.execute(
+                        update(t.sample)
+                        .where(t.sample.c.id == existing)
+                        .values(subtype=subtype, group_id=group_id, metadata=metadata)
+                    )
                     ids.append(existing)
                     if on_sample is not None:
                         on_sample(path)
