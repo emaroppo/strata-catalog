@@ -385,6 +385,20 @@ class Catalog:
         with self.engine.connect() as conn:
             return self._rows(conn, stmt)
 
+    def by_location(self, container: str) -> SampleRow | None:
+        """The sample whose bytes sit at a blob location.
+
+        How a Label Studio task is recognised on the way back: its image URL
+        names a location, and a location names one sample. Matching on that
+        rather than on a path string is why the URL carries the checksum.
+        """
+        stmt = select(*self._COLUMNS).where(
+            and_(self._live(), t.sample.c.location == container)
+        )
+        with self.engine.connect() as conn:
+            rows = self._rows(conn, stmt)
+        return rows[0] if rows else None
+
     def annotation_of(self, sample_id: int, label_set_id: int) -> Choices | None:
         with self.engine.connect() as conn:
             row = conn.execute(
