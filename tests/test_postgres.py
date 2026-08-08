@@ -18,26 +18,51 @@ import pytest
 from strata.catalog import EVERYTHING, Catalog, LocalBackend
 from strata.labels import Choices, ClassificationSchema
 
-URL = os.environ.get(
-    "STRATA_TEST_DB", "postgresql+psycopg://strata:strata@localhost:5432/strata"
-)
+
+def _default_url() -> str:
+    """The compose database, described the way compose describes it.
+
+    Built from the same variables docker-compose reads rather than hardcoded,
+    so rotating the password in ``.env`` does not quietly switch this whole
+    file off — which is exactly what a literal default did once.
+    """
+    user = os.environ.get("STRATA_DB_USER", "strata")
+    password = os.environ.get("STRATA_DB_PASSWORD", "strata")
+    port = os.environ.get("STRATA_DB_PORT", "5432")
+    name = os.environ.get("STRATA_DB_NAME", "strata")
+    return f"postgresql+psycopg://{user}:{password}@localhost:{port}/{name}"
 
 
-def _reachable() -> bool:
+URL = os.environ.get("STRATA_TEST_DB") or _default_url()
+
+
+def _why_not() -> str | None:
+    """None if the database is usable, else why it is not.
+
+    The reason is reported verbatim. A skip that says "no Postgres" when the
+    container is running and the password is wrong sends you to look in the
+    wrong place, and a whole dialect goes untested while you do.
+    """
     try:
         from sqlalchemy import create_engine, text
     except ImportError:
-        return False
+        return "psycopg not installed (uv sync --extra postgres)"
     try:
         with create_engine(URL).connect() as conn:
             conn.execute(text("SELECT 1"))
-        return True
-    except Exception:
-        return False
+        return None
+    except Exception as e:
+        return f"{type(e).__name__}: {str(e).splitlines()[0]}"
 
+
+_UNUSABLE = _why_not()
 
 pytestmark = pytest.mark.skipif(
-    not _reachable(), reason=f"no Postgres at {URL} (docker compose up -d catalog-db)"
+    _UNUSABLE is not None,
+    reason=(
+        f"Postgres unusable — {_UNUSABLE}. Set $STRATA_TEST_DB, or load the "
+        f"compose environment (set -a; . ./.env; set +a)."
+    ),
 )
 
 
