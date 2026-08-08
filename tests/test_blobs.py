@@ -101,3 +101,45 @@ def test_the_backend_satisfies_the_protocol(tmp_path):
     from strata.catalog import BlobBackend
 
     assert isinstance(LocalBackend(Path(tmp_path)), BlobBackend)
+
+
+def test_put_shares_an_inode_with_its_source(tmp_path):
+    # Cataloguing a corpus should not cost a second copy of it
+    import os
+
+    source = tmp_path / "img.jpg"
+    source.write_bytes(b"the only copy")
+    backend = LocalBackend(tmp_path / "blobs")
+    location = backend.put(source, checksum_of(source))
+
+    assert backend.path_for(location).stat().st_ino == source.stat().st_ino
+    assert os.stat(source).st_nlink == 2
+
+
+def test_put_falls_back_to_copying_when_it_cannot_link(tmp_path, monkeypatch):
+    # The ordinary case once the catalog lives on its own drive
+    import os
+
+    def no_links(*_args, **_kwargs):
+        raise OSError("cross-device link")
+
+    monkeypatch.setattr(os, "link", no_links)
+    source = tmp_path / "img.jpg"
+    source.write_bytes(b"copied instead")
+    backend = LocalBackend(tmp_path / "blobs")
+    location = backend.put(source, checksum_of(source))
+
+    assert backend.get(location) == b"copied instead"
+    assert backend.path_for(location).stat().st_ino != source.stat().st_ino
+    assert not list((tmp_path / "blobs").rglob("*.partial"))
+
+
+def test_a_linked_blob_survives_its_source_being_deleted(tmp_path):
+    # Which is what makes deleting the original tree safe afterwards
+    source = tmp_path / "img.jpg"
+    source.write_bytes(b"still here")
+    backend = LocalBackend(tmp_path / "blobs")
+    location = backend.put(source, checksum_of(source))
+    source.unlink()
+
+    assert backend.get(location) == b"still here"

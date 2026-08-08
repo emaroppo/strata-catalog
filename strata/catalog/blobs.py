@@ -16,6 +16,7 @@ Three rules the local backend keeps even though nothing forces it to:
 """
 
 import hashlib
+import os
 import shutil
 from collections.abc import Iterable, Iterator
 from dataclasses import dataclass
@@ -101,11 +102,23 @@ class LocalBackend:
         length = source.stat().st_size
         if not target.exists():
             target.parent.mkdir(parents=True, exist_ok=True)
-            # Via a temporary name so an interrupted copy cannot leave a
-            # short file sitting at the address of the real one.
-            partial = target.with_name(target.name + ".partial")
-            shutil.copyfile(source, partial)
-            partial.replace(target)
+            try:
+                # Linking rather than copying, so cataloguing a corpus costs
+                # no disk. Unlike materialise, whose source is a blob this
+                # backend owns and treats as immutable, the source here
+                # belongs to whoever put it there — editing it in place would
+                # change the catalog's bytes without changing the checksum
+                # that addresses them. Acceptable for an archive nothing
+                # rewrites; the alternative is a second copy of the corpus.
+                os.link(source, target)
+            except OSError:
+                # A different filesystem, which is the ordinary case once the
+                # catalog moves to its own drive. Via a temporary name, so an
+                # interrupted copy cannot leave a short file at the address
+                # of the real one.
+                partial = target.with_name(target.name + ".partial")
+                shutil.copyfile(source, partial)
+                partial.replace(target)
         return Location(container=relative, offset=0, length=length)
 
     def get(self, location: Location) -> bytes:
