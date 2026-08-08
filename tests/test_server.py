@@ -186,3 +186,26 @@ def test_storage_that_will_not_answer_is_not_a_missing_blob(stocked, checksums):
     response = client.get(signed(checksums[0]))
     assert response.status_code == 502
     assert "ConnectionError" in response.json()["detail"]
+
+
+def test_a_browser_is_allowed_to_keep_the_response(client, checksums):
+    """Label Studio marks its images crossorigin.
+
+    Without the header the browser fetches the image successfully and then
+    discards it, which surfaces as "issue loading URL" with a URL that works
+    perfectly from curl.
+    """
+    response = client.get(signed(checksums[0]), headers={"Origin": "http://localhost:8080"})
+    assert response.headers["access-control-allow-origin"] == "*"
+
+
+def test_origins_can_be_narrowed(stocked, checksums):
+    app = create_app(stocked, SECRET, allow_origins=("http://localhost:8080",))
+    client = TestClient(app)
+    allowed = client.get(signed(checksums[0]), headers={"Origin": "http://localhost:8080"})
+    assert allowed.headers["access-control-allow-origin"] == "http://localhost:8080"
+
+    other = client.get(signed(checksums[0]), headers={"Origin": "http://elsewhere"})
+    # The bytes still arrive — an origin policy is a browser rule, not a
+    # guard on the endpoint — but the browser will not hand them over
+    assert "access-control-allow-origin" not in other.headers

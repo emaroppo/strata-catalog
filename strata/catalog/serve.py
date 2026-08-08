@@ -67,7 +67,13 @@ def build():
             "With no S3 endpoint the server reads files, and needs to know where.",
         ))
 
-    return create_app(Catalog.connect(url, blobs), secret)
+    # Comma-separated, and everything by default. Label Studio marks images
+    # crossorigin, so without a matching header the browser discards a
+    # response it already received in full.
+    origins = tuple(
+        o.strip() for o in os.environ.get("STRATA_SERVE_ORIGINS", "*").split(",") if o.strip()
+    )
+    return create_app(Catalog.connect(url, blobs), secret, allow_origins=origins)
 
 
 def main() -> None:

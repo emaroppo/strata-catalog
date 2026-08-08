@@ -38,16 +38,39 @@ def _split(name: str) -> tuple[str, str]:
     return name[: len(name) - len(suffix)], suffix
 
 
-def create_app(catalog: Catalog, secret: str, cache_seconds: int = 31536000):
+def create_app(
+    catalog: Catalog,
+    secret: str,
+    cache_seconds: int = 31536000,
+    allow_origins: tuple[str, ...] = ("*",),
+):
     """An app serving ``catalog``'s blobs, given the secret URLs are signed with.
 
     Takes a catalog rather than building one, so the process that owns the
     connection pool decides how it is configured — and so tests can serve a
     catalog that lives entirely in a temporary directory.
+
+    ``allow_origins`` defaults to everything, and that is not the shortcut it
+    looks like. Label Studio marks its images ``crossorigin``, so a browser
+    treats even an ``<img>`` load as a CORS request and throws away a
+    perfectly good response that arrived without the header. Nothing is
+    conceded by allowing it: the signature authorises the read, and anyone
+    holding the URL can already fetch it with curl, where no origin policy
+    applies. Narrow it if a deployment wants defence in depth, but do not
+    mistake it for what is keeping the corpus closed.
     """
     from fastapi import FastAPI, HTTPException, Query, Response
+    from fastapi.middleware.cors import CORSMiddleware
 
     app = FastAPI(title="strata blobs", docs_url=None, redoc_url=None)
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=list(allow_origins),
+        allow_methods=["GET"],
+        # Credentials are never sent — the URL carries its own authorisation
+        # — and "*" is invalid alongside them anyway.
+        allow_credentials=False,
+    )
 
     @app.get("/healthz")
     def healthz() -> dict:
