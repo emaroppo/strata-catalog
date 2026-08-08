@@ -1,0 +1,55 @@
+# The catalog's own machine: the index, and the thing that serves bytes.
+#
+# Separate from the repository's docker-compose.yml on purpose. That one is a
+# development stack — Label Studio, a throwaway Postgres, MinIO standing in
+# for object storage. This is the deployment those stand in for, and the two
+# should never be confused for each other.
+#
+# Garage is not here. It runs on this host already and owns its own data;
+# bringing it under this file would mean this file could take it down.
+
+services:
+  catalog-db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    ports:
+      # Published because the desktop labels and trains against this index.
+      - "${STRATA_DB_PORT:-5432}:5432"
+    environment:
+      - POSTGRES_USER=${STRATA_DB_USER:-strata}
+      - POSTGRES_PASSWORD=${STRATA_DB_PASSWORD:?set it in .env}
+      - POSTGRES_DB=${STRATA_DB_NAME:-strata}
+    volumes:
+      - catalog-db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${STRATA_DB_USER:-strata}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  blobs:
+    build:
+      context: ../..
+      dockerfile: deploy/minipc/Dockerfile
+    restart: unless-stopped
+    ports:
+      - "${STRATA_SERVE_PORT:-8081}:8081"
+    environment:
+      # catalog-db by service name: this talks to the container, not through
+      # the published port.
+      - STRATA_CATALOG_URL=postgresql+psycopg://${STRATA_DB_USER:-strata}:${STRATA_DB_PASSWORD:?}@catalog-db:5432/${STRATA_DB_NAME:-strata}
+      - STRATA_BLOB_SECRET=${STRATA_BLOB_SECRET:?the labeller signs with this too}
+      # host.docker.internal so this reaches Garage on the host rather than
+      # looking for it inside the compose network.
+      - STRATA_S3_ENDPOINT=${STRATA_S3_ENDPOINT:-http://host.docker.internal:3900}
+      - STRATA_S3_BUCKET=${STRATA_S3_BUCKET:?}
+      - STRATA_S3_ACCESS_KEY=${STRATA_S3_ACCESS_KEY:?}
+      - STRATA_S3_SECRET_KEY=${STRATA_S3_SECRET_KEY:?}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      catalog-db:
+        condition: service_healthy
+
+volumes:
+  catalog-db:
