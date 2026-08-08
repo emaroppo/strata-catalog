@@ -752,13 +752,18 @@ class Catalog:
             raise CatalogError(f"No dataset with id {dataset_id}")
         return version
 
-    def materialise(self, dataset_id: int, dest: Path) -> Path:
+    def materialise(self, dataset_id: int, dest: Path, on_progress=None) -> Path:
         """Write a dataset version out as files plus a manifest.
 
         The result needs no database and no catalog to train from, which is
         what makes a dataset version the portable unit. Files are addressed
         by checksum, so re-materialising after a labelling round rewrites the
         manifest and copies nothing.
+
+        ``on_progress(done, total)`` is called as blobs land. It exists
+        because this stopped being instant: linking local files is over
+        before anyone looks, but pulling shards out of a bucket is minutes
+        of silence, and silence is indistinguishable from a hang.
         """
         dest = Path(dest)
         files = dest / FILES_DIR
@@ -814,7 +819,7 @@ class Catalog:
             target = dest / relatives[row.id]
             if not target.exists():
                 wanted[Location(row.location, row.offset, row.length)] = target
-        self._write_out(wanted)
+        self._write_out(wanted, on_progress)
 
         samples = []
         for row in rows:
@@ -846,7 +851,7 @@ class Catalog:
         (dest / MANIFEST_NAME).write_text(manifest.model_dump_json(indent=2))
         return dest
 
-    def _write_out(self, wanted: dict[Location, Path]) -> None:
+    def _write_out(self, wanted: dict[Location, Path], on_progress=None) -> None:
         """Put every wanted blob where the manifest says it is.
 
         Split by what the backend can do rather than done uniformly. A
@@ -861,13 +866,22 @@ class Catalog:
         for target in wanted.values():
             target.parent.mkdir(parents=True, exist_ok=True)
 
+        done = 0
+        total = len(wanted)
+
         path_for = getattr(self.blobs, "path_for", None)
         if path_for is None:
             for location, body in self.blobs.fetch(list(wanted)):
                 wanted[location].write_bytes(body)
+                done += 1
+                if on_progress is not None:
+                    on_progress(done, total)
             return
 
         for location, target in wanted.items():
+            if on_progress is not None:
+                on_progress(done, total)
+            done += 1
             source = path_for(location)
             try:
                 # A blob is immutable and addressed by its content, and a
