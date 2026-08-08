@@ -506,3 +506,34 @@ def test_a_dataset_must_be_told_where_to_draw_from(catalog, files, label_set):
     annotate_all(catalog, ids, label_set)
     with pytest.raises(CatalogError, match="collections"):
         catalog.create_dataset("d", label_set)
+
+
+def test_a_sample_row_can_be_hashed_even_carrying_metadata():
+    """A frozen dataclass hashes every field it compares.
+
+    metadata is a dict, so including it made any row describing where it
+    came from unusable as a key or set member — which stayed invisible only
+    while every sample had none, and then broke a push after three and a
+    half minutes of inference.
+    """
+    from strata.catalog import Location, SampleRow
+
+    row = SampleRow(
+        id=1, checksum="a" * 64, location=Location("x", 0, 1),
+        media="image", subtype="plain", group_id=None,
+        metadata={"source_path": "/raw/img.jpg"},
+    )
+    assert hash(row)
+    assert {row: "kept"}[row] == "kept"
+
+
+def test_two_rows_for_one_sample_are_the_same_sample():
+    from strata.catalog import Location, SampleRow
+
+    common = dict(
+        id=1, checksum="a" * 64, location=Location("x", 0, 1),
+        media="image", subtype="plain", group_id=None,
+    )
+    # What is recorded about where a sample came from does not make it a
+    # different sample
+    assert SampleRow(**common, metadata={"a": 1}) == SampleRow(**common, metadata=None)

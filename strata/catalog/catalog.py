@@ -9,7 +9,7 @@ import json
 import os
 import shutil
 from collections.abc import Callable, Iterable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from sqlalchemy import and_, create_engine, delete, event, insert, or_, select, update
@@ -91,7 +91,13 @@ class SampleRow:
     media: str
     subtype: str
     group_id: str | None
-    metadata: dict | None = None
+    #: Out of comparison, and therefore out of the generated hash. A frozen
+    #: dataclass hashes every field it compares, and a dict cannot be
+    #: hashed — so a row carrying metadata could not be put in a set or used
+    #: as a key at all. It stayed usable only while every sample had none.
+    #: Excluding it is also the truer reading: two rows for the same sample
+    #: are the same sample, whatever is recorded about where it came from.
+    metadata: dict | None = field(default=None, compare=False)
 
 
 class Catalog:
