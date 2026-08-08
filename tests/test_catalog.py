@@ -178,12 +178,22 @@ def test_a_dataset_defaults_to_everything_labelled(catalog, files, label_set):
     assert len(manifest.samples) == 6
 
 
-def test_versions_increment(catalog, files, label_set):
+def test_an_unchanged_selection_reuses_its_version(catalog, files, label_set):
+    # A version describes a selection, not an attempt at one. A round that
+    # crashed after freezing its dataset should retry against the same
+    # version rather than mint a second saying exactly the same thing.
     ids = catalog.ingest(files(10), media="image")
     annotate_all(catalog, ids, label_set)
+    assert catalog.create_dataset("d", label_set) == catalog.create_dataset("d", label_set)
+
+
+def test_a_changed_selection_makes_a_new_version(catalog, files, label_set):
+    ids = catalog.ingest(files(10), media="image")
+    annotate_all(catalog, ids[:6], label_set)
     first = catalog.create_dataset("d", label_set)
-    second = catalog.create_dataset("d", label_set)
-    assert first != second
+
+    annotate_all(catalog, ids[6:], label_set)
+    assert catalog.create_dataset("d", label_set) != first
 
 
 def test_a_dataset_with_nothing_labelled_is_an_error(catalog, files, label_set):

@@ -439,6 +439,13 @@ class Catalog:
             raise CatalogError(f"No labelled samples for label set {label_set_id}")
 
         with self.engine.begin() as conn:
+            existing = self._identical_version(conn, name, set(sample_ids))
+            if existing is not None:
+                # A version describes a selection, not an attempt at one. A
+                # round that crashed after freezing its dataset should be
+                # retried against the same version rather than minting a
+                # second one that says exactly the same thing.
+                return existing
             version = (
                 conn.execute(
                     select(t.dataset.c.version)
@@ -475,6 +482,26 @@ class Catalog:
                     )
                 )
         return dataset_id
+
+    def _identical_version(self, conn, name: str, wanted: set[int]) -> int | None:
+        """The latest version of ``name``, if it holds exactly ``wanted``."""
+        latest = conn.execute(
+            select(t.dataset.c.id)
+            .where(t.dataset.c.name == name)
+            .order_by(t.dataset.c.version.desc())
+            .limit(1)
+        ).scalar_one_or_none()
+        if latest is None:
+            return None
+        members = {
+            row[0]
+            for row in conn.execute(
+                select(t.dataset_member.c.sample_id).where(
+                    t.dataset_member.c.dataset_id == latest
+                )
+            )
+        }
+        return latest if members == wanted else None
 
     def _previous_split(self, conn, name: str) -> dict[int, bool]:
         previous = conn.execute(
