@@ -758,21 +758,27 @@ class Catalog:
     # Materialise
     # ------------------------------------------------------------------
 
-    def dataset_version(self, dataset_id: int) -> int:
-        """Which version a dataset id is, without materialising it.
+    def dataset_named(self, dataset_id: int) -> tuple[str, int]:
+        """A dataset's name and version, without materialising it.
 
-        So a caller can tell whether it already holds this version before
-        paying to fetch it. Reading the version off the manifest is only
-        possible once the files are written, which is too late to decide not
-        to write them.
+        So a caller can work out where a version would live, and whether it
+        already holds it, before paying to fetch it. Reading either off the
+        manifest is only possible once the files are written, which is too
+        late to decide not to write them.
         """
         with self.engine.connect() as conn:
-            version = conn.execute(
-                select(t.dataset.c.version).where(t.dataset.c.id == dataset_id)
-            ).scalar()
-        if version is None:
+            row = conn.execute(
+                select(t.dataset.c.name, t.dataset.c.version).where(
+                    t.dataset.c.id == dataset_id
+                )
+            ).first()
+        if row is None:
             raise CatalogError(f"No dataset with id {dataset_id}")
-        return version
+        return row.name, row.version
+
+    def dataset_version(self, dataset_id: int) -> int:
+        """Which version a dataset id is. See :meth:`dataset_named`."""
+        return self.dataset_named(dataset_id)[1]
 
     def materialise(
         self, dataset_id: int, dest: Path, on_progress=None, cache: Path | None = None
