@@ -24,7 +24,52 @@ here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 env_file="$here/.env"
 bucket=${STRATA_S3_BUCKET:-mydata}
 key_name=${STRATA_KEY_NAME:-strata-serve}
-garage=${GARAGE:-garage}
+
+# How to invoke Garage, worked out rather than assumed.
+#
+# A shell alias is the usual way people reach a containerised Garage, and an
+# alias is exactly what a script cannot see: non-interactive shells do not
+# read them. So this looks for the binary, then for a running container,
+# then for the alias definition in the usual rc files — and reports which
+# one it used, because "not reachable" when the thing is plainly running is
+# a confusing way to end up with placeholders.
+resolve_garage() {
+    if [ -n "${GARAGE:-}" ]; then
+        printf '%s' "$GARAGE"
+        return
+    fi
+    if command -v garage >/dev/null 2>&1; then
+        printf 'garage'
+        return
+    fi
+    if command -v docker >/dev/null 2>&1; then
+        local container
+        container=$(docker ps --format '{{.Names}} {{.Image}}' 2>/dev/null |
+            grep -i garage | head -1 | cut -d' ' -f1 || true)
+        if [ -n "$container" ]; then
+            printf 'docker exec -i %s /garage' "$container"
+            return
+        fi
+    fi
+    local defined
+    for rc in "$HOME/.bashrc" "$HOME/.bash_aliases" "$HOME/.zshrc" "$HOME/.profile"; do
+        [ -r "$rc" ] || continue
+        defined=$(sed -nE "s/^[[:space:]]*alias[[:space:]]+garage=['\"]?(.*[^'\"])['\"]?[[:space:]]*$/\1/p" \
+            "$rc" | tail -1)
+        if [ -n "$defined" ]; then
+            # -t allocates a pseudo-TTY, which injects carriage returns into
+            # output this script matches hex against. Harmless interactively,
+            # fatal here, and the failure would look like a parse problem.
+            printf '%s' "${defined//-it/-i}"
+            return
+        fi
+    done
+}
+
+garage=$(resolve_garage)
+if [ -z "$garage" ]; then
+    garage="garage"
+fi
 
 # Refuse rather than overwrite. The file holds the only copy of a running
 # deployment's credentials, and regenerating them silently would leave a
@@ -42,6 +87,7 @@ secret_key="REPLACE_ME"
 note=""
 
 if $garage status >/dev/null 2>&1; then
+    echo "Garage: $garage"
     echo "Creating read-only Garage key '$key_name' on bucket '$bucket'..."
     # The secret prints once, at creation, and there is no way to ask for it
     # again — so it is captured here or not at all.
@@ -65,9 +111,10 @@ if $garage status >/dev/null 2>&1; then
         echo "  $note — leaving placeholders" >&2
     fi
 else
-    note="garage CLI not reachable as '$garage'"
+    note="garage did not answer as '$garage'"
     echo "$note — leaving placeholders for the S3 credentials." >&2
-    echo "Set GARAGE to how you invoke it, e.g. 'docker exec -i garage /garage'." >&2
+    echo "If you reach it some other way, set GARAGE to that, minus any -t:" >&2
+    echo "  GARAGE=\"docker exec -i <container> /garage\" $0" >&2
 fi
 
 umask 077
