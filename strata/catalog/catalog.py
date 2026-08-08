@@ -736,6 +736,22 @@ class Catalog:
     # Materialise
     # ------------------------------------------------------------------
 
+    def dataset_version(self, dataset_id: int) -> int:
+        """Which version a dataset id is, without materialising it.
+
+        So a caller can tell whether it already holds this version before
+        paying to fetch it. Reading the version off the manifest is only
+        possible once the files are written, which is too late to decide not
+        to write them.
+        """
+        with self.engine.connect() as conn:
+            version = conn.execute(
+                select(t.dataset.c.version).where(t.dataset.c.id == dataset_id)
+            ).scalar()
+        if version is None:
+            raise CatalogError(f"No dataset with id {dataset_id}")
+        return version
+
     def materialise(self, dataset_id: int, dest: Path) -> Path:
         """Write a dataset version out as files plus a manifest.
 
