@@ -167,3 +167,22 @@ def test_something_that_is_not_a_checksum_is_not_found(client):
 
 def test_health_needs_no_signature(client):
     assert client.get("/healthz").status_code == 200
+
+
+def test_storage_that_will_not_answer_is_not_a_missing_blob(stocked, checksums):
+    """A backend failure and an absent sample must not look the same.
+
+    They send you to opposite places: one is a catalog that does not hold
+    this, the other a catalog that does and cannot reach its bytes.
+    """
+
+    class Unreachable:
+        def get(self, location):
+            raise ConnectionError("Could not connect to the endpoint URL")
+
+    stocked.blobs = Unreachable()
+    client = TestClient(create_app(stocked, SECRET), raise_server_exceptions=False)
+
+    response = client.get(signed(checksums[0]))
+    assert response.status_code == 502
+    assert "ConnectionError" in response.json()["detail"]

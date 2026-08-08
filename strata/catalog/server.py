@@ -71,7 +71,21 @@ def create_app(catalog: Catalog, secret: str, cache_seconds: int = 31536000):
         if sample is None:
             raise HTTPException(status_code=404, detail="No such blob.")
 
-        body = catalog.blobs.get(sample.location)
+        try:
+            body = catalog.blobs.get(sample.location)
+        except Exception as e:
+            # The index knew the sample and storage would not give it up.
+            # Distinct from 404 on purpose: one means the catalog does not
+            # have this, the other means it does and cannot reach it, and
+            # collapsing them into a 500 with a traceback sends whoever is
+            # debugging to look in the wrong place.
+            raise HTTPException(
+                status_code=502,
+                detail=(
+                    f"Storage did not return {sample.location.container} — "
+                    f"{type(e).__name__}: {e}"
+                ),
+            ) from None
         media_type = mimetypes.types_map.get(suffix.lower(), "application/octet-stream")
         return Response(
             content=body,
