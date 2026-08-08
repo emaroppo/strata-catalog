@@ -357,3 +357,22 @@ def test_regrouping_cannot_disturb_a_dataset_already_built(catalog, files, label
     catalog.ingest(paths, media="image", subtype="frames", group_id="vid1")
     after = {s.id: s.val for s in _manifest(first).samples}
     assert after == before
+
+
+def test_materialising_shares_inodes_with_the_blobs(materialised, catalog):
+    # A blob is immutable and content-addressed, and a version is derived
+    # from it — so a dataset version should cost no disk. Without this every
+    # round copies itself and a real project runs out.
+    import os
+
+    sample = _manifest(materialised).samples[0]
+    row = next(s for s in catalog.labelled(1) if s.id == sample.id)
+    assert (materialised / sample.path).stat().st_ino == (
+        catalog.blobs.path_for(row.location).stat().st_ino
+    )
+    assert os.stat(materialised / sample.path).st_nlink >= 2
+
+
+def test_a_materialised_file_still_has_the_right_bytes(materialised):
+    sample = _manifest(materialised).samples[0]
+    assert (materialised / sample.path).read_bytes().startswith(b"contents of img")

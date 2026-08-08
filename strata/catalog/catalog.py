@@ -6,6 +6,7 @@ directory be swapped for Postgres and a bucket without a consumer noticing.
 """
 
 import json
+import os
 import shutil
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
@@ -587,8 +588,18 @@ class Catalog:
 
     def _copy_out(self, location: Location, target: Path) -> None:
         path_for = getattr(self.blobs, "path_for", None)
-        if path_for is not None:
-            # Cheaper than a read/write cycle, and the common case today
-            shutil.copyfile(path_for(location), target)
-        else:
+        if path_for is None:
             target.write_bytes(self.blobs.get(location))
+            return
+
+        source = path_for(location)
+        try:
+            # A blob is immutable and addressed by its content, and a
+            # materialised version is derived from it — so the two can share
+            # an inode. Without this every dataset version costs a full copy
+            # of itself, and a project of any size runs a disk out.
+            os.link(source, target)
+        except OSError:
+            # Different filesystem, or one that will not link. Correctness
+            # does not depend on the link, only the disk usage does.
+            shutil.copyfile(source, target)
