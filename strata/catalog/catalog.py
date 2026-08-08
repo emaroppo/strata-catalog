@@ -56,19 +56,32 @@ class Catalog:
         """
         root = Path(root)
         root.mkdir(parents=True, exist_ok=True)
-        engine = create_engine(f"sqlite:///{root / 'catalog.db'}")
+        return cls.connect(f"sqlite:///{root / 'catalog.db'}", LocalBackend(root / "blobs"))
 
-        @event.listens_for(engine, "connect")
-        def _pragmas(dbapi_connection, _record):
-            # A full fsync per commit is what makes a bulk import crawl, and
-            # this index is rebuildable from the blobs and the source it came
-            # from. WAL also lets a reader run while an import is going.
-            cursor = dbapi_connection.cursor()
-            cursor.execute("PRAGMA journal_mode=WAL")
-            cursor.execute("PRAGMA synchronous=NORMAL")
-            cursor.close()
+    @classmethod
+    def connect(cls, url: str, blobs: BlobBackend) -> "Catalog":
+        """A catalog on any index the same schema runs against.
 
-        catalog = cls(engine, LocalBackend(root / "blobs"))
+        One schema, two dialects: SQLite for a checkout with nothing
+        installed, Postgres once the corpus is millions of rows read from
+        several machines at once, which is where SQLite stops being the
+        right answer.
+        """
+        engine = create_engine(url)
+        if engine.dialect.name == "sqlite":
+
+            @event.listens_for(engine, "connect")
+            def _pragmas(dbapi_connection, _record):
+                # A full fsync per commit is what makes a bulk import crawl,
+                # and this index is rebuildable from the blobs and the source
+                # it came from. WAL also lets a reader run during an import.
+                # Neither has an equivalent worth setting on Postgres.
+                cursor = dbapi_connection.cursor()
+                cursor.execute("PRAGMA journal_mode=WAL")
+                cursor.execute("PRAGMA synchronous=NORMAL")
+                cursor.close()
+
+        catalog = cls(engine, blobs)
         catalog.create_all()
         return catalog
 
