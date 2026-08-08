@@ -18,9 +18,25 @@ from sqlalchemy.engine import Engine
 from strata.labels import Choices, ClassificationSchema
 
 from . import tables as t
-from .blobs import BlobBackend, LocalBackend, Location, checksum_of
+from .blobs import BlobBackend, LocalBackend, Location, blob_path, checksum_of
 from .manifest import FILES_DIR, MANIFEST_NAME, Manifest, ManifestSample
 from .split import assign
+
+
+def _link_or_copy(source: Path, target: Path) -> None:
+    """Put ``source``'s bytes at ``target``, sharing them if the filesystem can.
+
+    A blob is immutable and addressed by its content, and anything derived
+    from it is the same bytes — so the two can share an inode. Without this
+    every dataset version costs a full copy of itself, and a project of any
+    size runs out of disk.
+    """
+    try:
+        os.link(source, target)
+    except OSError:
+        # A different filesystem, or one that will not link. Correctness
+        # does not depend on the link, only disk usage.
+        shutil.copyfile(source, target)
 
 
 def _materialised_name(row) -> str:
@@ -758,7 +774,9 @@ class Catalog:
             raise CatalogError(f"No dataset with id {dataset_id}")
         return version
 
-    def materialise(self, dataset_id: int, dest: Path, on_progress=None) -> Path:
+    def materialise(
+        self, dataset_id: int, dest: Path, on_progress=None, cache: Path | None = None
+    ) -> Path:
         """Write a dataset version out as files plus a manifest.
 
         The result needs no database and no catalog to train from, which is
@@ -770,6 +788,11 @@ class Catalog:
         because this stopped being instant: linking local files is over
         before anyone looks, but pulling shards out of a bucket is minutes
         of silence, and silence is indistinguishable from a hang.
+
+        ``cache`` is a directory of blobs by checksum, consulted before the
+        backend and filled from it. Successive versions of a dataset share
+        almost all their samples, so without one every version re-fetches a
+        corpus it already has on disk. A hit costs a hard link.
         """
         dest = Path(dest)
         files = dest / FILES_DIR
@@ -825,7 +848,7 @@ class Catalog:
             target = dest / relatives[row.id]
             if not target.exists():
                 wanted[Location(row.location, row.offset, row.length)] = target
-        self._write_out(wanted, on_progress)
+        self._write_out(wanted, on_progress, cache)
 
         samples = []
         for row in rows:
@@ -857,7 +880,9 @@ class Catalog:
         (dest / MANIFEST_NAME).write_text(manifest.model_dump_json(indent=2))
         return dest
 
-    def _write_out(self, wanted: dict[Location, Path], on_progress=None) -> None:
+    def _write_out(
+        self, wanted: dict[Location, Path], on_progress=None, cache: Path | None = None
+    ) -> None:
         """Put every wanted blob where the manifest says it is.
 
         Split by what the backend can do rather than done uniformly. A
@@ -875,27 +900,54 @@ class Catalog:
         done = 0
         total = len(wanted)
 
-        path_for = getattr(self.blobs, "path_for", None)
-        if path_for is None:
-            for location, body in self.blobs.fetch(list(wanted)):
-                wanted[location].write_bytes(body)
-                done += 1
-                if on_progress is not None:
-                    on_progress(done, total)
-            return
-
-        for location, target in wanted.items():
+        def tick() -> None:
+            nonlocal done
+            done += 1
             if on_progress is not None:
                 on_progress(done, total)
-            done += 1
-            source = path_for(location)
-            try:
-                # A blob is immutable and addressed by its content, and a
-                # materialised version is derived from it — so the two can
-                # share an inode. Without this every dataset version costs a
-                # full copy of itself, and a project of any size runs out.
-                os.link(source, target)
-            except OSError:
-                # Different filesystem, or one that will not link.
-                # Correctness does not depend on the link, only disk usage.
-                shutil.copyfile(source, target)
+
+        # The cache first, because a hit costs a link and a miss costs a
+        # network round trip. A materialised file is named for its checksum,
+        # so where it would live in the cache is derivable from where it is
+        # going — no second lookup, and no need to carry checksums here.
+        remaining = wanted
+        if cache is not None:
+            cache = Path(cache)
+            remaining = {}
+            for location, target in wanted.items():
+                candidate = cache / blob_path(target.stem, target.suffix)
+                if candidate.exists():
+                    _link_or_copy(candidate, target)
+                    tick()
+                else:
+                    remaining[location] = target
+
+        if not remaining:
+            # Everything came from the cache. Asking a backend for nothing
+            # is a round trip that can only fail.
+            return
+
+        path_for = getattr(self.blobs, "path_for", None)
+        if path_for is None:
+            for location, body in self.blobs.fetch(list(remaining)):
+                target = remaining[location]
+                if cache is None:
+                    target.write_bytes(body)
+                else:
+                    # Written to the cache and linked from it, so the bytes
+                    # exist once however many versions reference them. Via a
+                    # temporary name: an interrupted write must not leave a
+                    # short file at the address of a whole one, which would
+                    # then be served as a cache hit forever.
+                    cached = cache / blob_path(target.stem, target.suffix)
+                    cached.parent.mkdir(parents=True, exist_ok=True)
+                    partial = cached.with_name(cached.name + ".partial")
+                    partial.write_bytes(body)
+                    partial.replace(cached)
+                    _link_or_copy(cached, target)
+                tick()
+            return
+
+        for location, target in remaining.items():
+            _link_or_copy(path_for(location), target)
+            tick()
