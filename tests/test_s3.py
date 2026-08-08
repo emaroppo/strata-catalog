@@ -245,3 +245,97 @@ def test_an_ingest_failure_leaves_no_rows_naming_a_missing_shard(tmp_path):
         "x", __import__("strata.labels", fromlist=["C"]).ClassificationSchema()
     )
     assert catalog.unlabelled(label_set_id) == []
+
+
+def test_materialising_from_a_bucket_pulls_shards_not_members(store, tmp_path):
+    """The dense path, which is what fetch exists for.
+
+    Copying sample by sample would be a range request each; a dataset that
+    lives in one shard should cost one object.
+    """
+    from strata.catalog import Catalog, Manifest
+    from strata.labels import Choices, ClassificationSchema
+
+    backend = S3Backend(store, bucket="test", shard_bytes=1 << 20)
+    catalog = Catalog.connect(f"sqlite:///{tmp_path / 'index.db'}", backend)
+
+    label_set_id = catalog.create_label_set("x", ClassificationSchema(classes=["a"]))
+    bodies = {}
+    for group in ("vid1", "vid2"):
+        paths = []
+        for i in range(5):
+            body = f"{group} frame {i}".encode() * 30
+            path = a_file(tmp_path, f"{group}_{i}.jpg", body)
+            bodies[path.name] = body
+            paths.append(path)
+        ids = catalog.ingest(
+            paths, media="image", subtype="frames", group_id=group,
+            metadata_for=lambda p: {"source_path": p.name},
+        )
+        catalog.annotate_many(label_set_id, [(i, Choices(values=["a"])) for i in ids])
+
+    store.ranges.clear()
+    directory = catalog.materialise(
+        catalog.create_dataset("d", label_set_id), tmp_path / "out"
+    )
+    manifest = Manifest.model_validate_json((directory / "manifest.json").read_text())
+
+    assert len(manifest.samples) == 10
+    # No ranges at all: the shard was pulled whole
+    assert store.ranges == []
+    by_id = {r.id: r for r in catalog.labelled(label_set_id)}
+    for sample in manifest.samples:
+        source = by_id[sample.id].metadata["source_path"]
+        assert (directory / sample.path).read_bytes() == bodies[source]
+
+
+def test_a_materialised_file_is_not_re_fetched(store, tmp_path):
+    from strata.catalog import Catalog
+    from strata.labels import Choices, ClassificationSchema
+
+    backend = S3Backend(store, bucket="test", shard_bytes=1 << 20)
+    catalog = Catalog.connect(f"sqlite:///{tmp_path / 'index.db'}", backend)
+    label_set_id = catalog.create_label_set("x", ClassificationSchema(classes=["a"]))
+    for group in ("a", "b"):
+        ids = catalog.ingest(
+            [a_file(tmp_path, f"{group}{i}.jpg", f"{group}{i}".encode() * 40) for i in range(3)],
+            media="image", group_id=group,
+        )
+        catalog.annotate_many(label_set_id, [(i, Choices(values=["a"])) for i in ids])
+
+    dataset_id = catalog.create_dataset("d", label_set_id)
+    out = tmp_path / "out"
+    catalog.materialise(dataset_id, out)
+
+    calls = len(store.objects)
+    store.ranges.clear()
+    catalog.materialise(dataset_id, out)
+    # Re-materialising a version rewrites the manifest and fetches nothing
+    assert store.ranges == []
+    assert len(store.objects) == calls
+
+
+def test_two_samples_in_one_shard_are_told_apart(store, tmp_path):
+    """A container was one file when blobs were files.
+
+    A shard holds hundreds, so matching a location by container alone
+    returns whichever the database reaches first — the wrong sample, with no
+    error to say so.
+    """
+    from strata.catalog import Catalog
+
+    backend = S3Backend(store, bucket="test", shard_bytes=1 << 20)
+    catalog = Catalog.connect(f"sqlite:///{tmp_path / 'index.db'}", backend)
+    catalog.ingest(
+        [a_file(tmp_path, f"{i}.jpg", f"body {i}".encode() * 50) for i in range(4)],
+        media="image",
+    )
+    label_set_id = catalog.create_label_set(
+        "x", __import__("strata.labels", fromlist=["C"]).ClassificationSchema()
+    )
+    rows = {r.id: r for r in catalog.unlabelled(label_set_id)}
+    assert len({r.location.container for r in rows.values()}) == 1
+
+    for sample_id, row in rows.items():
+        found = catalog.by_location(row.location.container, row.location.offset)
+        assert found.id == sample_id

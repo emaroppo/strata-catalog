@@ -23,6 +23,22 @@ from .manifest import FILES_DIR, MANIFEST_NAME, Manifest, ManifestSample
 from .split import assign
 
 
+def _materialised_name(row) -> str:
+    """What a sample is called inside a materialised dataset.
+
+    Its checksum, not its container. A container was one file when blobs
+    were files, so naming after it happened to be unique; a tar shard holds
+    hundreds, and naming after it gave every sample in the shard the same
+    filename — one file on disk, every manifest entry pointing at it, and a
+    training run over one image repeated with nothing to say so.
+
+    The extension comes from the recorded source path, because a checksum
+    has none and some readers still look.
+    """
+    suffix = Path((row.metadata or {}).get("source_path") or "").suffix
+    return f"{row.checksum}{suffix.lower()}"
+
+
 class CatalogError(Exception):
     """A request the catalog cannot honour."""
 
@@ -454,15 +470,23 @@ class Catalog:
         with self.engine.connect() as conn:
             return self._rows(conn, stmt)
 
-    def by_location(self, container: str) -> SampleRow | None:
+    def by_location(self, container: str, offset: int = 0) -> SampleRow | None:
         """The sample whose bytes sit at a blob location.
 
         How a Label Studio task is recognised on the way back: its image URL
-        names a location, and a location names one sample. Matching on that
-        rather than on a path string is why the URL carries the checksum.
+        names a location, and a location names one sample.
+
+        Both halves are needed. A container was one file when blobs were
+        files, so matching on it alone was unambiguous; a tar shard holds
+        hundreds, and matching on it alone returns whichever of them the
+        database reaches first. The offset is what tells them apart.
         """
         stmt = select(*self._COLUMNS).where(
-            and_(self._live(), t.sample.c.location == container)
+            and_(
+                self._live(),
+                t.sample.c.location == container,
+                t.sample.c.offset == offset,
+            )
         )
         with self.engine.connect() as conn:
             rows = self._rows(conn, stmt)
@@ -631,6 +655,7 @@ class Catalog:
                     t.sample.c.offset,
                     t.sample.c.length,
                     t.sample.c.group_id,
+                    t.sample.c.metadata,
                     t.dataset_member.c.val,
                     t.annotation.c.state,
                     t.annotation.c.value,
@@ -646,14 +671,18 @@ class Catalog:
                 .where(t.dataset_member.c.dataset_id == dataset_id)
             ).all()
 
+        wanted: dict[Location, Path] = {}
+        relatives: dict[int, str] = {}
+        for row in rows:
+            relatives[row.id] = f"{FILES_DIR}/{_materialised_name(row)}"
+            target = dest / relatives[row.id]
+            if not target.exists():
+                wanted[Location(row.location, row.offset, row.length)] = target
+        self._write_out(wanted)
+
         samples = []
         for row in rows:
-            location = Location(row.location, row.offset, row.length)
-            relative = f"{FILES_DIR}/{Path(row.location).name}"
-            target = dest / relative
-            if not target.exists():
-                target.parent.mkdir(parents=True, exist_ok=True)
-                self._copy_out(location, target)
+            relative = relatives[row.id]
             samples.append(
                 ManifestSample(
                     id=row.id,
@@ -681,20 +710,36 @@ class Catalog:
         (dest / MANIFEST_NAME).write_text(manifest.model_dump_json(indent=2))
         return dest
 
-    def _copy_out(self, location: Location, target: Path) -> None:
+    def _write_out(self, wanted: dict[Location, Path]) -> None:
+        """Put every wanted blob where the manifest says it is.
+
+        Split by what the backend can do rather than done uniformly. A
+        backend with files behind it links them, so a dataset version costs
+        no disk. One with blobs packed in a bucket is asked for them
+        together, so a shard is pulled once instead of range-requested per
+        member — which is the difference between one object and a thousand
+        requests for a dataset that lives in one shard.
+        """
+        if not wanted:
+            return
+        for target in wanted.values():
+            target.parent.mkdir(parents=True, exist_ok=True)
+
         path_for = getattr(self.blobs, "path_for", None)
         if path_for is None:
-            target.write_bytes(self.blobs.get(location))
+            for location, body in self.blobs.fetch(list(wanted)):
+                wanted[location].write_bytes(body)
             return
 
-        source = path_for(location)
-        try:
-            # A blob is immutable and addressed by its content, and a
-            # materialised version is derived from it — so the two can share
-            # an inode. Without this every dataset version costs a full copy
-            # of itself, and a project of any size runs a disk out.
-            os.link(source, target)
-        except OSError:
-            # Different filesystem, or one that will not link. Correctness
-            # does not depend on the link, only the disk usage does.
-            shutil.copyfile(source, target)
+        for location, target in wanted.items():
+            source = path_for(location)
+            try:
+                # A blob is immutable and addressed by its content, and a
+                # materialised version is derived from it — so the two can
+                # share an inode. Without this every dataset version costs a
+                # full copy of itself, and a project of any size runs out.
+                os.link(source, target)
+            except OSError:
+                # Different filesystem, or one that will not link.
+                # Correctness does not depend on the link, only disk usage.
+                shutil.copyfile(source, target)
