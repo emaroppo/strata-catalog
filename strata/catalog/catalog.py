@@ -37,6 +37,7 @@ class SampleRow:
     media: str
     subtype: str
     group_id: str | None
+    metadata: dict | None = None
 
 
 class Catalog:
@@ -85,6 +86,7 @@ class Catalog:
         subtype: str = "plain",
         group_id: str | None = None,
         metadata: dict | None = None,
+        metadata_for: Callable[[Path], dict | None] | None = None,
         on_sample: Callable[[Path], None] | None = None,
     ) -> list[int]:
         """Register files, storing their bytes and returning their sample ids.
@@ -92,6 +94,10 @@ class Catalog:
         Idempotent on content: a file whose bytes are already catalogued
         returns the existing id rather than a duplicate, which is what makes
         re-running ingest over a growing directory safe.
+
+        ``metadata`` applies to the whole batch; ``metadata_for`` supplies it
+        per file, for anything that differs sample by sample — where a file
+        came from, its frame index, its capture time.
 
         A known sample has its ``subtype``, ``group_id`` and ``metadata``
         brought up to date rather than left alone, so correcting how a
@@ -107,6 +113,8 @@ class Catalog:
         with self.engine.begin() as conn:
             for path in paths:
                 path = Path(path)
+                extra = metadata_for(path) if metadata_for is not None else None
+                entry = {**(metadata or {}), **(extra or {})} or None
                 checksum = checksum_of(path)
                 existing = conn.execute(
                     select(t.sample.c.id).where(t.sample.c.checksum == checksum)
@@ -115,7 +123,7 @@ class Catalog:
                     conn.execute(
                         update(t.sample)
                         .where(t.sample.c.id == existing)
-                        .values(subtype=subtype, group_id=group_id, metadata=metadata)
+                        .values(subtype=subtype, group_id=group_id, metadata=entry)
                     )
                     ids.append(existing)
                     if on_sample is not None:
@@ -132,7 +140,7 @@ class Catalog:
                             media=media,
                             subtype=subtype,
                             group_id=group_id,
-                            metadata=metadata,
+                            metadata=entry,
                         )
                     ).inserted_primary_key[0]
                 )
@@ -316,6 +324,7 @@ class Catalog:
                 media=r.media,
                 subtype=r.subtype,
                 group_id=r.group_id,
+                metadata=r.metadata,
             )
             for r in conn.execute(stmt)
         ]
@@ -329,6 +338,7 @@ class Catalog:
         t.sample.c.media,
         t.sample.c.subtype,
         t.sample.c.group_id,
+        t.sample.c.metadata,
     )
 
     def unlabelled(self, label_set_id: int, limit: int | None = None) -> list[SampleRow]:
