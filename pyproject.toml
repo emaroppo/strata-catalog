@@ -13,7 +13,14 @@ dependencies = [
 # object store.
 [project.optional-dependencies]
 s3 = ["boto3>=1.34"]
+# Serving blobs over HTTP, so Label Studio can stop reading a local mount.
+serve = ["fastapi>=0.110", "uvicorn>=0.29"]
 postgres = ["psycopg[binary]>=3.2"]
+
+[project.scripts]
+# Only importable with the serve extra; declared here so the container has a
+# command rather than a python -c.
+strata-blobs = "strata.catalog.serve:main"
 
 [tool.uv.sources]
 strata-labels = { workspace = true }
