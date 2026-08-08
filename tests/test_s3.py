@@ -1,0 +1,247 @@
+"""Blobs as tar shards in object storage.
+
+No bucket involved: the backend takes a client, and a dict-backed stand-in
+implements the two calls it makes. That keeps boto3 optional and the tests
+fast, and it exercises the range arithmetic — which is the part that would
+silently return the wrong bytes rather than fail.
+"""
+
+import tarfile
+
+import pytest
+
+from strata.catalog import checksum_of
+from strata.catalog.s3 import S3Backend
+
+
+class FakeStore:
+    """The two S3 calls the backend makes, over a dict."""
+
+    def __init__(self):
+        self.objects: dict[str, bytes] = {}
+        self.ranges: list[str] = []
+
+    def put_object(self, Bucket: str, Key: str, Body: bytes):
+        self.objects[Key] = Body
+        return {}
+
+    def get_object(self, Bucket: str, Key: str, Range: str = ""):
+        body = self.objects[Key]
+        if Range:
+            self.ranges.append(Range)
+            first, last = Range.removeprefix("bytes=").split("-")
+            body = body[int(first) : int(last) + 1]
+        return {"Body": _Reader(body)}
+
+
+class _Reader:
+    def __init__(self, body: bytes):
+        self._body = body
+
+    def read(self) -> bytes:
+        return self._body
+
+
+@pytest.fixture
+def store() -> FakeStore:
+    return FakeStore()
+
+
+@pytest.fixture
+def backend(store) -> S3Backend:
+    return S3Backend(store, bucket="test", shard_bytes=1 << 20)
+
+
+def a_file(tmp_path, name: str, body: bytes):
+    path = tmp_path / name
+    path.write_bytes(body)
+    return path
+
+
+# ----------------------------------------------------------------------
+# Writing
+# ----------------------------------------------------------------------
+
+
+def test_nothing_is_uploaded_until_flush(backend, store, tmp_path):
+    path = a_file(tmp_path, "a.jpg", b"contents")
+    backend.put(path, checksum_of(path))
+    # A member's offset is known the moment it is written, but the object
+    # does not exist until the pack is closed
+    assert store.objects == {}
+
+    backend.flush()
+    assert len(store.objects) == 1
+
+
+def test_a_flushed_shard_is_a_readable_tar(backend, store, tmp_path):
+    path = a_file(tmp_path, "a.jpg", b"contents")
+    backend.put(path, checksum_of(path))
+    key = backend.flush()
+
+    with tarfile.open(fileobj=__import__("io").BytesIO(store.objects[key])) as tar:
+        assert len(tar.getmembers()) == 1
+
+
+def test_the_member_is_named_by_checksum(backend, store, tmp_path):
+    path = a_file(tmp_path, "a.jpg", b"contents")
+    checksum = checksum_of(path)
+    backend.put(path, checksum)
+    key = backend.flush()
+
+    with tarfile.open(fileobj=__import__("io").BytesIO(store.objects[key])) as tar:
+        # A shard is self-describing: the member says which sample it is
+        assert tar.getnames() == [f"{checksum[:2]}/{checksum[2:4]}/{checksum}.jpg"]
+
+
+def test_a_location_names_the_shard_and_the_extent(backend, tmp_path):
+    path = a_file(tmp_path, "a.jpg", b"0123456789")
+    location = backend.put(path, checksum_of(path))
+    assert location.container.endswith(".tar")
+    assert location.length == 10
+    # Past the tar header, not at the start of the object
+    assert location.offset > 0
+
+
+def test_a_shard_rolls_over_at_the_size_limit(store, tmp_path):
+    small = S3Backend(store, bucket="test", shard_bytes=2048)
+    for i in range(6):
+        path = a_file(tmp_path, f"{i}.bin", bytes(600))
+        small.put(path, checksum_of(path))
+    small.flush()
+    # More than one shard, or the limit meant nothing
+    assert len(store.objects) > 1
+
+
+def test_samples_are_packed_in_the_order_given(backend, store, tmp_path):
+    # The caller ingests a group at a time, so a video's frames land
+    # together without this having to know what a group is
+    checksums = []
+    for i in range(4):
+        path = a_file(tmp_path, f"{i}.jpg", f"frame {i}".encode())
+        checksums.append(checksum_of(path))
+        backend.put(path, checksums[-1])
+    key = backend.flush()
+
+    with tarfile.open(fileobj=__import__("io").BytesIO(store.objects[key])) as tar:
+        assert [n.split("/")[-1].split(".")[0] for n in tar.getnames()] == checksums
+
+
+def test_flushing_nothing_is_harmless(backend):
+    assert backend.flush() is None
+
+
+# ----------------------------------------------------------------------
+# Reading
+# ----------------------------------------------------------------------
+
+
+def test_a_sample_comes_back_byte_for_byte(backend, tmp_path):
+    path = a_file(tmp_path, "a.jpg", b"the exact bytes")
+    location = backend.put(path, checksum_of(path))
+    backend.flush()
+    assert backend.get(location) == b"the exact bytes"
+
+
+def test_one_sample_is_one_range_request(backend, store, tmp_path):
+    path = a_file(tmp_path, "a.jpg", b"payload")
+    location = backend.put(path, checksum_of(path))
+    backend.flush()
+    backend.get(location)
+    # The whole point of recording an offset: a sample is a range, not an
+    # object
+    assert store.ranges == [f"bytes={location.offset}-{location.offset + 6}"]
+
+
+def test_every_sample_in_a_shard_reads_back_correctly(backend, tmp_path):
+    # The arithmetic that would silently return a neighbour's bytes rather
+    # than fail
+    expected = {}
+    for i in range(12):
+        body = f"sample number {i}".encode() * (i + 1)
+        path = a_file(tmp_path, f"{i}.jpg", body)
+        expected[backend.put(path, checksum_of(path))] = body
+    backend.flush()
+
+    for location, body in expected.items():
+        assert backend.get(location) == body
+
+
+def test_fetch_reads_a_shard_whole_rather_than_member_by_member(backend, store, tmp_path):
+    locations = []
+    for i in range(5):
+        path = a_file(tmp_path, f"{i}.jpg", f"body {i}".encode())
+        locations.append(backend.put(path, checksum_of(path)))
+    backend.flush()
+
+    fetched = dict(backend.fetch(locations))
+    assert fetched[locations[2]] == b"body 2"
+    # One object, no ranges: pulling it once beats a request per member when
+    # most of it is wanted
+    assert store.ranges == []
+
+
+def test_fetch_spans_several_shards(store, tmp_path):
+    small = S3Backend(store, bucket="test", shard_bytes=1024)
+    locations, bodies = [], []
+    for i in range(8):
+        body = bytes(400) + bytes([i])
+        path = a_file(tmp_path, f"{i}.bin", body)
+        locations.append(small.put(path, checksum_of(path)))
+        bodies.append(body)
+    small.flush()
+
+    assert len({loc.container for loc in locations}) > 1
+    fetched = dict(small.fetch(locations))
+    assert [fetched[loc] for loc in locations] == bodies
+
+
+def test_an_empty_fetch_yields_nothing(backend):
+    assert list(backend.fetch([])) == []
+
+
+def test_the_backend_satisfies_the_protocol(store):
+    from strata.catalog import BlobBackend
+
+    assert isinstance(S3Backend(store, bucket="test"), BlobBackend)
+
+
+def test_it_has_no_path_for(store):
+    # A tar member in a bucket has no path, which is why path_for is not on
+    # the protocol
+    assert not hasattr(S3Backend(store, bucket="test"), "path_for")
+
+
+def test_a_location_from_another_shard_reads_from_that_shard(backend, store, tmp_path):
+    first = a_file(tmp_path, "a.jpg", b"first shard")
+    location_a = backend.put(first, checksum_of(first))
+    backend.flush()
+    second = a_file(tmp_path, "b.jpg", b"second shard")
+    location_b = backend.put(second, checksum_of(second))
+    backend.flush()
+
+    assert location_a.container != location_b.container
+    assert backend.get(location_a) == b"first shard"
+    assert backend.get(location_b) == b"second shard"
+
+
+def test_an_ingest_failure_leaves_no_rows_naming_a_missing_shard(tmp_path):
+    # flush happens inside the transaction, so an upload that fails takes
+    # the rows with it rather than leaving them pointing at nothing
+    from strata.catalog import Catalog
+
+    class Failing(FakeStore):
+        def put_object(self, Bucket, Key, Body):
+            raise OSError("bucket unreachable")
+
+    catalog = Catalog.local(tmp_path / "catalog")
+    catalog.blobs = S3Backend(Failing(), bucket="test")
+    paths = [a_file(tmp_path, f"{i}.jpg", f"image {i}".encode()) for i in range(3)]
+
+    with pytest.raises(OSError):
+        catalog.ingest(paths, media="image")
+
+    label_set_id = catalog.create_label_set(
+        "x", __import__("strata.labels", fromlist=["C"]).ClassificationSchema()
+    )
+    assert catalog.unlabelled(label_set_id) == []

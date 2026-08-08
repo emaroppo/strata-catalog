@@ -146,6 +146,10 @@ class Catalog:
                 )
                 if on_sample is not None:
                     on_sample(path)
+            # Inside the transaction and before it commits: a backend that
+            # packs has not made its objects exist yet, and rows naming a
+            # shard that failed to upload would be worse than no rows.
+            self.blobs.flush()
         return ids
 
     # ------------------------------------------------------------------

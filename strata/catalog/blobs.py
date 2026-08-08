@@ -64,6 +64,16 @@ class BlobBackend(Protocol):
         """
         ...
 
+    def flush(self) -> object:
+        """Make everything written so far durable.
+
+        A backend that packs cannot make an object exist until the pack is
+        closed, so a caller writing index rows has to flush before it commits
+        them — otherwise the index names a shard that was never uploaded. A
+        backend writing whole files has nothing to do here.
+        """
+        ...
+
 
 def checksum_of(path: Path) -> str:
     """sha256 of a file's contents, streamed."""
@@ -130,6 +140,9 @@ class LocalBackend:
     def fetch(self, locations: Iterable[Location]) -> Iterator[tuple[Location, bytes]]:
         for location in locations:
             yield location, self.get(location)
+
+    def flush(self) -> None:
+        """Nothing to do: a file exists the moment it is written."""
 
     def path_for(self, location: Location) -> Path:
         """The file behind a location.
