@@ -262,6 +262,27 @@ class Catalog:
                     on_item(sample_id)
         return annotated, skipped
 
+    def unskip(self, label_set_id: int, sample_ids: Iterable[int]) -> int:
+        """Return skipped samples to the queue; returns how many moved.
+
+        The row is deleted rather than flagged, because the queue is defined
+        by the absence of one. Anything annotated is left alone: a skip is
+        the only state this undoes, and quietly discarding an answer would
+        be a far worse thing to do by accident.
+        """
+        moved = 0
+        with self.engine.begin() as conn:
+            for sample_id in sample_ids:
+                where = and_(
+                    t.annotation.c.sample_id == sample_id,
+                    t.annotation.c.label_set_id == label_set_id,
+                    t.annotation.c.state == t.SKIPPED,
+                )
+                if conn.execute(delete(t.annotation).where(where)).rowcount:
+                    self._reindex_classes(conn, sample_id, label_set_id, set())
+                    moved += 1
+        return moved
+
     def _upsert_annotation(self, conn, sample_id, label_set_id, *, state, value, source):
         where = and_(
             t.annotation.c.sample_id == sample_id,
