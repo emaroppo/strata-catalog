@@ -29,6 +29,7 @@ interface.
 
 from .blobs import BlobBackend, LocalBackend, Location, checksum_of
 from .catalog import Catalog, CatalogError, SampleRow
+from .copy import CopyError, CopyReport, copy_index
 from .manifest import FILES_DIR, MANIFEST_NAME, Manifest, ManifestSample
 from .split import SplitError, assign
 
@@ -38,6 +39,8 @@ __all__ = [
     "BlobBackend",
     "Catalog",
     "CatalogError",
+    "CopyError",
+    "CopyReport",
     "LocalBackend",
     "Location",
     "Manifest",
@@ -46,4 +49,5 @@ __all__ = [
     "SplitError",
     "assign",
     "checksum_of",
+    "copy_index",
 ]

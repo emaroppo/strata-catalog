@@ -167,3 +167,115 @@ def test_by_location_resolves(catalog, files):
     label_set_id = catalog.create_label_set("x", ClassificationSchema(classes=["a"]))
     row = catalog.unlabelled(label_set_id)[0]
     assert catalog.by_location(row.location.container).id == row.id
+
+
+# ----------------------------------------------------------------------
+# Moving an index
+# ----------------------------------------------------------------------
+
+
+@pytest.fixture
+def populated(tmp_path, files):
+    """A SQLite catalog with something of every kind in it."""
+    source = Catalog.local(tmp_path / "sqlite")
+    label_set_id = source.create_label_set(
+        "presence", ClassificationSchema(classes=["cat", "dog"])
+    )
+    # Two groups, because one cannot be split and create_dataset says so
+    ids = []
+    for group in ("vid1", "vid2"):
+        ids += source.ingest(
+            files(4, prefix=f"{group}_"), media="image", subtype="frames",
+            group_id=group, metadata_for=lambda p: {"source_path": p.name},
+        )
+    source.annotate_many(
+        label_set_id, [(i, Choices(values=["cat"])) for i in ids[:5]]
+    )
+    source.skip(ids[5], label_set_id)
+    source.create_dataset("d", label_set_id)
+    return source, label_set_id, ids
+
+
+def test_every_row_crosses(populated, catalog):
+    from strata.catalog import copy_index
+
+    source, _, _ = populated
+    report = copy_index(source, catalog)
+    assert report.copied["sample"] == 8
+    assert report.copied["annotation"] == 6  # five answered, one skipped
+    assert report.copied["dataset_member"] == 5
+    assert report.total > 0
+
+
+def test_sample_ids_are_preserved(populated, catalog):
+    from strata.catalog import copy_index
+
+    source, label_set_id, ids = populated
+    copy_index(source, catalog)
+    # Annotations, dataset members and the Label Studio task map are all
+    # keyed on these; renumbering would repoint every task at another image
+    assert {s.id for s in catalog.labelled(label_set_id)} == set(ids[:5])
+
+
+def test_annotations_and_their_index_arrive(populated, catalog):
+    from strata.catalog import copy_index
+
+    source, label_set_id, ids = populated
+    copy_index(source, catalog)
+    assert catalog.annotation_of(ids[0], label_set_id) == Choices(values=["cat"])
+    assert len(catalog.with_class(label_set_id, "cat")) == 5
+    assert len(catalog.skipped(label_set_id)) == 1
+
+
+def test_grouping_and_metadata_survive(populated, catalog):
+    from strata.catalog import copy_index
+
+    source, label_set_id, _ = populated
+    copy_index(source, catalog)
+    rows = catalog.labelled(label_set_id)
+    assert {r.group_id for r in rows} == {"vid1", "vid2"}
+    assert all((r.metadata or {}).get("source_path") for r in rows)
+
+
+def test_the_next_insert_does_not_collide(populated, catalog, tmp_path):
+    from strata.catalog import copy_index
+
+    source, label_set_id, _ = populated
+    copy_index(source, catalog)
+
+    # Ids came in explicitly, which leaves a Postgres sequence at zero — the
+    # next insert would try row 1 and hit something already there
+    extra = tmp_path / "raw" / "later.jpg"
+    extra.write_bytes(b"ingested after the copy")
+    [new_id] = catalog.ingest([extra], media="image")
+    assert new_id > 8
+
+
+def test_copying_into_a_populated_index_is_refused(populated, catalog, files):
+    from strata.catalog import CopyError, copy_index
+
+    source, _, _ = populated
+    catalog.ingest(files(1, prefix="already"), media="image")
+    # Merging two catalogs is a different problem; doing it by accident here
+    # would be worse than not offering it
+    with pytest.raises(CopyError, match="already holds"):
+        copy_index(source, catalog)
+
+
+def test_a_dataset_still_materialises_after_the_move(populated, catalog, tmp_path):
+    from strata.catalog import Manifest, copy_index
+
+    source, label_set_id, _ = populated
+    copy_index(source, catalog)
+
+    # Pointed at the source's blobs, which is the whole arrangement: the
+    # index moved and the bytes did not. A target aimed anywhere else has an
+    # index describing files that are not there.
+    catalog.blobs = source.blobs
+    dataset_id = catalog.create_dataset("d2", label_set_id)
+    directory = catalog.materialise(dataset_id, tmp_path / "out")
+    manifest = Manifest.model_validate_json((directory / "manifest.json").read_text())
+    # The blobs never moved, so the files behind the manifest are the ones
+    # the source catalog wrote
+    assert len(manifest.samples) == 5
+    assert all((directory / s.path).exists() for s in manifest.samples)
