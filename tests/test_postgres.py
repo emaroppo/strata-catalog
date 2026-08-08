@@ -15,7 +15,7 @@ import uuid
 
 import pytest
 
-from strata.catalog import Catalog, LocalBackend
+from strata.catalog import EVERYTHING, Catalog, LocalBackend
 from strata.labels import Choices, ClassificationSchema
 
 URL = os.environ.get(
@@ -104,7 +104,7 @@ def test_reserved_words_in_the_schema_are_quoted(catalog, files):
     [sample_id] = catalog.ingest(files(1), media="image",
                                  metadata_for=lambda p: {"source_path": p.name})
     label_set_id = catalog.create_label_set("x", ClassificationSchema(classes=["a"]))
-    [row] = catalog.unlabelled(label_set_id)
+    [row] = catalog.unlabelled(label_set_id, EVERYTHING)
     assert row.location.offset == 0
     assert row.metadata["source_path"].endswith(".jpg")
 
@@ -117,9 +117,9 @@ def test_annotations_and_the_class_index(catalog, files):
     catalog.annotate(ids[0], label_set_id, Choices(values=["cat"]))
     catalog.annotate(ids[1], label_set_id, Choices(values=["cat", "dog"]))
 
-    assert {s.id for s in catalog.with_class(label_set_id, "cat")} == {ids[0], ids[1]}
-    assert len(catalog.labelled(label_set_id)) == 2
-    assert len(catalog.unlabelled(label_set_id)) == 2
+    assert {s.id for s in catalog.with_class(label_set_id, "cat", EVERYTHING)} == {ids[0], ids[1]}
+    assert len(catalog.labelled(label_set_id, EVERYTHING)) == 2
+    assert len(catalog.unlabelled(label_set_id, EVERYTHING)) == 2
 
 
 def test_the_three_states_partition(catalog, files):
@@ -128,9 +128,9 @@ def test_the_three_states_partition(catalog, files):
     catalog.annotate(ids[0], label_set_id, Choices(values=["a"]))
     catalog.skip(ids[1], label_set_id)
     assert (
-        len(catalog.labelled(label_set_id)),
-        len(catalog.skipped(label_set_id)),
-        len(catalog.unlabelled(label_set_id)),
+        len(catalog.labelled(label_set_id, EVERYTHING)),
+        len(catalog.skipped(label_set_id, EVERYTHING)),
+        len(catalog.unlabelled(label_set_id, EVERYTHING)),
     ) == (1, 1, 3)
 
 
@@ -143,7 +143,7 @@ def test_a_grouped_split_holds(catalog, files, tmp_path):
         )
         catalog.annotate_many(label_set_id, [(i, Choices(values=["a"])) for i in ids])
 
-    dataset_id = catalog.create_dataset("d", label_set_id)
+    dataset_id = catalog.create_dataset("d", label_set_id, collections=EVERYTHING)
     from strata.catalog import Manifest
 
     directory = catalog.materialise(dataset_id, tmp_path / "out")
@@ -159,13 +159,14 @@ def test_a_version_is_reused_when_the_selection_has_not_changed(catalog, files):
     ids = catalog.ingest(files(6), media="image")
     label_set_id = catalog.create_label_set("x", ClassificationSchema(classes=["a"]))
     catalog.annotate_many(label_set_id, [(i, Choices(values=["a"])) for i in ids])
-    assert catalog.create_dataset("d", label_set_id) == catalog.create_dataset("d", label_set_id)
+    first = catalog.create_dataset("d", label_set_id, collections=EVERYTHING)
+    assert first == catalog.create_dataset("d", label_set_id, collections=EVERYTHING)
 
 
 def test_by_location_resolves(catalog, files):
     catalog.ingest(files(3), media="image")
     label_set_id = catalog.create_label_set("x", ClassificationSchema(classes=["a"]))
-    row = catalog.unlabelled(label_set_id)[0]
+    row = catalog.unlabelled(label_set_id, EVERYTHING)[0]
     assert catalog.by_location(row.location.container).id == row.id
 
 
@@ -192,7 +193,7 @@ def populated(tmp_path, files):
         label_set_id, [(i, Choices(values=["cat"])) for i in ids[:5]]
     )
     source.skip(ids[5], label_set_id)
-    source.create_dataset("d", label_set_id)
+    source.create_dataset("d", label_set_id, collections=EVERYTHING)
     return source, label_set_id, ids
 
 
@@ -214,7 +215,7 @@ def test_sample_ids_are_preserved(populated, catalog):
     copy_index(source, catalog)
     # Annotations, dataset members and the Label Studio task map are all
     # keyed on these; renumbering would repoint every task at another image
-    assert {s.id for s in catalog.labelled(label_set_id)} == set(ids[:5])
+    assert {s.id for s in catalog.labelled(label_set_id, EVERYTHING)} == set(ids[:5])
 
 
 def test_annotations_and_their_index_arrive(populated, catalog):
@@ -223,8 +224,8 @@ def test_annotations_and_their_index_arrive(populated, catalog):
     source, label_set_id, ids = populated
     copy_index(source, catalog)
     assert catalog.annotation_of(ids[0], label_set_id) == Choices(values=["cat"])
-    assert len(catalog.with_class(label_set_id, "cat")) == 5
-    assert len(catalog.skipped(label_set_id)) == 1
+    assert len(catalog.with_class(label_set_id, "cat", EVERYTHING)) == 5
+    assert len(catalog.skipped(label_set_id, EVERYTHING)) == 1
 
 
 def test_grouping_and_metadata_survive(populated, catalog):
@@ -232,7 +233,7 @@ def test_grouping_and_metadata_survive(populated, catalog):
 
     source, label_set_id, _ = populated
     copy_index(source, catalog)
-    rows = catalog.labelled(label_set_id)
+    rows = catalog.labelled(label_set_id, EVERYTHING)
     assert {r.group_id for r in rows} == {"vid1", "vid2"}
     assert all((r.metadata or {}).get("source_path") for r in rows)
 
@@ -272,7 +273,7 @@ def test_a_dataset_still_materialises_after_the_move(populated, catalog, tmp_pat
     # index moved and the bytes did not. A target aimed anywhere else has an
     # index describing files that are not there.
     catalog.blobs = source.blobs
-    dataset_id = catalog.create_dataset("d2", label_set_id)
+    dataset_id = catalog.create_dataset("d2", label_set_id, collections=EVERYTHING)
     directory = catalog.materialise(dataset_id, tmp_path / "out")
     manifest = Manifest.model_validate_json((directory / "manifest.json").read_text())
     # The blobs never moved, so the files behind the manifest are the ones

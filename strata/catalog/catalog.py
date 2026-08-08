@@ -12,7 +12,7 @@ from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-from sqlalchemy import and_, create_engine, delete, event, insert, select, update
+from sqlalchemy import and_, create_engine, delete, event, insert, or_, select, update
 from sqlalchemy.engine import Engine
 
 from strata.labels import Choices, ClassificationSchema
@@ -37,6 +37,44 @@ def _materialised_name(row) -> str:
     """
     suffix = Path((row.metadata or {}).get("source_path") or "").suffix
     return f"{row.checksum}{suffix.lower()}"
+
+
+#: Every collection, said out loud. A query has to name what it wants —
+#: forgetting to scope one is how a project's review queue fills with
+#: another project's data — so this exists to make "all of it" a thing you
+#: choose rather than a thing you get by omission.
+EVERYTHING = "*"
+
+
+def _within(collections) -> object | None:
+    """A condition matching samples in any of ``collections``.
+
+    ``None`` when the answer is everything, so a caller can drop the join
+    entirely rather than filter on a tautology.
+
+    Selecting a collection selects what is under it: ``sat_images`` covers
+    ``sat_images/2024`` but never ``sat_images_old``, which a bare prefix
+    match would swallow. That distinction lives here rather than at each
+    call site.
+    """
+    if collections == EVERYTHING:
+        return None
+    names = [collections] if isinstance(collections, str) else list(collections)
+    if not names:
+        raise CatalogError(
+            "No collections given. Name what to draw from, or pass EVERYTHING "
+            "to mean the whole catalog — an empty list would silently be one "
+            "or the other."
+        )
+    return or_(
+        *[
+            or_(
+                t.sample_collection.c.collection == name,
+                t.sample_collection.c.collection.like(f"{name}/%"),
+            )
+            for name in names
+        ]
+    )
 
 
 class CatalogError(Exception):
@@ -116,6 +154,7 @@ class Catalog:
         group_id: str | None = None,
         metadata: dict | None = None,
         metadata_for: Callable[[Path], dict | None] | None = None,
+        collections: Iterable[str] = (),
         on_sample: Callable[[Path], None] | None = None,
     ) -> list[int]:
         """Register files, storing their bytes and returning their sample ids.
@@ -133,6 +172,11 @@ class Catalog:
         corpus is described is one re-run rather than a rebuild. Regrouping
         cannot disturb a dataset already built: membership is materialised
         into ``dataset_member``, so only later versions see the change.
+
+        ``collections`` says where these samples came from, as paths. They
+        are added rather than replaced: a sample already in one collection
+        that turns up in another belongs to both, which is what makes a
+        corpus reusable across jobs rather than owned by the first.
 
         The whole batch is one transaction — a commit per file costs an
         fsync each and turns an import into a crawl — so ``on_sample`` is how
@@ -175,6 +219,24 @@ class Catalog:
                 )
                 if on_sample is not None:
                     on_sample(path)
+
+            for sample_id in ids:
+                for name in collections:
+                    exists = conn.execute(
+                        select(t.sample_collection.c.sample_id).where(
+                            and_(
+                                t.sample_collection.c.sample_id == sample_id,
+                                t.sample_collection.c.collection == name,
+                            )
+                        )
+                    ).first()
+                    if not exists:
+                        conn.execute(
+                            insert(t.sample_collection).values(
+                                sample_id=sample_id, collection=name
+                            )
+                        )
+
             # Inside the transaction and before it commits: a backend that
             # packs has not made its objects exist yet, and rows naming a
             # shard that failed to upload would be worse than no rows.
@@ -369,6 +431,26 @@ class Catalog:
     def _live(self):
         return t.sample.c.deleted_at.is_(None)
 
+    def _scoped(self, stmt, collections):
+        """Restrict a sample query to the collections a caller named.
+
+        An EXISTS rather than a join, because a sample in three collections
+        would otherwise come back three times and need a DISTINCT to fix —
+        and Postgres cannot take DISTINCT over a json column at all, so the
+        obvious shape fails on one dialect and silently duplicates on the
+        other.
+        """
+        within = _within(collections)
+        if within is None:
+            return stmt
+        return stmt.where(
+            select(t.sample_collection.c.sample_id)
+            .where(
+                and_(t.sample_collection.c.sample_id == t.sample.c.id, within)
+            )
+            .exists()
+        )
+
     def _rows(self, conn, stmt) -> list[SampleRow]:
         return [
             SampleRow(
@@ -395,12 +477,18 @@ class Catalog:
         t.sample.c.metadata,
     )
 
-    def unlabelled(self, label_set_id: int, limit: int | None = None) -> list[SampleRow]:
-        """Samples nobody has dealt with for this label set.
+    def unlabelled(
+        self, label_set_id: int, collections, limit: int | None = None
+    ) -> list[SampleRow]:
+        """Samples nobody has dealt with, drawn from ``collections``.
 
         Per label set, not global: a sample can be classified and still be
         waiting for boxes. Skipped samples have a row, so they are excluded
         by the same join rather than by a second condition.
+
+        Scoped, because a catalog holding several jobs' data would otherwise
+        offer every one of them to every job. What a project draws from is
+        the project's declaration, not the catalog's.
         """
         stmt = (
             select(*self._COLUMNS)
@@ -413,13 +501,21 @@ class Catalog:
             )
             .where(and_(self._live(), t.annotation.c.sample_id.is_(None)))
         )
+        stmt = self._scoped(stmt, collections)
         if limit is not None:
             stmt = stmt.limit(limit)
         with self.engine.connect() as conn:
             return self._rows(conn, stmt)
 
-    def labelled(self, label_set_id: int) -> list[SampleRow]:
-        """Samples with a real answer — skipped ones are not training data."""
+    def labelled(self, label_set_id: int, collections) -> list[SampleRow]:
+        """Samples with a real answer — skipped ones are not training data.
+
+        Scoped like the queue. Dropping a collection from a project means
+        declaring that data out of scope, training included: quietly
+        carrying it would move the metrics as well as the model, and neither
+        would say why. Keeping what is already answered while asking for no
+        more is what skipping is for.
+        """
         stmt = (
             select(*self._COLUMNS)
             .join(t.annotation, t.annotation.c.sample_id == t.sample.c.id)
@@ -432,9 +528,9 @@ class Catalog:
             )
         )
         with self.engine.connect() as conn:
-            return self._rows(conn, stmt)
+            return self._rows(conn, self._scoped(stmt, collections))
 
-    def skipped(self, label_set_id: int) -> list[SampleRow]:
+    def skipped(self, label_set_id: int, collections) -> list[SampleRow]:
         """Samples reviewed with nothing applicable.
 
         Neither training data nor queue: they belong to neither of the other
@@ -452,9 +548,9 @@ class Catalog:
             )
         )
         with self.engine.connect() as conn:
-            return self._rows(conn, stmt)
+            return self._rows(conn, self._scoped(stmt, collections))
 
-    def with_class(self, label_set_id: int, class_name: str) -> list[SampleRow]:
+    def with_class(self, label_set_id: int, class_name: str, collections) -> list[SampleRow]:
         """Every sample asserting a class — the join the index table exists for."""
         stmt = (
             select(*self._COLUMNS)
@@ -468,7 +564,7 @@ class Catalog:
             )
         )
         with self.engine.connect() as conn:
-            return self._rows(conn, stmt)
+            return self._rows(conn, self._scoped(stmt, collections))
 
     def by_location(self, container: str, offset: int = 0) -> SampleRow | None:
         """The sample whose bytes sit at a blob location.
@@ -515,6 +611,7 @@ class Catalog:
         name: str,
         label_set_id: int,
         sample_ids: Sequence[int] | None = None,
+        collections=None,
         val_ratio: float = 0.2,
         seed: int = 42,
         query: dict | None = None,
@@ -526,7 +623,13 @@ class Catalog:
         decided, so the split cannot drift as the labelled set grows.
         """
         if sample_ids is None:
-            sample_ids = [s.id for s in self.labelled(label_set_id)]
+            if collections is None:
+                raise CatalogError(
+                    "Give either the samples to freeze or the collections to "
+                    "draw them from; defaulting to the whole catalog would "
+                    "quietly train on another job's data."
+                )
+            sample_ids = [s.id for s in self.labelled(label_set_id, collections)]
         if not sample_ids:
             raise CatalogError(f"No labelled samples for label set {label_set_id}")
 

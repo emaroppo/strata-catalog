@@ -10,7 +10,7 @@ import tarfile
 
 import pytest
 
-from strata.catalog import checksum_of
+from strata.catalog import EVERYTHING, checksum_of
 from strata.catalog.s3 import S3Backend
 
 
@@ -244,7 +244,7 @@ def test_an_ingest_failure_leaves_no_rows_naming_a_missing_shard(tmp_path):
     label_set_id = catalog.create_label_set(
         "x", __import__("strata.labels", fromlist=["C"]).ClassificationSchema()
     )
-    assert catalog.unlabelled(label_set_id) == []
+    assert catalog.unlabelled(label_set_id, EVERYTHING) == []
 
 
 def test_materialising_from_a_bucket_pulls_shards_not_members(store, tmp_path):
@@ -276,14 +276,14 @@ def test_materialising_from_a_bucket_pulls_shards_not_members(store, tmp_path):
 
     store.ranges.clear()
     directory = catalog.materialise(
-        catalog.create_dataset("d", label_set_id), tmp_path / "out"
+        catalog.create_dataset("d", label_set_id, collections=EVERYTHING), tmp_path / "out"
     )
     manifest = Manifest.model_validate_json((directory / "manifest.json").read_text())
 
     assert len(manifest.samples) == 10
     # No ranges at all: the shard was pulled whole
     assert store.ranges == []
-    by_id = {r.id: r for r in catalog.labelled(label_set_id)}
+    by_id = {r.id: r for r in catalog.labelled(label_set_id, EVERYTHING)}
     for sample in manifest.samples:
         source = by_id[sample.id].metadata["source_path"]
         assert (directory / sample.path).read_bytes() == bodies[source]
@@ -303,7 +303,7 @@ def test_a_materialised_file_is_not_re_fetched(store, tmp_path):
         )
         catalog.annotate_many(label_set_id, [(i, Choices(values=["a"])) for i in ids])
 
-    dataset_id = catalog.create_dataset("d", label_set_id)
+    dataset_id = catalog.create_dataset("d", label_set_id, collections=EVERYTHING)
     out = tmp_path / "out"
     catalog.materialise(dataset_id, out)
 
@@ -333,7 +333,7 @@ def test_two_samples_in_one_shard_are_told_apart(store, tmp_path):
     label_set_id = catalog.create_label_set(
         "x", __import__("strata.labels", fromlist=["C"]).ClassificationSchema()
     )
-    rows = {r.id: r for r in catalog.unlabelled(label_set_id)}
+    rows = {r.id: r for r in catalog.unlabelled(label_set_id, EVERYTHING)}
     assert len({r.location.container for r in rows.values()}) == 1
 
     for sample_id, row in rows.items():

@@ -27,6 +27,7 @@ from . import tables as t
 #: it here would mean this module knowing what a label value means.
 ORDER = (
     t.sample,
+    t.sample_collection,
     t.label_set,
     t.annotation,
     t.annotation_class,

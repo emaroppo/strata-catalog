@@ -74,6 +74,23 @@ sample = Table(
 )
 
 
+#: Where a sample came from, as a path: ``sat_images``,
+#: ``sat_images/2024-batch``. A sample carries one row per collection it
+#: belongs to, because the same images can feed more than one job — which is
+#: the whole reason a catalog is worth keeping.
+#:
+#: Distinct from ``media``/``subtype``, which say what a sample is made of,
+#: and from ``group_id``, which says what must not straddle a split. One
+#: collection holds many groups; the three axes are independent.
+sample_collection = Table(
+    "sample_collection",
+    metadata,
+    Column("sample_id", ForeignKey("sample.id", ondelete="CASCADE"), primary_key=True),
+    Column("collection", String(255), primary_key=True),
+    Index("ix_sample_collection_name", "collection"),
+)
+
+
 label_set = Table(
     "label_set",
     metadata,
