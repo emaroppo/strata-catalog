@@ -380,6 +380,26 @@ class Catalog:
         with self.engine.connect() as conn:
             return self._rows(conn, stmt)
 
+    def skipped(self, label_set_id: int) -> list[SampleRow]:
+        """Samples reviewed with nothing applicable.
+
+        Neither training data nor queue: they belong to neither of the other
+        two, so anything reconstructing the whole picture needs them named.
+        """
+        stmt = (
+            select(*self._COLUMNS)
+            .join(t.annotation, t.annotation.c.sample_id == t.sample.c.id)
+            .where(
+                and_(
+                    self._live(),
+                    t.annotation.c.label_set_id == label_set_id,
+                    t.annotation.c.state == t.SKIPPED,
+                )
+            )
+        )
+        with self.engine.connect() as conn:
+            return self._rows(conn, stmt)
+
     def with_class(self, label_set_id: int, class_name: str) -> list[SampleRow]:
         """Every sample asserting a class — the join the index table exists for."""
         stmt = (

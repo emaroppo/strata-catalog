@@ -386,3 +386,26 @@ def test_materialising_shares_inodes_with_the_blobs(materialised, catalog):
 def test_a_materialised_file_still_has_the_right_bytes(materialised):
     sample = _manifest(materialised).samples[0]
     assert (materialised / sample.path).read_bytes().startswith(b"contents of img")
+
+
+def test_skipped_samples_can_be_listed(catalog, files, label_set):
+    ids = catalog.ingest(files(4), media="image")
+    catalog.skip(ids[0], label_set)
+    catalog.skip(ids[1], label_set)
+    catalog.annotate(ids[2], label_set, Choices(values=["cat"]))
+    # They belong to neither the labelled set nor the queue, so anything
+    # reconstructing the whole picture needs them named
+    assert {s.id for s in catalog.skipped(label_set)} == {ids[0], ids[1]}
+
+
+def test_the_three_states_partition_the_catalog(catalog, files, label_set):
+    ids = catalog.ingest(files(6), media="image")
+    catalog.skip(ids[0], label_set)
+    catalog.annotate(ids[1], label_set, Choices(values=["cat"]))
+    counts = (
+        len(catalog.labelled(label_set)),
+        len(catalog.skipped(label_set)),
+        len(catalog.unlabelled(label_set)),
+    )
+    assert counts == (1, 1, 4)
+    assert sum(counts) == len(ids)
