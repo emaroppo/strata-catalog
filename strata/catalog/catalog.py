@@ -566,6 +566,23 @@ class Catalog:
         with self.engine.connect() as conn:
             return self._rows(conn, self._scoped(stmt, collections))
 
+    def by_checksum(self, checksum: str) -> SampleRow | None:
+        """The sample with these bytes.
+
+        How a Label Studio task is recognised on the way back. Keyed on the
+        checksum rather than on where the bytes sit, because a location is a
+        storage detail that moves — repacking files into shards rewrites
+        every one of them — while a task URL created months earlier does
+        not. Content addressing is the only identity here that survives the
+        blobs being moved.
+        """
+        stmt = select(*self._COLUMNS).where(
+            and_(self._live(), t.sample.c.checksum == checksum)
+        )
+        with self.engine.connect() as conn:
+            rows = self._rows(conn, stmt)
+        return rows[0] if rows else None
+
     def by_location(self, container: str, offset: int = 0) -> SampleRow | None:
         """The sample whose bytes sit at a blob location.
 

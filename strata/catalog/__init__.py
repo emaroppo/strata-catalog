@@ -27,10 +27,11 @@ Phase 2 built the local half: SQLite index, a directory of blobs, ingest and
 interface.
 """
 
-from .blobs import BlobBackend, LocalBackend, Location, checksum_of
+from .blobs import BlobBackend, LocalBackend, Location, blob_path, checksum_of
 from .catalog import EVERYTHING, Catalog, CatalogError, SampleRow
 from .copy import CopyError, CopyReport, copy_index
 from .manifest import FILES_DIR, MANIFEST_NAME, Manifest, ManifestSample
+from .repack import RepackError, RepackReport, repack_blobs
 from .split import SplitError, assign
 
 __all__ = [
@@ -46,9 +47,13 @@ __all__ = [
     "Location",
     "Manifest",
     "ManifestSample",
+    "RepackError",
+    "RepackReport",
     "SampleRow",
     "SplitError",
     "assign",
+    "blob_path",
     "checksum_of",
     "copy_index",
+    "repack_blobs",
 ]
