@@ -28,6 +28,12 @@ services:
       retries: 10
 
   blobs:
+    # Both, deliberately. A clone with no such image builds it, so nothing
+    # here depends on a registry or on a prebuilt artifact. A host that
+    # already has the image tagged this way uses it and skips the build —
+    # which is what lets a machine that cannot reach Docker Hub run the
+    # thing anyway, by having the image loaded from elsewhere.
+    image: strata-blobs:latest
     build:
       context: ../..
       dockerfile: deploy/minipc/Dockerfile

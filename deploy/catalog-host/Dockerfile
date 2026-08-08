@@ -7,6 +7,10 @@ FROM python:3.13-slim
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 
 WORKDIR /app
+# The workspace root comes too. catalog declares strata-labels as a
+# workspace source, so without the root defining one, uv resolves it as a
+# package that does not exist on any index and the build fails.
+COPY pyproject.toml /app/pyproject.toml
 COPY packages/labels /app/packages/labels
 COPY packages/catalog /app/packages/catalog
 
