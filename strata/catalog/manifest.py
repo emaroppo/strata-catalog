@@ -43,6 +43,11 @@ class Manifest(BaseModel):
 
     dataset: str
     version: int
+    #: Which catalog this was built from. A dataset name and a sample id
+    #: both mean something only within one, so a directory that does not
+    #: say makes a run's lineage unresolvable the moment a host serves two.
+    #: Null for a version materialised before catalogs had identities.
+    catalog_id: str | None = None
     label_set: str
     label_schema: AnySchema
     #: What was asked for, and what grouping actually allowed. They differ

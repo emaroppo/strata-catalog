@@ -291,6 +291,7 @@ def test_a_manifest_is_json_anyone_can_read(materialised):
     assert set(payload) == {
         "dataset",
         "version",
+        "catalog_id",
         "label_set",
         "label_schema",
         "val_ratio",

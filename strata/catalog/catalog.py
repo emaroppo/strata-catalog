@@ -1130,6 +1130,7 @@ class Catalog:
         manifest = Manifest(
             dataset=info.name,
             version=info.version,
+            catalog_id=self.id,
             label_set=info.label_set,
             label_schema=_SCHEMA.validate_python(info.schema),
             val_ratio=info.val_ratio,
