@@ -12,7 +12,7 @@ different catalog match these samples to its own.
 
 from pydantic import BaseModel, Field
 
-from strata.labels import Choices, ClassificationSchema
+from strata.labels import AnySchema, AnyValue
 
 MANIFEST_NAME = "manifest.json"
 FILES_DIR = "files"
@@ -31,7 +31,11 @@ class ManifestSample(BaseModel):
     val: bool = False
     #: Null when the sample was skipped. An empty value is different: a
     #: human looked and found nothing, which is an answer.
-    value: Choices | None = None
+    #:
+    #: Any annotation payload, not one task's — a dataset version is the
+    #: artifact a model trains from, so pinning it to choices would mean no
+    #: detector could ever be handed one.
+    value: AnyValue | None = None
 
 
 class Manifest(BaseModel):
@@ -40,7 +44,7 @@ class Manifest(BaseModel):
     dataset: str
     version: int
     label_set: str
-    label_schema: ClassificationSchema
+    label_schema: AnySchema
     #: What was asked for, and what grouping actually allowed. They differ
     #: when a group is too large to hold out at the requested ratio.
     val_ratio: float = 0.2

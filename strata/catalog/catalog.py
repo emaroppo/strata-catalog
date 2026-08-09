@@ -12,15 +12,19 @@ from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from pydantic import TypeAdapter
 from sqlalchemy import and_, create_engine, delete, event, insert, or_, select, update
 from sqlalchemy.engine import Engine
 
-from strata.labels import Choices, ClassificationSchema
+from strata.labels import AnySchema, AnyValue, Choices, ClassificationSchema
 
 from . import tables as t
 from .blobs import BlobBackend, LocalBackend, Location, blob_path, checksum_of
 from .manifest import FILES_DIR, MANIFEST_NAME, Manifest, ManifestSample
 from .split import assign
+
+_SCHEMA = TypeAdapter(AnySchema)
+_VALUE = TypeAdapter(AnyValue)
 
 
 def _chunks(items: list, size: int):
