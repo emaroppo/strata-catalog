@@ -16,7 +16,7 @@ from pydantic import TypeAdapter
 from sqlalchemy import and_, create_engine, delete, event, insert, or_, select, update
 from sqlalchemy.engine import Engine
 
-from strata.labels import AnySchema, AnyValue, Choices, ClassificationSchema
+from strata.labels import AnySchema, AnyValue
 
 from . import tables as t
 from .blobs import BlobBackend, LocalBackend, Location, blob_path, checksum_of
@@ -323,7 +323,7 @@ class Catalog:
         self,
         sample_id: int,
         label_set_id: int,
-        value: Choices,
+        value: AnyValue,
         source: str = "human",
     ) -> None:
         """Record what a sample is, and index the classes it asserts."""
@@ -357,7 +357,7 @@ class Catalog:
     def annotate_many(
         self,
         label_set_id: int,
-        items: Iterable[tuple[int, Choices | None]],
+        items: Iterable[tuple[int, AnyValue | None]],
         source: str = "human",
         on_item: Callable[[int], None] | None = None,
     ) -> tuple[int, int]:
@@ -454,14 +454,14 @@ class Catalog:
                 )
             )
 
-    def _label_set_by_id(self, label_set_id: int) -> tuple[int, ClassificationSchema]:
+    def _label_set_by_id(self, label_set_id: int) -> tuple[int, AnySchema]:
         with self.engine.connect() as conn:
             row = conn.execute(
                 select(t.label_set.c.schema).where(t.label_set.c.id == label_set_id)
             ).first()
         if row is None:
             raise CatalogError(f"No label set with id {label_set_id}")
-        return label_set_id, ClassificationSchema.model_validate(row.schema)
+        return label_set_id, _SCHEMA.validate_python(row.schema)
 
     # ------------------------------------------------------------------
     # Queries
@@ -644,7 +644,7 @@ class Catalog:
             rows = self._rows(conn, stmt)
         return rows[0] if rows else None
 
-    def annotation_of(self, sample_id: int, label_set_id: int) -> Choices | None:
+    def annotation_of(self, sample_id: int, label_set_id: int) -> AnyValue | None:
         with self.engine.connect() as conn:
             row = conn.execute(
                 select(t.annotation.c.state, t.annotation.c.value).where(
@@ -656,7 +656,10 @@ class Catalog:
             ).first()
         if row is None or row.state == t.SKIPPED:
             return None
-        return Choices.model_validate(row.value)
+        # Through the discriminator: read back as one task's value, a boxes
+        # annotation parses without complaint into an empty Choices, and the
+        # catalog silently forgets what a human actually said.
+        return _VALUE.validate_python(row.value)
 
     # ------------------------------------------------------------------
     # Datasets
@@ -956,7 +959,7 @@ class Catalog:
                     group_id=row.group_id,
                     val=bool(row.val),
                     value=(
-                        Choices.model_validate(row.value)
+                        _VALUE.validate_python(row.value)
                         if row.state == t.ANNOTATED and row.value is not None
                         else None
                     ),
@@ -967,7 +970,7 @@ class Catalog:
             dataset=info.name,
             version=info.version,
             label_set=info.label_set,
-            label_schema=ClassificationSchema.model_validate(info.schema),
+            label_schema=_SCHEMA.validate_python(info.schema),
             val_ratio=info.val_ratio,
             val_ratio_achieved=info.val_ratio_achieved,
             samples=samples,
