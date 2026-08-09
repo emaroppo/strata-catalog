@@ -23,6 +23,12 @@ from .manifest import FILES_DIR, MANIFEST_NAME, Manifest, ManifestSample
 from .split import assign
 
 
+def _chunks(items: list, size: int):
+    """SQLite caps parameters per statement, and a review pool is past it."""
+    for start in range(0, len(items), size):
+        yield items[start : start + size]
+
+
 def _link_or_copy(source: Path, target: Path) -> None:
     """Put ``source``'s bytes at ``target``, sharing them if the filesystem can.
 
@@ -757,6 +763,78 @@ class Catalog:
     # ------------------------------------------------------------------
     # Materialise
     # ------------------------------------------------------------------
+
+    def ensure_cached(
+        self, checksums: Sequence[str], cache: Path, on_progress=None
+    ) -> dict[str, Path]:
+        """Files on this host for these samples, fetching what is missing.
+
+        For work that is not a dataset — ranking a review pool means scoring
+        every unlabelled sample, and those are by definition in no dataset
+        version. The cache is content-addressed, so a sample already pulled
+        for a dataset is already here, and a sample pulled for this is there
+        for the next one.
+
+        Returns only what the catalog knows. A checksum it has never seen is
+        absent rather than an error, because the caller asked about samples
+        and is entitled to hear that one is not among them.
+        """
+        cache = Path(cache)
+        paths: dict[str, Path] = {}
+        missing: list[tuple[Location, Path]] = []
+
+        with self.engine.connect() as conn:
+            for chunk in _chunks(list(checksums), 500):
+                rows = conn.execute(
+                    select(
+                        t.sample.c.checksum,
+                        t.sample.c.location,
+                        t.sample.c.offset,
+                        t.sample.c.length,
+                        t.sample.c.metadata,
+                    ).where(and_(self._live(), t.sample.c.checksum.in_(chunk)))
+                )
+                for row in rows:
+                    suffix = Path(
+                        (row.metadata or {}).get("source_path") or ""
+                    ).suffix.lower()
+                    target = cache / blob_path(row.checksum, suffix)
+                    paths[row.checksum] = target
+                    if not target.exists():
+                        missing.append(
+                            (Location(row.location, row.offset, row.length), target)
+                        )
+
+        done, total = len(paths) - len(missing), len(paths)
+        if on_progress is not None:
+            on_progress(done, total)
+        if not missing:
+            return paths
+
+        for _, target in missing:
+            target.parent.mkdir(parents=True, exist_ok=True)
+
+        wanted = dict(missing)
+        path_for = getattr(self.blobs, "path_for", None)
+        if path_for is None:
+            for location, body in self.blobs.fetch(list(wanted)):
+                target = wanted[location]
+                # Through a temporary name: a short file at the address of a
+                # whole one is served as a hit forever, and nothing rehashes
+                # a cache entry to notice.
+                partial = target.with_name(target.name + ".partial")
+                partial.write_bytes(body)
+                partial.replace(target)
+                done += 1
+                if on_progress is not None:
+                    on_progress(done, total)
+        else:
+            for location, target in wanted.items():
+                _link_or_copy(path_for(location), target)
+                done += 1
+                if on_progress is not None:
+                    on_progress(done, total)
+        return paths
 
     def dataset_named(self, dataset_id: int) -> tuple[str, int]:
         """A dataset's name and version, without materialising it.
