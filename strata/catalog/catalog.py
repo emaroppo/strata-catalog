@@ -13,7 +13,17 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from pydantic import TypeAdapter
-from sqlalchemy import and_, create_engine, delete, event, insert, or_, select, update
+from sqlalchemy import (
+    and_,
+    create_engine,
+    delete,
+    event,
+    func,
+    insert,
+    or_,
+    select,
+    update,
+)
 from sqlalchemy.engine import Engine
 
 from strata.labels import AnySchema, AnyValue
@@ -849,6 +859,31 @@ class Catalog:
                 if on_progress is not None:
                     on_progress(done, total)
         return paths
+
+    def composition(self, collections) -> dict[tuple[str, str], int]:
+        """What the samples in these collections are, keyed (media, subtype).
+
+        A project declares both so ``ingest`` can work before anything is
+        catalogued: media picks which files count, and subtype decides
+        whether they are grouped. Afterwards the samples are the truth, and
+        the two can disagree — a collection a project did not fill, or a
+        declaration changed after the fact.
+
+        Subtype is the one that matters quietly. Frames ingested as plain
+        images each become their own group, so near-duplicates land on both
+        sides of a train/val split and validation reads high for a model
+        that has memorised them.
+        """
+        stmt = (
+            select(t.sample.c.media, t.sample.c.subtype, func.count())
+            .where(self._live())
+            .group_by(t.sample.c.media, t.sample.c.subtype)
+        )
+        with self.engine.connect() as conn:
+            return {
+                (row[0], row[1]): row[2]
+                for row in conn.execute(self._scoped(stmt, collections))
+            }
 
     def dataset_named(self, dataset_id: int) -> tuple[str, int]:
         """A dataset's name and version, without materialising it.
