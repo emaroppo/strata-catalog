@@ -537,3 +537,23 @@ def test_two_rows_for_one_sample_are_the_same_sample():
     # What is recorded about where a sample came from does not make it a
     # different sample
     assert SampleRow(**common, metadata={"a": 1}) == SampleRow(**common, metadata=None)
+
+
+def test_a_label_set_keeps_whatever_kind_of_schema_it_is(tmp_path):
+    """A catalog holds annotations, not one task's annotations.
+
+    Reading a label set back as classification meant a catalog could store
+    boxes it could never hand over — and the mismatch surfaced wherever the
+    schema was next used, not where it was made.
+    """
+    from strata.catalog import Catalog
+    from strata.labels import BBoxSchema, ClassificationSchema, SpanSchema
+
+    catalog = Catalog.local(tmp_path / "catalog")
+    for name, schema in [
+        ("boxes", BBoxSchema(classes=["cat"])),
+        ("spans", SpanSchema(classes=["name"])),
+        ("choices", ClassificationSchema(classes=["a"])),
+    ]:
+        catalog.create_label_set(name, schema)
+        assert catalog.label_set(name)[1] == schema
