@@ -375,6 +375,9 @@ class Catalog:
                 value=json.loads(value.model_dump_json()),
                 source=source,
             )
+            # Someone has looked again, which is what a conflict was asking
+            # for. Whichever way they went, it is settled.
+            self._clear_conflict(conn, sample_id, label_set_id)
             self._reindex_classes(
                 conn, sample_id, label_set_id, schema.classes_asserted(value)
             )
@@ -680,6 +683,102 @@ class Catalog:
         with self.engine.connect() as conn:
             rows = self._rows(conn, stmt)
         return rows[0] if rows else None
+
+    # ------------------------------------------------------------------
+    # Disagreement
+    # ------------------------------------------------------------------
+
+    def record_conflict(
+        self,
+        sample_id: int,
+        label_set_id: int,
+        kept: AnyValue | None,
+        other: AnyValue | None,
+        other_origin: str | None = None,
+    ) -> None:
+        """Note that two origins answered this sample differently.
+
+        Called by whatever merges one catalog into another. Not by
+        :meth:`annotate`: a reviewer changing their mind is not a conflict,
+        it is the point of being able to correct an answer. A conflict is
+        two answers that were made independently, and only a merge can see
+        that.
+
+        The catalog keeps the answer it already had. Choosing between them
+        is exactly what it cannot do — both were made by someone looking at
+        the sample — so it keeps one, remembers the other, and puts the pair
+        in front of a person.
+        """
+        payload = {
+            "kept_value": None if kept is None else json.loads(kept.model_dump_json()),
+            "other_value": None if other is None else json.loads(other.model_dump_json()),
+            "other_origin": other_origin,
+        }
+        with self.engine.begin() as conn:
+            updated = conn.execute(
+                update(t.annotation_conflict)
+                .where(
+                    and_(
+                        t.annotation_conflict.c.sample_id == sample_id,
+                        t.annotation_conflict.c.label_set_id == label_set_id,
+                    )
+                )
+                .values(**payload)
+            ).rowcount
+            if not updated:
+                conn.execute(
+                    insert(t.annotation_conflict).values(
+                        sample_id=sample_id, label_set_id=label_set_id, **payload
+                    )
+                )
+
+    def conflicts(self, label_set_id: int, collections) -> list[dict]:
+        """Samples whose answer is disputed, and what the two answers were."""
+        stmt = (
+            select(
+                t.sample.c.id,
+                t.sample.c.checksum,
+                t.annotation_conflict.c.kept_value,
+                t.annotation_conflict.c.other_value,
+                t.annotation_conflict.c.other_origin,
+            )
+            .select_from(
+                t.annotation_conflict.join(
+                    t.sample, t.sample.c.id == t.annotation_conflict.c.sample_id
+                )
+            )
+            .where(
+                and_(
+                    self._live(),
+                    t.annotation_conflict.c.label_set_id == label_set_id,
+                )
+            )
+        )
+        def value(raw):
+            return None if raw is None else _VALUE.validate_python(raw)
+
+        with self.engine.connect() as conn:
+            return [
+                {
+                    "sample_id": row.id,
+                    "checksum": row.checksum,
+                    "kept": value(row.kept_value),
+                    "other": value(row.other_value),
+                    "origin": row.other_origin,
+                }
+                for row in conn.execute(self._scoped(stmt, collections))
+            ]
+
+    def _clear_conflict(self, conn, sample_id: int, label_set_id: int) -> None:
+        """A fresh answer settles it, whichever way it went."""
+        conn.execute(
+            delete(t.annotation_conflict).where(
+                and_(
+                    t.annotation_conflict.c.sample_id == sample_id,
+                    t.annotation_conflict.c.label_set_id == label_set_id,
+                )
+            )
+        )
 
     def annotation_of(self, sample_id: int, label_set_id: int) -> AnyValue | None:
         with self.engine.connect() as conn:

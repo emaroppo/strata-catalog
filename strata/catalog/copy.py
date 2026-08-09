@@ -35,6 +35,7 @@ ORDER = (
     t.label_set,
     t.annotation,
     t.annotation_class,
+    t.annotation_conflict,
     t.dataset,
     t.dataset_member,
 )

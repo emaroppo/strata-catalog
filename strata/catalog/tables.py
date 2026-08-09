@@ -188,3 +188,33 @@ dataset_member = Table(
     Column("val", Boolean, nullable=False, default=False),
     Index("ix_dataset_member_val", "dataset_id", "val"),
 )
+
+
+#: Two origins that answered the same sample differently.
+#:
+#: A merge cannot decide this. Both answers were made by someone looking at
+#: the sample, so one of them is a mistake and only a person can say which —
+#: and the useful thing to show that person is *what* disagreed, which is
+#: lost the moment either answer is discarded.
+#:
+#: Not a relaxation of ``annotation``'s key. One current answer per sample
+#: per label set is worth keeping: everything that reads an annotation wants
+#: the answer, not a set of candidates. This records that the answer is
+#: disputed, alongside it.
+#:
+#: One row per sample per label set. A third disagreement replaces the
+#: second — the pair being shown matters more than the history of who
+#: disagreed when, and the history is in the origins anyway.
+annotation_conflict = Table(
+    "annotation_conflict",
+    metadata,
+    Column("sample_id", ForeignKey("sample.id", ondelete="CASCADE"), primary_key=True),
+    Column("label_set_id", ForeignKey("label_set.id", ondelete="CASCADE"), primary_key=True),
+    #: What the catalog holds, and what arrived disagreeing with it.
+    Column("kept_value", JSON, nullable=True),
+    Column("other_value", JSON, nullable=True),
+    #: Which catalog the disagreeing answer came from, so "the laptop said
+    #: otherwise" is answerable rather than merely "something did".
+    Column("other_origin", String(64), nullable=True),
+    Column("noticed_at", DateTime, server_default=func.now()),
+)
