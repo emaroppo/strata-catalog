@@ -31,6 +31,7 @@ from .blobs import BlobBackend, LocalBackend, Location, blob_path, checksum_of
 from .catalog import EVERYTHING, Catalog, CatalogError, SampleRow
 from .copy import CopyError, CopyReport, copy_index
 from .manifest import FILES_DIR, MANIFEST_NAME, Manifest, ManifestSample
+from .merge import MergeError, MergeReport, merge_annotations
 from .repack import RepackError, RepackReport, repack_blobs
 from .split import SplitError, assign
 
@@ -55,5 +56,8 @@ __all__ = [
     "blob_path",
     "checksum_of",
     "copy_index",
+    "merge_annotations",
+    "MergeError",
+    "MergeReport",
     "repack_blobs",
 ]
