@@ -8,8 +8,10 @@ directory be swapped for Postgres and a bucket without a consumer noticing.
 import json
 import os
 import shutil
+import uuid
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from pathlib import Path
 
 from pydantic import TypeAdapter
@@ -183,6 +185,31 @@ class Catalog:
 
     def create_all(self) -> None:
         t.metadata.create_all(self.engine)
+        self._mint_identity()
+
+    def _mint_identity(self) -> None:
+        """Give a catalog its name when it comes into existence.
+
+        Not on first ask. A catalog nobody had questioned would have no
+        identity, and a copy of it would carry none — so whether two
+        databases are the same corpus would depend on whether anyone had
+        happened to look.
+        """
+        with self.engine.begin() as conn:
+            if conn.execute(select(t.catalog_identity.c.id)).scalar() is not None:
+                return
+            conn.execute(
+                insert(t.catalog_identity).values(
+                    id=f"{datetime.now(UTC).strftime('%Y%m%dT%H%M%S')}"
+                    f"-{uuid.uuid4().hex[:8]}"
+                )
+            )
+
+    @property
+    def id(self) -> str:
+        """Which catalog this is. Sortable by time, unique without coordination."""
+        with self.engine.connect() as conn:
+            return conn.execute(select(t.catalog_identity.c.id)).scalar()
 
     # ------------------------------------------------------------------
     # Ingest

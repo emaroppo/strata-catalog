@@ -49,6 +49,24 @@ STATES = (ANNOTATED, SKIPPED)
 SOURCES = ("human", "model", "import")
 
 
+#: Who this catalog is. One row, written once.
+#:
+#: A dataset name, a collection, a sample id — all of them mean something
+#: *within* a catalog, and nothing said which. Two hosts reading "demo" and
+#: getting different data is the ambiguity this removes.
+#:
+#: It travels with a copy on purpose. ``copy_index`` preserves sample ids
+#: because annotations and task maps reference them, so a copy is the same
+#: corpus on another database rather than a new one — and a laptop working
+#: offline has to be able to say which catalog its answers belong to.
+catalog_identity = Table(
+    "catalog_identity",
+    metadata,
+    Column("id", String(64), primary_key=True),
+    Column("created_at", DateTime, server_default=func.now()),
+)
+
+
 sample = Table(
     "sample",
     metadata,

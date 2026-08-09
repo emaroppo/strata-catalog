@@ -18,7 +18,7 @@ wrong days later.
 
 from dataclasses import dataclass, field
 
-from sqlalchemy import func, insert, select, text
+from sqlalchemy import delete, func, insert, select, text
 
 from . import tables as t
 
@@ -26,6 +26,10 @@ from . import tables as t
 #: recomputing: it is written through the indexing contract, and rebuilding
 #: it here would mean this module knowing what a label value means.
 ORDER = (
+    # First, and not merely alphabetically: a copy is the same corpus on
+    # another database, and everything after it means something only within
+    # the catalog this names.
+    t.catalog_identity,
     t.sample,
     t.sample_collection,
     t.label_set,
@@ -64,6 +68,12 @@ def copy_index(source, target, batch: int = 2000, on_progress=None) -> CopyRepor
             f"The target index already holds {existing} sample(s). This copies "
             f"into an empty index; merging two catalogs is a different problem."
         )
+
+    # The target minted an identity when it was created, and it is about to
+    # stop being its own catalog. Dropping it first is what makes the copy
+    # the same corpus rather than a second one holding the same rows.
+    with target.engine.begin() as conn:
+        conn.execute(delete(t.catalog_identity))
 
     report = CopyReport()
     for table in ORDER:
