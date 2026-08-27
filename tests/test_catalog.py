@@ -558,3 +558,34 @@ def test_a_label_set_keeps_whatever_kind_of_schema_it_is(tmp_path):
     ]:
         catalog.create_label_set(name, schema)
         assert catalog.label_set(name)[1] == schema
+
+
+def test_discard_removes_one_source_and_returns_samples_to_the_queue(catalog, files):
+    """An unreviewed import is not an answer, and should not read as one."""
+    label_set_id = catalog.create_label_set("x", ClassificationSchema(classes=["cat"]))
+    ids = catalog.ingest(files(2), media="image")
+    catalog.annotate(ids[0], label_set_id, Choices(values=["cat"]), source="import")
+    catalog.annotate(ids[1], label_set_id, Choices(values=["cat"]), source="human")
+
+    assert catalog.discard(label_set_id, "import") == 1
+
+    # The imported one is unlabelled again, the answered one untouched
+    assert [row.id for row in catalog.unlabelled(label_set_id, EVERYTHING)] == [ids[0]]
+    assert [row.id for row in catalog.labelled(label_set_id, EVERYTHING)] == [ids[1]]
+    assert catalog.annotation_of(ids[0], label_set_id) is None
+
+
+def test_discard_clears_the_class_index_too(catalog, files):
+    """Otherwise a discarded row still answers 'which samples have a cat'."""
+    label_set_id = catalog.create_label_set("x", ClassificationSchema(classes=["cat"]))
+    ids = catalog.ingest(files(1), media="image")
+    catalog.annotate(ids[0], label_set_id, Choices(values=["cat"]), source="import")
+    assert catalog.with_class(label_set_id, "cat", EVERYTHING)
+
+    catalog.discard(label_set_id, "import")
+    assert catalog.with_class(label_set_id, "cat", EVERYTHING) == []
+
+
+def test_discard_names_a_source_that_is_not_there(catalog):
+    label_set_id = catalog.create_label_set("x", ClassificationSchema(classes=["cat"]))
+    assert catalog.discard(label_set_id, "nobody") == 0

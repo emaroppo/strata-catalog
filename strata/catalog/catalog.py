@@ -457,6 +457,46 @@ class Catalog:
                     moved += 1
         return moved
 
+    def discard(self, label_set_id: int, source: str) -> int:
+        """Delete annotations from one source; returns how many went.
+
+        For rows that were never really answers. A batch imported from
+        somewhere else is a set of candidates: useful to review against,
+        and not something to train on until somebody has confirmed it.
+        Left in place it is indistinguishable from an answer, and a
+        document annotated only in part is worse than one not annotated at
+        all — every class nobody marked reads as a deliberate negative.
+
+        The row is deleted rather than flagged, for the reason ``unskip``
+        deletes: unlabelled is the absence of a row, and that is exactly
+        the state an unreviewed import should be returned to.
+
+        Scoped by source, and the source has to be named, so an answer a
+        person actually gave is never removed by a call that meant
+        something else.
+        """
+        with self.engine.begin() as conn:
+            rows = conn.execute(
+                select(t.annotation.c.sample_id).where(
+                    and_(
+                        t.annotation.c.label_set_id == label_set_id,
+                        t.annotation.c.source == source,
+                    )
+                )
+            ).all()
+            for row in rows:
+                conn.execute(
+                    delete(t.annotation).where(
+                        and_(
+                            t.annotation.c.sample_id == row.sample_id,
+                            t.annotation.c.label_set_id == label_set_id,
+                            t.annotation.c.source == source,
+                        )
+                    )
+                )
+                self._reindex_classes(conn, row.sample_id, label_set_id, set())
+        return len(rows)
+
     def _upsert_annotation(self, conn, sample_id, label_set_id, *, state, value, source):
         where = and_(
             t.annotation.c.sample_id == sample_id,
