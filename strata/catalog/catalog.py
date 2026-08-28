@@ -5,6 +5,7 @@ backend stay implementation details. That is what lets SQLite and a
 directory be swapped for Postgres and a bucket without a consumer noticing.
 """
 
+import hashlib
 import json
 import os
 import shutil
@@ -13,6 +14,7 @@ from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
+from tempfile import TemporaryDirectory
 
 from pydantic import TypeAdapter
 from sqlalchemy import (
@@ -43,6 +45,38 @@ def _chunks(items: list, size: int):
     """SQLite caps parameters per statement, and a review pool is past it."""
     for start in range(0, len(items), size):
         yield items[start : start + size]
+
+
+def _canonical_source(
+    path: Path, canonicalise: Callable[[bytes], bytes], scratch: Path, entry: dict | None
+) -> tuple[Path, dict | None]:
+    """The file to catalogue, and what to record if it is not the one given.
+
+    A file already in canonical form is catalogued as it stands, which keeps
+    the hardlink path and means a corpus prepared properly pays nothing for
+    this. Where the bytes do differ, the canonical ones are what the catalog
+    holds — but the original's checksum is recorded, so a sample can still
+    be traced to the file on disk it came from.
+    """
+    data = path.read_bytes()
+    try:
+        canonical = canonicalise(data)
+    except Exception as e:
+        # Broad on purpose: this is a sample type's code, it may raise
+        # anything, and the one thing missing from whatever it raised is
+        # which of forty thousand files it was looking at.
+        raise CatalogError(f"Cannot canonicalise {path}: {e}") from None
+    if canonical == data:
+        return path, entry
+
+    source_checksum = hashlib.sha256(data).hexdigest()
+    target = scratch / f"{source_checksum}{path.suffix.lower()}"
+    target.write_bytes(canonical)
+    return target, {
+        **(entry or {}),
+        "canonicalised": True,
+        "source_checksum": source_checksum,
+    }
 
 
 def _link_or_copy(source: Path, target: Path) -> None:
@@ -225,6 +259,7 @@ class Catalog:
         metadata_for: Callable[[Path], dict | None] | None = None,
         collections: Iterable[str] = (),
         on_sample: Callable[[Path], None] | None = None,
+        canonicalise: Callable[[bytes], bytes] | None = None,
     ) -> list[int]:
         """Register files, storing their bytes and returning their sample ids.
 
@@ -247,17 +282,31 @@ class Catalog:
         that turns up in another belongs to both, which is what makes a
         corpus reusable across jobs rather than owned by the first.
 
+        ``canonicalise`` is a sample type's canonical form, passed in rather
+        than resolved here so that a catalog stays free of the type registry.
+        Where it changes a file's bytes, those are what is stored and what
+        the checksum addresses; the sample records ``canonicalised`` and the
+        original's ``source_checksum``. Omitted — which is every media whose
+        type does not override it — no file is read at all.
+
         The whole batch is one transaction — a commit per file costs an
         fsync each and turns an import into a crawl — so ``on_sample`` is how
         a caller reports progress without breaking that up.
         """
         ids: list[int] = []
-        with self.engine.begin() as conn:
+        with TemporaryDirectory(prefix="strata-canonical-") as scratch, (
+            self.engine.begin()
+        ) as conn:
             for path in paths:
                 path = Path(path)
                 extra = metadata_for(path) if metadata_for is not None else None
                 entry = {**(metadata or {}), **(extra or {})} or None
-                checksum = checksum_of(path)
+                source = path
+                if canonicalise is not None:
+                    source, entry = _canonical_source(
+                        path, canonicalise, Path(scratch), entry
+                    )
+                checksum = checksum_of(source)
                 existing = conn.execute(
                     select(t.sample.c.id).where(t.sample.c.checksum == checksum)
                 ).scalar_one_or_none()
@@ -271,7 +320,7 @@ class Catalog:
                     if on_sample is not None:
                         on_sample(path)
                     continue
-                location = self.blobs.put(path, checksum)
+                location = self.blobs.put(source, checksum)
                 ids.append(
                     conn.execute(
                         insert(t.sample).values(

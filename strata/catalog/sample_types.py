@@ -2,7 +2,7 @@
 
 A photograph, a video frame, a satellite scene, a document. This belongs to
 the catalog: it is a fact about the data, not about whatever tool collected
-it, and it decides three things nothing else can.
+it, and it decides four things nothing else can.
 
 - **Which files are allowed.** An allow list, checked and reported — not a
   filter applied quietly. Ingest walks what it is pointed at, because a
@@ -14,6 +14,12 @@ it, and it decides three things nothing else can.
 - **How samples group.** Frames of one video must not straddle a train/val
   split. Grouping is per sample in the schema already; this is the rule that
   assigns it.
+- **What canonical form the bytes are in.** A line ending or a byte order
+  mark is not a difference between two documents, but it is a difference
+  between two checksums — and for anything annotated by character offset it
+  is a difference between two sets of offsets. Semantically null, idempotent
+  and safe at ingest; see :meth:`SampleType.canonicalise` for the line
+  between this and normalisation, which is not safe there at all.
 
 Types are plugins, registered through the ``strata.sample_types`` entry
 point group, and they inherit. ``Satellite(Image)`` overrides how metadata
@@ -35,6 +41,8 @@ so both are checked when a type is defined.
 from importlib.metadata import entry_points
 from pathlib import Path
 from typing import ClassVar
+
+from .prepared import index_for
 
 #: Where a distribution advertises the sample types it provides.
 ENTRY_POINT_GROUP = "strata.sample_types"
@@ -117,13 +125,52 @@ class SampleType:
         suffix = Path(path).suffix.lower().lstrip(".")
         return bool(suffix) and suffix in self.extensions
 
-    def metadata_for(self, path: Path) -> dict:
+    def canonicalise(self, data: bytes) -> bytes:
+        """These bytes in the one form the catalog stores them in.
+
+        Semantically null and idempotent: a line ending, a byte order mark,
+        a unicode composition. What it buys is an honest checksum — two
+        files that read identically should not ingest as two samples — and,
+        for anything annotated by character offset, one answer to what the
+        characters are.
+
+        **The test that separates this from normalisation:** would two
+        independent implementations produce identical bytes? If yes it is
+        canonicalisation and belongs here. If it encodes a preference —
+        column names, key order, whitespace someone prefers — it does not.
+        A checksum would then depend on our own version, and ``merge``
+        matches samples on checksum precisely so that two hosts on
+        different releases still agree about what a sample is.
+
+        The default returns the bytes untouched, and ingest reads no file at
+        all for a type that leaves it that way.
+        """
+        return data
+
+    @classmethod
+    def canonicalises(cls) -> bool:
+        """Whether this type has a canonical form worth checking for.
+
+        Asked rather than assumed so ingest can keep its cheap path: a
+        corpus of images is hardlinked without ever being read, and only a
+        type that overrides :meth:`canonicalise` pays for the read.
+        """
+        return cls.canonicalise is not SampleType.canonicalise
+
+    def metadata_for(self, path: Path, root: Path) -> dict:
         """What to record about this sample beyond its bytes.
 
         Where it came from is added by ingest itself; this is for what only
         the type knows — a capture time, a coordinate system, a frame index.
+
+        The default hands back whatever a conversion recorded for this file.
+        A type that overrides this and still wants that should call
+        ``super()`` — prepared metadata is a fact about the corpus, not
+        about the type reading it.
         """
-        return {}
+        prepared = index_for(root)
+        entry = prepared.entry_for(path, root) if prepared is not None else None
+        return dict(entry.metadata) if entry is not None else {}
 
     def group_id_for(self, path: Path, root: Path) -> str | None:
         """Which group this sample belongs to, or None for its own.
@@ -131,8 +178,15 @@ class SampleType:
         Samples sharing a group are never split across train and validation,
         because near-duplicates on both sides make a validation score
         meaningless.
+
+        The default is what a conversion declared. That is the better place
+        for it: a converter turning one video into frames knows they are one
+        video, where a type can only infer it from a directory layout both
+        sides have to agree about.
         """
-        return None
+        prepared = index_for(root)
+        entry = prepared.entry_for(path, root) if prepared is not None else None
+        return entry.group_id if entry is not None else None
 
 
 # ----------------------------------------------------------------------
