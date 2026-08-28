@@ -16,6 +16,9 @@ s3 = ["boto3>=1.34"]
 # Serving blobs over HTTP, so Label Studio can stop reading a local mount.
 serve = ["fastapi>=0.110", "uvicorn>=0.29"]
 postgres = ["psycopg[binary]>=3.2"]
+# The preparer conformance suite is importable by plugins so they can run
+# the contract against their own converter. The only thing here needing pytest.
+test = ["pytest>=8.0"]
 
 # What this catalog can ingest, read from what is installed. A plugin
 # registers here too; these names are reserved so one cannot replace them.
