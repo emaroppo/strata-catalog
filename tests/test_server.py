@@ -136,6 +136,28 @@ def test_the_response_says_what_it_is(client, checksums):
     assert response.headers["etag"] == f'"{checksums[0]}"'
 
 
+def test_a_document_is_served_as_text_in_a_stated_encoding():
+    """What a browser does with a document it is handed no encoding for.
+
+    It applies its own default, and a document that renders as mojibake has
+    every character offset in it addressing something else. The catalog
+    stores text as UTF-8 — the sample type refuses anything else — so this
+    is a fact rather than a guess.
+    """
+    from strata.catalog.server import _media_type
+
+    assert _media_type(".txt") == "text/plain; charset=utf-8"
+    # Markdown is not in the standard library's built-in table, so a
+    # document ingested as .md was served as a download
+    assert _media_type(".md") == "text/markdown; charset=utf-8"
+
+
+def test_anything_unrecognised_is_still_served():
+    from strata.catalog.server import _media_type
+
+    assert _media_type(".unheard-of") == "application/octet-stream"
+
+
 def test_an_unsigned_request_is_refused(client, checksums):
     assert client.get(f"/blob/{checksums[0]}.jpg").status_code == 422
     assert client.get(f"/blob/{checksums[0]}.jpg?exp=1&sig=x").status_code == 403

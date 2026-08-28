@@ -1,6 +1,7 @@
 """Signed URLs for blobs, so a browser can fetch one without a header.
 
-Label Studio shows an image with ``<img src>``, and an image tag cannot
+Label Studio shows a sample by its URL — an image tag, a document fetch —
+and neither of them can
 carry an Authorization header. Whatever authorises the read therefore has to
 be in the URL, which means the URL itself is the credential and has to be
 worth no more than the one sample it names.

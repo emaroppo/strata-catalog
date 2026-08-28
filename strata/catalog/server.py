@@ -1,9 +1,10 @@
 """Serving sample bytes over HTTP.
 
-What lets Label Studio stop reading images off a local mount, and with it
+What lets Label Studio stop reading samples off a local mount, and with it
 the duplicate copy of the corpus that the mount required. A reviewer's
-browser asks this for one blob at a time; it turns that into one range read
-against whatever backend the catalog has.
+browser asks this for one blob at a time — an image to display, a document
+to read — and it turns that into one range read against whatever backend
+the catalog has.
 
 Deliberately one endpoint. Anything that answers questions about samples
 belongs in the query layer, and mixing the two here would make the thing
@@ -26,13 +27,37 @@ from .signing import SigningError, verify
 #: before touching the database keeps a scan from reaching it.
 _DIGEST_CHARS = 64
 
+#: Content types the standard library's built-in table does not carry.
+#: ``mimetypes.types_map`` is read without ``init()`` on purpose — the
+#: system table varies from host to host, and what this catalog serves a
+#: blob as should not depend on which machine is serving it. Markdown is
+#: here because a text project ingests ``.md`` and, without this, a
+#: document was handed over as ``application/octet-stream``.
+EXTRA_TYPES = {".md": "text/markdown"}
+
+#: Documents are stored UTF-8 — their sample type refuses anything else —
+#: so this is a fact rather than a guess. Without it a browser falls back
+#: to its own default encoding and a document renders as mojibake, with
+#: every character offset in it addressing something else.
+TEXT_CHARSET = "charset=utf-8"
+
+
+def _media_type(suffix: str) -> str:
+    """What to serve a blob as, from the filename's extension."""
+    suffix = suffix.lower()
+    kind = EXTRA_TYPES.get(suffix) or mimetypes.types_map.get(
+        suffix, "application/octet-stream"
+    )
+    return f"{kind}; {TEXT_CHARSET}" if kind.startswith("text/") else kind
+
 
 def _split(name: str) -> tuple[str, str]:
     """A path segment into its checksum and suffix.
 
     The suffix is decoration — it exists so a browser and a human both see a
-    filename that looks like an image — but it is what the content type is
-    derived from, since the catalog stores bytes rather than media types.
+    filename that looks like the thing it is — but it is what the content
+    type is derived from, since the catalog stores bytes rather than media
+    types.
     """
     suffix = Path(name).suffix
     return name[: len(name) - len(suffix)], suffix
@@ -109,10 +134,9 @@ def create_app(
                     f"{type(e).__name__}: {e}"
                 ),
             ) from None
-        media_type = mimetypes.types_map.get(suffix.lower(), "application/octet-stream")
         return Response(
             content=body,
-            media_type=media_type,
+            media_type=_media_type(suffix),
             headers={
                 # The bytes behind a checksum cannot change, so the only
                 # thing bounding the cache is the signature in the URL.

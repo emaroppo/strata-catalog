@@ -38,7 +38,7 @@ def build():
     secret = _required(
         "STRATA_BLOB_SECRET",
         "URLs are signed with it, and it must match what the labeller signs "
-        "with, or every image fails to load.",
+        "with, or nothing a reviewer opens will load.",
     )
 
     endpoint = os.environ.get("STRATA_S3_ENDPOINT")
@@ -68,8 +68,8 @@ def build():
         ))
 
     # Comma-separated, and everything by default. Label Studio marks images
-    # crossorigin, so without a matching header the browser discards a
-    # response it already received in full.
+    # crossorigin and fetches documents with XHR, so without a matching
+    # header the browser discards a response it already received in full.
     origins = tuple(
         o.strip() for o in os.environ.get("STRATA_SERVE_ORIGINS", "*").split(",") if o.strip()
     )
