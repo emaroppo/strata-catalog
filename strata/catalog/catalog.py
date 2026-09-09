@@ -935,13 +935,21 @@ class Catalog:
                 or 0
             ) + 1
             inherited = self._previous_split(conn, name)
-            groups = dict(
-                conn.execute(
-                    select(t.sample.c.id, t.sample.c.group_id).where(
-                        t.sample.c.id.in_(list(sample_ids))
-                    )
-                ).all()
-            )
+            # Chunked for the reason _chunks exists: one bound parameter per
+            # sample, against a limit that depends on the interpreter. An
+            # apt-installed Python allows 250,000 of them and a uv-managed
+            # one 32,766, so a corpus this held fine on one machine failed on
+            # another — and failed before the round did anything, which at
+            # least made it loud.
+            groups: dict[int, str | None] = {}
+            for chunk in _chunks(list(sample_ids), 500):
+                groups.update(
+                    conn.execute(
+                        select(t.sample.c.id, t.sample.c.group_id).where(
+                            t.sample.c.id.in_(chunk)
+                        )
+                    ).all()
+                )
             flags, achieved = assign(groups, inherited, val_ratio=val_ratio, seed=seed)
 
             dataset_id = conn.execute(
@@ -954,12 +962,15 @@ class Catalog:
                     val_ratio_achieved=achieved,
                 )
             ).inserted_primary_key[0]
-            for sample_id, is_val in flags.items():
-                conn.execute(
-                    insert(t.dataset_member).values(
-                        dataset_id=dataset_id, sample_id=sample_id, val=is_val
-                    )
-                )
+            # One statement per chunk rather than per sample: freezing a
+            # version of a large corpus was 54,000 round trips, all inside
+            # the same transaction and all doing the same thing.
+            members = [
+                {"dataset_id": dataset_id, "sample_id": sample_id, "val": is_val}
+                for sample_id, is_val in flags.items()
+            ]
+            for chunk in _chunks(members, 500):
+                conn.execute(insert(t.dataset_member), chunk)
         return dataset_id
 
     def _identical_version(self, conn, name: str, wanted: set[int]) -> int | None:
