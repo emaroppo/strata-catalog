@@ -31,10 +31,8 @@ feature is missing cannot be scored and would silently never surface again
 checked, not inferred from where the value came from.
 """
 
-import hashlib
-import json
 from dataclasses import dataclass
-from typing import Any, Literal
+from typing import Literal
 
 #: Where a feature's value is read from.
 SOURCES = ("label_set", "metadata")
@@ -80,22 +78,4 @@ class FeatureSpec:
         return cls(name=raw["name"], source=raw["source"], ref=raw["ref"])
 
 
-def digest_of(features: dict[str, Any] | None) -> str:
-    """A stable digest of one sample's features.
-
-    What makes a cached prediction honest. A prediction is a function of a
-    checkpoint, some bytes *and these values*; keyed on the first two alone
-    it survives a correction to the third and is served for inputs that no
-    longer exist. Widening the key is what lets the cache keep its stated
-    property — nothing is ever invalidated — while ceasing to be wrong.
-
-    The empty digest is empty rather than a hash of nothing, so a project
-    with no features reads exactly as it did before there were any.
-    """
-    if not features:
-        return ""
-    canonical = json.dumps(features, sort_keys=True, separators=(",", ":"), default=str)
-    return hashlib.sha256(canonical.encode()).hexdigest()
-
-
-__all__ = ["SOURCES", "FeatureError", "FeatureSpec", "digest_of"]
+__all__ = ["SOURCES", "FeatureError", "FeatureSpec"]

@@ -253,8 +253,8 @@ def test_materialising_from_a_bucket_pulls_shards_not_members(store, tmp_path):
     Copying sample by sample would be a range request each; a dataset that
     lives in one shard should cost one object.
     """
-    from strata.catalog import Catalog, Manifest
-    from strata.labels import Choices, ClassificationSchema
+    from strata.catalog import Catalog
+    from strata.labels import Choices, ClassificationSchema, Manifest
 
     backend = S3Backend(store, bucket="test", shard_bytes=1 << 20)
     catalog = Catalog.connect(f"sqlite:///{tmp_path / 'index.db'}", backend)

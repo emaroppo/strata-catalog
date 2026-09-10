@@ -31,12 +31,11 @@ from sqlalchemy import (
 )
 from sqlalchemy.engine import Engine
 
-from strata.labels import AnySchema, AnyValue
+from strata.labels import FILES_DIR, MANIFEST_NAME, AnySchema, AnyValue, Manifest, ManifestSample
 
 from . import tables as t
 from .blobs import BlobBackend, LocalBackend, Location, blob_path, checksum_of
 from .features import FeatureError, FeatureSpec
-from .manifest import FILES_DIR, MANIFEST_NAME, Manifest, ManifestSample
 from .schema_version import require_current, stamp_if_new
 from .split import assign
 

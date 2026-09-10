@@ -3,7 +3,7 @@
 import pytest
 
 from strata.catalog import EVERYTHING
-from strata.catalog.features import FeatureError, FeatureSpec, digest_of
+from strata.catalog.features import FeatureError, FeatureSpec
 from strata.labels import Choices, ClassificationSchema
 
 
@@ -15,17 +15,6 @@ def test_a_declaration_must_name_its_source():
 def test_an_unknown_source_is_refused():
     with pytest.raises(FeatureError, match="expected one of"):
         FeatureSpec(name="s", source="somewhere", ref="x")
-
-
-def test_the_empty_digest_is_empty():
-    """A project with no features reads exactly as it did before there were any."""
-    assert digest_of({}) == ""
-    assert digest_of(None) == ""
-    assert digest_of({"a": 1}) != ""
-
-
-def test_the_digest_does_not_depend_on_key_order():
-    assert digest_of({"a": 1, "b": 2}) == digest_of({"b": 2, "a": 1})
 
 
 def test_a_metadata_feature_reaches_the_manifest(catalog, files, label_set, tmp_path):
@@ -42,7 +31,7 @@ def test_a_metadata_feature_reaches_the_manifest(catalog, files, label_set, tmp_
         tmp_path / "out",
         features=[FeatureSpec(name="species", source="metadata", ref="species")],
     )
-    from strata.catalog import Manifest
+    from strata.labels import Manifest
 
     manifest = Manifest.model_validate_json((out / "manifest.json").read_text())
 
@@ -66,7 +55,7 @@ def test_a_label_set_feature_reaches_the_manifest(catalog, files, label_set, tmp
         tmp_path / "out",
         features=[FeatureSpec(name="species", source="label_set", ref="species")],
     )
-    from strata.catalog import Manifest
+    from strata.labels import Manifest
 
     manifest = Manifest.model_validate_json((out / "manifest.json").read_text())
 
@@ -92,7 +81,7 @@ def test_a_sample_the_feature_does_not_cover_is_left_absent(
         tmp_path / "out",
         features=[FeatureSpec(name="species", source="label_set", ref="species")],
     )
-    from strata.catalog import Manifest
+    from strata.labels import Manifest
 
     manifest = Manifest.model_validate_json((out / "manifest.json").read_text())
     covered = [s for s in manifest.samples if s.features]

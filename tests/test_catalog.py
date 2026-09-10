@@ -4,8 +4,8 @@ import json
 
 import pytest
 
-from strata.catalog import EVERYTHING, CatalogError, Manifest
-from strata.labels import Choices, ClassificationSchema, SchemaError
+from strata.catalog import EVERYTHING, CatalogError
+from strata.labels import Choices, ClassificationSchema, Manifest, SchemaError
 
 # ----------------------------------------------------------------------
 # Ingest
