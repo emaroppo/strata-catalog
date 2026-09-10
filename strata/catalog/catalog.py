@@ -35,6 +35,7 @@ from strata.labels import AnySchema, AnyValue
 
 from . import tables as t
 from .blobs import BlobBackend, LocalBackend, Location, blob_path, checksum_of
+from .features import FeatureError, FeatureSpec
 from .manifest import FILES_DIR, MANIFEST_NAME, Manifest, ManifestSample
 from .schema_version import require_current, stamp_if_new
 from .split import assign
@@ -1213,7 +1214,12 @@ class Catalog:
         return self.dataset_named(dataset_id)[1]
 
     def materialise(
-        self, dataset_id: int, dest: Path, on_progress=None, cache: Path | None = None
+        self,
+        dataset_id: int,
+        dest: Path,
+        on_progress=None,
+        cache: Path | None = None,
+        features: "Sequence[FeatureSpec] | None" = None,
     ) -> Path:
         """Write a dataset version out as files plus a manifest.
 
@@ -1231,6 +1237,13 @@ class Catalog:
         backend and filled from it. Successive versions of a dataset share
         almost all their samples, so without one every version re-fetches a
         corpus it already has on disk. A hit costs a hard link.
+
+        ``features`` are values the model is to be told alongside each
+        sample. Resolved here rather than by the trainer because they come
+        out of the catalog and a materialised directory has to be readable
+        without one. A sample missing a declared feature is written with it
+        absent — counted and reported by the caller rather than filled in,
+        since a zero is an answer and "not known" is not.
         """
         dest = Path(dest)
         files = dest / FILES_DIR
@@ -1288,6 +1301,8 @@ class Catalog:
                 wanted[Location(row.location, row.offset, row.length)] = target
         self._write_out(wanted, on_progress, cache)
 
+        resolved = self._resolve_features(features, [row.id for row in rows])
+
         samples = []
         for row in rows:
             relative = relatives[row.id]
@@ -1298,6 +1313,7 @@ class Catalog:
                     path=relative,
                     group_id=row.group_id,
                     val=bool(row.val),
+                    features=resolved.get(row.id, {}),
                     value=(
                         _VALUE.validate_python(row.value)
                         if row.state == t.ANNOTATED and row.value is not None
@@ -1314,10 +1330,88 @@ class Catalog:
             label_schema=_SCHEMA.validate_python(info.schema),
             val_ratio=info.val_ratio,
             val_ratio_achieved=info.val_ratio_achieved,
+            features=[spec.as_dict() for spec in features or ()],
             samples=samples,
         )
         (dest / MANIFEST_NAME).write_text(manifest.model_dump_json(indent=2))
         return dest
+
+    def _resolve_features(
+        self, specs: "Sequence[FeatureSpec] | None", sample_ids: list[int]
+    ) -> dict[int, dict]:
+        """Read each declared feature for each sample.
+
+        One query per declaration rather than per sample: a review pool is
+        tens of thousands of samples and a round trip each would dwarf the
+        round.
+
+        A sample the declaration does not cover is simply absent from its
+        entry. Filling in a default would be inventing an answer, and the
+        caller is better placed to decide whether missing means "skip this
+        one" or "refuse the round".
+        """
+        if not specs or not sample_ids:
+            return {}
+        out: dict[int, dict] = {}
+        with self.engine.connect() as conn:
+            for spec in specs:
+                if spec.source == "metadata":
+                    values = self._feature_from_metadata(conn, spec, sample_ids)
+                else:
+                    values = self._feature_from_label_set(conn, spec, sample_ids)
+                for sample_id, value in values.items():
+                    out.setdefault(sample_id, {})[spec.name] = value
+        return out
+
+    def _feature_from_metadata(self, conn, spec, sample_ids) -> dict[int, object]:
+        found: dict[int, object] = {}
+        for chunk in _chunks(list(sample_ids), 500):
+            rows = conn.execute(
+                select(t.sample.c.id, t.sample.c.metadata).where(t.sample.c.id.in_(chunk))
+            ).all()
+            for sample_id, metadata in rows:
+                value = (metadata or {}).get(spec.ref)
+                if value is not None:
+                    found[sample_id] = value
+        return found
+
+    def _feature_from_label_set(self, conn, spec, sample_ids) -> dict[int, object]:
+        """Another label set's answer, as the classes it asserts.
+
+        The value is what the annotation *says*, read through the schema's
+        own indexing contract rather than by reaching into a payload this
+        does not understand — the same reason a new task type becomes
+        queryable without the catalog learning about it.
+        """
+        row = conn.execute(
+            select(t.label_set.c.id, t.label_set.c.schema).where(
+                t.label_set.c.name == spec.ref
+            )
+        ).first()
+        if row is None:
+            raise FeatureError(
+                f"Feature {spec.name!r} reads label set {spec.ref!r}, which this "
+                f"catalog does not have."
+            )
+        schema = _SCHEMA.validate_python(row.schema)
+        found: dict[int, object] = {}
+        for chunk in _chunks(list(sample_ids), 500):
+            rows = conn.execute(
+                select(t.annotation.c.sample_id, t.annotation.c.value).where(
+                    and_(
+                        t.annotation.c.label_set_id == row.id,
+                        t.annotation.c.state == t.ANNOTATED,
+                        t.annotation.c.sample_id.in_(chunk),
+                    )
+                )
+            ).all()
+            for sample_id, raw in rows:
+                if raw is None:
+                    continue
+                asserted = sorted(schema.classes_asserted(_VALUE.validate_python(raw)))
+                if asserted:
+                    found[sample_id] = asserted
+        return found
 
     def _write_out(
         self, wanted: dict[Location, Path], on_progress=None, cache: Path | None = None

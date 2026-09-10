@@ -10,6 +10,8 @@ labels alone are enough to train anywhere, and the checksum is what lets a
 different catalog match these samples to its own.
 """
 
+from typing import Any
+
 from pydantic import BaseModel, Field
 
 from strata.labels import AnySchema, AnyValue
@@ -36,6 +38,15 @@ class ManifestSample(BaseModel):
     #: artifact a model trains from, so pinning it to choices would mean no
     #: detector could ever be handed one.
     value: AnyValue | None = None
+    #: What the model is told about this sample beyond its bytes, by the
+    #: name the project gave each one.
+    #:
+    #: Deliberately plain JSON rather than ``AnyValue``. That union is
+    #: choices, spans and boxes — a coordinate pair is none of them, and a
+    #: feature read from a metadata key has no label shape at all. Typing
+    #: it as a label value would make the label-set source the only one
+    #: expressible, which is the corner worth not painting into.
+    features: dict[str, Any] = Field(default_factory=dict)
 
 
 class Manifest(BaseModel):
@@ -54,6 +65,10 @@ class Manifest(BaseModel):
     #: when a group is too large to hold out at the requested ratio.
     val_ratio: float = 0.2
     val_ratio_achieved: float = 0.0
+    #: The feature declarations this version was built under, as
+    #: ``{name, source, ref}``. Recorded so a materialised directory still
+    #: says where its features came from once it is somewhere else.
+    features: list[dict] = Field(default_factory=list)
     samples: list[ManifestSample] = Field(default_factory=list)
 
     @property

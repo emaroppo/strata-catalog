@@ -359,6 +359,7 @@ def test_a_manifest_is_json_anyone_can_read(materialised):
         "label_schema",
         "val_ratio",
         "val_ratio_achieved",
+        "features",
         "samples",
     }
 
