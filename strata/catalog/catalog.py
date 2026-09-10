@@ -183,6 +183,16 @@ class SampleRow:
     metadata: dict | None = field(default=None, compare=False)
 
 
+class DatasetRef(NamedTuple):
+    """Which dataset version an id is, and what it said when it was frozen."""
+
+    name: str
+    version: int
+    #: Over the version's members and their annotations. Null for a version
+    #: frozen before versions carried one.
+    annotation_digest: str | None
+
+
 class AnnotateReport(NamedTuple):
     """What a bulk write did."""
 
@@ -1243,27 +1253,30 @@ class Catalog:
                 for row in conn.execute(self._scoped(stmt, collections))
             }
 
-    def dataset_named(self, dataset_id: int) -> tuple[str, int]:
-        """A dataset's name and version, without materialising it.
+    def dataset_named(self, dataset_id: int) -> DatasetRef:
+        """A dataset's name, version and digest, without materialising it.
 
         So a caller can work out where a version would live, and whether it
         already holds it, before paying to fetch it. Reading either off the
         manifest is only possible once the files are written, which is too
         late to decide not to write them.
+
+        The digest is what a round sends along with the id, so a host can
+        tell its own dataset from a copy's that happens to share the number.
         """
         with self.engine.connect() as conn:
             row = conn.execute(
-                select(t.dataset.c.name, t.dataset.c.version).where(
-                    t.dataset.c.id == dataset_id
-                )
+                select(
+                    t.dataset.c.name, t.dataset.c.version, t.dataset.c.annotation_digest
+                ).where(t.dataset.c.id == dataset_id)
             ).first()
         if row is None:
             raise CatalogError(f"No dataset with id {dataset_id}")
-        return row.name, row.version
+        return DatasetRef(row.name, row.version, row.annotation_digest)
 
     def dataset_version(self, dataset_id: int) -> int:
         """Which version a dataset id is. See :meth:`dataset_named`."""
-        return self.dataset_named(dataset_id)[1]
+        return self.dataset_named(dataset_id).version
 
     def materialise(
         self,

@@ -53,8 +53,9 @@ def ensure_materialised(
     find the version was already there meant pulling a whole dataset out of
     object storage to delete it.
     """
-    name, version = catalog.dataset_named(dataset_id)
-    directory = Path(root) / name / f"v{version:03d}"
+    ref = catalog.dataset_named(dataset_id)
+    name = ref.name
+    directory = Path(root) / name / f"v{ref.version:03d}"
     specs = list(features)
 
     existing = _reusable(directory, catalog.id, [spec.as_dict() for spec in specs])

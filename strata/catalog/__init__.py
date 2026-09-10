@@ -28,7 +28,14 @@ interface.
 """
 
 from .blobs import BlobBackend, LocalBackend, Location, blob_path, checksum_of
-from .catalog import EVERYTHING, AnnotateReport, Catalog, CatalogError, SampleRow
+from .catalog import (
+    EVERYTHING,
+    AnnotateReport,
+    Catalog,
+    CatalogError,
+    DatasetRef,
+    SampleRow,
+)
 from .copy import CopyError, CopyReport, copy_index
 from .materialised import Materialised, ensure_materialised
 from .merge import MergeError, MergeReport, merge_annotations
@@ -46,6 +53,7 @@ __all__ = [
     "CatalogError",
     "CopyError",
     "CopyReport",
+    "DatasetRef",
     "LocalBackend",
     "Location",
     "Materialised",
