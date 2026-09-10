@@ -31,7 +31,15 @@ from sqlalchemy import (
 )
 from sqlalchemy.engine import Engine
 
-from strata.labels import FILES_DIR, MANIFEST_NAME, AnySchema, AnyValue, Manifest, ManifestSample
+from strata.labels import (
+    FILES_DIR,
+    MANIFEST_FORMAT,
+    MANIFEST_NAME,
+    AnySchema,
+    AnyValue,
+    Manifest,
+    ManifestSample,
+)
 
 from . import tables as t
 from .blobs import BlobBackend, LocalBackend, Location, blob_path, checksum_of
@@ -1322,6 +1330,7 @@ class Catalog:
             )
 
         manifest = Manifest(
+            format=MANIFEST_FORMAT,
             dataset=info.name,
             version=info.version,
             catalog_id=self.id,

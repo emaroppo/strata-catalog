@@ -352,6 +352,7 @@ def test_materialising_again_rewrites_only_the_manifest(catalog, materialised):
 def test_a_manifest_is_json_anyone_can_read(materialised):
     payload = json.loads((materialised / "manifest.json").read_text())
     assert set(payload) == {
+        "format",
         "dataset",
         "version",
         "catalog_id",
