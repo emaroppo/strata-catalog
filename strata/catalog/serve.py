@@ -29,6 +29,7 @@ def _required(name: str, why: str) -> str:
 def build():
     """The app, from the environment. Raises if anything essential is absent."""
     from .catalog import Catalog
+    from .config import CatalogConfig, blobs_for
     from .server import create_app
 
     url = _required(
@@ -41,31 +42,29 @@ def build():
         "with, or nothing a reviewer opens will load.",
     )
 
-    endpoint = os.environ.get("STRATA_S3_ENDPOINT")
+    endpoint = os.environ.get("STRATA_S3_ENDPOINT", "")
     if endpoint:
-        import boto3
-        from botocore.config import Config
-
-        from .s3 import S3Backend
-
-        client = boto3.client(
-            "s3",
-            endpoint_url=endpoint,
-            aws_access_key_id=os.environ.get("STRATA_S3_ACCESS_KEY") or None,
-            aws_secret_access_key=os.environ.get("STRATA_S3_SECRET_KEY") or None,
-            region_name=os.environ.get("STRATA_S3_REGION", "garage"),
-            config=Config(s3={"addressing_style": "path"}),
-        )
-        blobs = S3Backend(client, bucket=_required(
-            "STRATA_S3_BUCKET", "An endpoint without a bucket names nothing."
-        ))
+        bucket = _required("STRATA_S3_BUCKET", "An endpoint without a bucket names nothing.")
+        local = None
     else:
-        from .blobs import LocalBackend
-
-        blobs = LocalBackend(_required(
+        bucket = ""
+        local = _required(
             "STRATA_BLOBS_ROOT",
             "With no S3 endpoint the server reads files, and needs to know where.",
-        ))
+        )
+    # Built by the same code the CLI uses, so the two cannot open a bucket
+    # differently. Described from the environment until the server reads a
+    # catalog file of its own.
+    blobs = blobs_for(
+        CatalogConfig(
+            s3_endpoint=endpoint,
+            s3_bucket=bucket,
+            s3_region=os.environ.get("STRATA_S3_REGION", "garage"),
+            s3_access_key=os.environ.get("STRATA_S3_ACCESS_KEY", ""),
+            s3_secret_key=os.environ.get("STRATA_S3_SECRET_KEY", ""),
+        ),
+        local=local,
+    )
 
     # Comma-separated, and everything by default. Label Studio marks images
     # crossorigin and fetches documents with XHR, so without a matching
