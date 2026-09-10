@@ -343,6 +343,26 @@ def test_annotations_travel_with_the_files(materialised):
     assert all(s.value == Choices(values=["cat"]) for s in _manifest(materialised).samples)
 
 
+def test_a_manifest_says_whether_each_label_was_reviewed(catalog, files, label_set, tmp_path):
+    """Imports are trained on either way; the record is what makes a poor result readable."""
+    ids = catalog.ingest(files(4), media="image")
+    catalog.annotate_many(
+        label_set, [(i, Choices(values=["cat"])) for i in ids[:2]], source="import"
+    )
+    catalog.annotate_many(label_set, [(i, Choices(values=["cat"])) for i in ids[2:]])
+    dataset_id = catalog.create_dataset("d", label_set, collections=EVERYTHING)
+
+    directory = catalog.materialise(dataset_id, tmp_path / "out")
+
+    by_id = {s.id: (s.source, s.reviewed) for s in _manifest(directory).samples}
+    assert by_id == {
+        ids[0]: ("import", False),
+        ids[1]: ("import", False),
+        ids[2]: ("human", True),
+        ids[3]: ("human", True),
+    }
+
+
 def test_materialising_again_rewrites_only_the_manifest(catalog, materialised):
     stamps = {p: p.stat().st_mtime_ns for p in (materialised / "files").rglob("*")}
     catalog.materialise(1, materialised)

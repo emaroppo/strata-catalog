@@ -1332,6 +1332,7 @@ class Catalog:
                     t.dataset_member.c.val,
                     t.annotation.c.state,
                     t.annotation.c.value,
+                    t.annotation.c.source,
                 )
                 .join(t.dataset_member, t.dataset_member.c.sample_id == t.sample.c.id)
                 .outerjoin(
@@ -1368,6 +1369,11 @@ class Catalog:
                     # holdout yet, so there is no third value to store
                     split="val" if row.val else "train",
                     features=resolved.get(row.id, {}),
+                    source=row.source,
+                    # From the source, for now: nothing yet records a person
+                    # confirming an import, so a person's answer is the only
+                    # reviewed one and an import is never reviewed.
+                    reviewed=None if row.source is None else row.source == t.HUMAN,
                     value=(
                         _VALUE.validate_python(row.value)
                         if row.state == t.ANNOTATED and row.value is not None
