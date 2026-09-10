@@ -35,6 +35,7 @@ from strata.labels import AnySchema, AnyValue
 from . import tables as t
 from .blobs import BlobBackend, LocalBackend, Location, blob_path, checksum_of
 from .manifest import FILES_DIR, MANIFEST_NAME, Manifest, ManifestSample
+from .schema_version import stamp_if_new
 from .split import assign
 
 _SCHEMA = TypeAdapter(AnySchema)
@@ -218,7 +219,16 @@ class Catalog:
         return catalog
 
     def create_all(self) -> None:
+        """Build the schema, and mark it current.
+
+        Stamped rather than migrated: this creates everything in one step,
+        which is what keeps a checkout runnable and the suite fast, and a
+        database built that way is at head by construction. Without the
+        stamp the first ``alembic upgrade`` would replay the baseline
+        against tables that already exist.
+        """
         t.metadata.create_all(self.engine)
+        stamp_if_new(self.engine)
         self._mint_identity()
 
     def _mint_identity(self) -> None:

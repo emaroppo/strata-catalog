@@ -6,6 +6,9 @@ requires-python = ">=3.13"
 dependencies = [
     "strata-labels",
     "sqlalchemy>=2.0",
+    # Schema changes are migrations, not create_all: an existing database
+    # never gains a column from metadata alone. See alembic.ini.
+    "alembic>=1.13",
 ]
 
 # Storage backends are optional: the local one needs nothing beyond the
