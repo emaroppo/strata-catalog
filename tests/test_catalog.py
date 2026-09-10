@@ -43,9 +43,7 @@ def test_a_standalone_sample_has_no_group(catalog, files, label_set):
 def test_the_bytes_come_back(catalog, files):
     [sample_id] = catalog.ingest(files(1), media="image")
     label_set_id = catalog.create_label_set("x", ClassificationSchema())
-    [row] = [
-        s for s in catalog.unlabelled(label_set_id, EVERYTHING) if s.id == sample_id
-    ]
+    [row] = [s for s in catalog.unlabelled(label_set_id, EVERYTHING) if s.id == sample_id]
     assert catalog.blobs.get(row.location) == b"contents of img0"
 
 
@@ -174,8 +172,9 @@ def test_a_dataset_defaults_to_everything_labelled(catalog, files, label_set):
     annotate_all(catalog, ids[:6], label_set)
     dataset_id = catalog.create_dataset("d", label_set, collections=EVERYTHING)
     manifest = Manifest.model_validate_json(
-        (catalog.materialise(dataset_id, catalog.blobs.root.parent / "out")
-         / "manifest.json").read_text()
+        (
+            catalog.materialise(dataset_id, catalog.blobs.root.parent / "out") / "manifest.json"
+        ).read_text()
     )
     assert len(manifest.samples) == 6
 
@@ -197,6 +196,70 @@ def test_a_changed_selection_makes_a_new_version(catalog, files, label_set):
 
     annotate_all(catalog, ids[6:], label_set)
     assert catalog.create_dataset("d", label_set, collections=EVERYTHING) != first
+
+
+def test_a_corrected_answer_makes_a_new_version(catalog, files, label_set):
+    """A version is samples *and what was said about them*.
+
+    Membership alone was the whole identity test, and correcting a label
+    leaves membership untouched — so the round was handed the previous
+    version, skipped materialising because that manifest was already on
+    disk, and trained on the values the correction had just replaced.
+    Nothing raised.
+    """
+    ids = catalog.ingest(files(10), media="image")
+    annotate_all(catalog, ids, label_set)
+    first = catalog.create_dataset("d", label_set, collections=EVERYTHING)
+
+    catalog.annotate_many(label_set, [(ids[0], Choices(values=["dog"]))])
+
+    assert catalog.create_dataset("d", label_set, collections=EVERYTHING) != first
+
+
+def test_a_guess_becoming_an_answer_makes_a_new_version(catalog, files, label_set):
+    """Same value, different source, and that is a change.
+
+    An imported guess and a human answer saying the same thing are not the
+    same annotation — the distinction is the only thing separating a
+    regex's output from a reviewed label, and a frozen version that
+    conflates them cannot say which it trained on.
+    """
+    ids = catalog.ingest(files(4), media="image")
+    catalog.annotate_many(label_set, [(i, Choices(values=["cat"])) for i in ids], source="import")
+    first = catalog.create_dataset("d", label_set, collections=EVERYTHING)
+
+    catalog.annotate_many(label_set, [(ids[0], Choices(values=["cat"]))], source="human")
+
+    assert catalog.create_dataset("d", label_set, collections=EVERYTHING) != first
+
+
+def test_a_version_frozen_before_digests_existed_is_not_reused(catalog, files, label_set):
+    """Null is unknown, and unknown is not a match.
+
+    A version written before this column cannot say which answers it holds,
+    so it cannot claim to hold these. The cost is one extra version per
+    project on upgrade, which is visible in `report`; the alternative is
+    the silent staleness this exists to stop.
+    """
+    from sqlalchemy import update
+
+    from strata.catalog import tables as t
+
+    ids = catalog.ingest(files(4), media="image")
+    annotate_all(catalog, ids, label_set)
+    first = catalog.create_dataset("d", label_set, collections=EVERYTHING)
+    with catalog.engine.begin() as conn:
+        conn.execute(update(t.dataset).values(annotation_digest=None))
+
+    assert catalog.create_dataset("d", label_set, collections=EVERYTHING) != first
+
+
+def test_the_digest_does_not_depend_on_the_order_asked_for(catalog, files, label_set):
+    ids = catalog.ingest(files(6), media="image")
+    annotate_all(catalog, ids, label_set)
+    first = catalog.create_dataset("d", label_set, sample_ids=ids)
+
+    assert catalog.create_dataset("d", label_set, sample_ids=list(reversed(ids))) == first
 
 
 def test_a_dataset_with_nothing_labelled_is_an_error(catalog, files, label_set):
@@ -520,8 +583,12 @@ def test_a_sample_row_can_be_hashed_even_carrying_metadata():
     from strata.catalog import Location, SampleRow
 
     row = SampleRow(
-        id=1, checksum="a" * 64, location=Location("x", 0, 1),
-        media="image", subtype="plain", group_id=None,
+        id=1,
+        checksum="a" * 64,
+        location=Location("x", 0, 1),
+        media="image",
+        subtype="plain",
+        group_id=None,
         metadata={"source_path": "/raw/img.jpg"},
     )
     assert hash(row)
@@ -532,8 +599,12 @@ def test_two_rows_for_one_sample_are_the_same_sample():
     from strata.catalog import Location, SampleRow
 
     common = dict(
-        id=1, checksum="a" * 64, location=Location("x", 0, 1),
-        media="image", subtype="plain", group_id=None,
+        id=1,
+        checksum="a" * 64,
+        location=Location("x", 0, 1),
+        media="image",
+        subtype="plain",
+        group_id=None,
     )
     # What is recorded about where a sample came from does not make it a
     # different sample

@@ -918,7 +918,8 @@ class Catalog:
             raise CatalogError(f"No labelled samples for label set {label_set_id}")
 
         with self.engine.begin() as conn:
-            existing = self._identical_version(conn, name, set(sample_ids))
+            digest = self._annotation_digest(conn, label_set_id, sample_ids)
+            existing = self._identical_version(conn, name, set(sample_ids), digest)
             if existing is not None:
                 # A version describes a selection, not an attempt at one. A
                 # round that crashed after freezing its dataset should be
@@ -958,6 +959,7 @@ class Catalog:
                     version=version,
                     label_set_id=label_set_id,
                     query=query,
+                    annotation_digest=digest,
                     val_ratio=val_ratio,
                     val_ratio_achieved=achieved,
                 )
@@ -973,25 +975,82 @@ class Catalog:
                 conn.execute(insert(t.dataset_member), chunk)
         return dataset_id
 
-    def _identical_version(self, conn, name: str, wanted: set[int]) -> int | None:
-        """The latest version of ``name``, if it holds exactly ``wanted``."""
+    def _annotation_digest(
+        self, conn, label_set_id: int, sample_ids: Sequence[int]
+    ) -> str:
+        """What this label set currently says about these samples, as a digest.
+
+        Over the answer and not merely its presence: the state, the source
+        and the value itself, because a reviewer changing ``cat`` to ``dog``
+        and a reviewer changing an imported guess into a human answer are
+        both changes a frozen version must not pretend it already holds.
+
+        Ordered by sample id and serialised with sorted keys, so the digest
+        is a function of the answers rather than of the order a query
+        happened to return them in.
+        """
+        digest = hashlib.sha256()
+        for chunk in _chunks(list(sample_ids), 500):
+            rows = conn.execute(
+                select(
+                    t.annotation.c.sample_id,
+                    t.annotation.c.state,
+                    t.annotation.c.source,
+                    t.annotation.c.value,
+                )
+                .where(
+                    and_(
+                        t.annotation.c.label_set_id == label_set_id,
+                        t.annotation.c.sample_id.in_(chunk),
+                    )
+                )
+                .order_by(t.annotation.c.sample_id)
+            ).all()
+            for sample_id, state, source, value in rows:
+                digest.update(
+                    json.dumps(
+                        [sample_id, state, source, value],
+                        sort_keys=True,
+                        separators=(",", ":"),
+                        default=str,
+                    ).encode()
+                )
+        return digest.hexdigest()
+
+    def _identical_version(
+        self, conn, name: str, wanted: set[int], digest: str | None = None
+    ) -> int | None:
+        """The latest version of ``name``, if it froze exactly this.
+
+        Exactly this means the same members *and* the same answers about
+        them. Membership alone was the whole test until a correction was
+        shown to leave it unchanged — the round then reused the previous
+        version, skipped materialising because its manifest was already on
+        disk, and trained on the values the correction had replaced.
+        """
         latest = conn.execute(
-            select(t.dataset.c.id)
+            select(t.dataset.c.id, t.dataset.c.annotation_digest)
             .where(t.dataset.c.name == name)
             .order_by(t.dataset.c.version.desc())
             .limit(1)
-        ).scalar_one_or_none()
+        ).first()
         if latest is None:
+            return None
+        # Null is unknown rather than equal: a version frozen before this
+        # column existed cannot say what answers it holds, so it cannot
+        # claim to hold these. The cost is one extra version per project on
+        # upgrade, which is visible; the alternative is silent staleness.
+        if digest is not None and latest.annotation_digest != digest:
             return None
         members = {
             row[0]
             for row in conn.execute(
                 select(t.dataset_member.c.sample_id).where(
-                    t.dataset_member.c.dataset_id == latest
+                    t.dataset_member.c.dataset_id == latest.id
                 )
             )
         }
-        return latest if members == wanted else None
+        return latest.id if members == wanted else None
 
     def _previous_split(self, conn, name: str) -> dict[int, bool]:
         previous = conn.execute(

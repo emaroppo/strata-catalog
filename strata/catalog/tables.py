@@ -166,6 +166,19 @@ dataset = Table(
     # re-running it later would return something else, which is the point of
     # materialising in the first place.
     Column("query", JSON, nullable=True),
+    # The answers this version froze, as a digest over its members'
+    # annotations. A version is *samples and what was said about them*, and
+    # membership alone cannot tell the two apart: correcting a label leaves
+    # the sample set identical, so a round that follows a correction was
+    # handed the previous version and trained on the materialised copy of
+    # the values it had just fixed.
+    #
+    # A digest rather than a timestamp watermark, because updated_at is
+    # second-resolution here — one bulk annotate writes thousands of rows
+    # sharing a second, so a correction inside that second moves no
+    # watermark. Null means a version frozen before this column existed:
+    # unknown, and unknown is not a match.
+    Column("annotation_digest", String(64), nullable=True),
     # Both, because grouping can make the target unreachable: a corpus of
     # two videos cannot hold out 20% of itself, and a caller that asked for
     # 20% and got 50% should be able to find that out afterwards.
