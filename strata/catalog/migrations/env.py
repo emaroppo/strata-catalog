@@ -1,6 +1,6 @@
 """Alembic environment for the catalog index.
 
-The URL is not in ``alembic.ini``. It comes from where every other reader of
+There is no ``alembic.ini``: the URL comes from where every other reader of
 a catalog gets it: the ``[catalog]`` tables of ``config.toml`` — the file
 ``$STRATA_CONFIG`` names, or ``./config.toml`` — and their default, or the
 one named with ``-x catalog=<name>``. The password comes from

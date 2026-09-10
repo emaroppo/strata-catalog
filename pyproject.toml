@@ -4,10 +4,10 @@ version = "0.1.0"
 description = "The labelled data catalog: samples, storage, grouping, annotations, datasets"
 requires-python = ">=3.13"
 dependencies = [
-    "strata-labels",
+    "strata-labels>=0.1,<0.2",
     "sqlalchemy>=2.0",
     # Schema changes are migrations, not create_all: an existing database
-    # never gains a column from metadata alone. See alembic.ini.
+    # never gains a column from metadata alone. See strata-catalog-migrate.
     "alembic>=1.13",
 ]
 
@@ -34,6 +34,9 @@ text = "strata.catalog.builtin_types:Text"
 # Only importable with the serve extra; declared here so the container has a
 # command rather than a python -c.
 strata-blobs = "strata.catalog.serve:main"
+# Alembic's commands over the migrations this package ships, so a catalog
+# can be brought up to date from an installed wheel.
+strata-catalog-migrate = "strata.catalog.schema_version:migrate"
 
 [tool.uv.sources]
 strata-labels = { workspace = true }

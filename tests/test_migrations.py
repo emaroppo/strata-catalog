@@ -106,6 +106,19 @@ def test_a_named_catalog_can_be_migrated(tmp_path, monkeypatch):
     assert not (tmp_path / "a" / "catalog.db").exists()
 
 
+def test_the_migrate_command_needs_no_alembic_ini(tmp_path, monkeypatch):
+    """What an installed wheel has: the scripts inside the package, and this."""
+    from strata.catalog.schema_version import migrate
+
+    monkeypatch.delenv("STRATA_CATALOG_URL", raising=False)
+    monkeypatch.setenv("STRATA_CATALOG_ROOT", str(tmp_path))
+    monkeypatch.chdir(tmp_path)
+
+    migrate(["upgrade", "head"])
+
+    assert _head_of(tmp_path / "catalog.db") == script_directory().get_current_head()
+
+
 def test_a_created_catalog_is_stamped_at_head(tmp_path):
     """Otherwise its first upgrade replays the baseline over live tables."""
     from strata.catalog import Catalog
