@@ -150,6 +150,37 @@ def load_catalogs(path: Path, environ: Mapping[str, str] | None = None) -> Catal
     return read_catalogs(data.get("catalog", {}), environ)
 
 
+#: The config file a long-running service reads its catalog from.
+CONFIG_ENV = "STRATA_CONFIG"
+
+
+def host_catalog(environ: Mapping[str, str] | None = None) -> tuple[str, CatalogConfig]:
+    """The catalog a service on this host uses, and the name it goes by.
+
+    The blob server and the modelling host read the same ``[catalog]``
+    tables the CLI does, from the file ``$STRATA_CONFIG`` names — on a
+    machine that also runs the CLI, the very same ``config.toml``. The
+    file's default is the one served, so pointing a host at another catalog
+    is changing that default and restarting.
+
+    Unlike the CLI, a missing file is an error rather than a default
+    catalog: a service that quietly opened ``./catalog`` would serve
+    nothing, and look healthy doing it.
+    """
+    environ = os.environ if environ is None else environ
+    value = environ.get(CONFIG_ENV, "")
+    if not value:
+        raise CatalogConfigError(
+            f"${CONFIG_ENV} is not set. It names the config.toml whose [catalog] "
+            f"default this service serves."
+        )
+    path = Path(value)
+    if not path.exists():
+        raise CatalogConfigError(f"${CONFIG_ENV} names {path}, which does not exist.")
+    catalogs = load_catalogs(path, environ)
+    return catalogs.default_name or DEFAULT_CATALOG, catalogs.named()
+
+
 def read_catalogs(section: dict, environ: Mapping[str, str] | None = None) -> Catalogs:
     """A flat ``[catalog]``, or ``[catalog.<name>]`` tables, or both.
 
@@ -260,12 +291,14 @@ def _config(values: dict, where: str, environ: Mapping[str, str]) -> CatalogConf
 
 
 __all__ = [
+    "CONFIG_ENV",
     "DEFAULT_CATALOG",
     "CatalogConfig",
     "CatalogConfigError",
     "CatalogMissing",
     "Catalogs",
     "blobs_for",
+    "host_catalog",
     "load_catalogs",
     "open_catalog",
     "read_catalogs",

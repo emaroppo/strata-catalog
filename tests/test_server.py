@@ -191,6 +191,12 @@ def test_health_needs_no_signature(client):
     assert client.get("/healthz").status_code == 200
 
 
+def test_health_names_the_catalog_served(stocked):
+    """Pointed at the wrong catalog, this server's only symptom is 404s."""
+    client = TestClient(create_app(stocked, SECRET, name="demo"))
+    assert client.get("/healthz").json()["catalog"] == {"name": "demo", "id": stocked.id}
+
+
 def test_storage_that_will_not_answer_is_not_a_missing_blob(stocked, checksums):
     """A backend failure and an absent sample must not look the same.
 

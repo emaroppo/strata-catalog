@@ -68,6 +68,7 @@ def create_app(
     secret: str,
     cache_seconds: int = 31536000,
     allow_origins: tuple[str, ...] = ("*",),
+    name: str = "",
 ):
     """An app serving ``catalog``'s blobs, given the secret URLs are signed with.
 
@@ -83,9 +84,16 @@ def create_app(
     holding the URL can already fetch it with curl, where no origin policy
     applies. Narrow it if a deployment wants defence in depth, but do not
     mistake it for what is keeping the corpus closed.
+
+    ``name`` is what the catalog is called in the config it was opened
+    from, reported on ``/healthz`` beside its identity so that a machine
+    pointed at the wrong catalog can be seen to be.
     """
     from fastapi import FastAPI, HTTPException, Query, Response
     from fastapi.middleware.cors import CORSMiddleware
+
+    # Once: a catalog's identity does not change under a running server
+    identity = catalog.id
 
     app = FastAPI(title="strata blobs", docs_url=None, redoc_url=None)
     app.add_middleware(
@@ -99,7 +107,9 @@ def create_app(
 
     @app.get("/healthz")
     def healthz() -> dict:
-        return {"ok": True}
+        # Which catalog, because the failure this server has when pointed
+        # at the wrong one is a 404 on every image and nothing else
+        return {"ok": True, "catalog": {"name": name, "id": identity}}
 
     @app.get("/blob/{name}")
     def blob(name: str, exp: int = Query(...), sig: str = Query(...)) -> Response:
