@@ -1336,6 +1336,17 @@ class Catalog:
         (dest / MANIFEST_NAME).write_text(manifest.model_dump_json(indent=2))
         return dest
 
+    def features_for(
+        self, sample_ids: list[int], specs: "Sequence[FeatureSpec]"
+    ) -> dict[int, dict]:
+        """What each sample's declared features currently say.
+
+        The read behind a review queue, where ``materialise`` is the read
+        behind a round. Same resolution, different moment: one is scoring
+        an unlabelled pool, the other is freezing a dataset.
+        """
+        return self._resolve_features(specs, list(sample_ids))
+
     def _resolve_features(
         self, specs: "Sequence[FeatureSpec] | None", sample_ids: list[int]
     ) -> dict[int, dict]:
