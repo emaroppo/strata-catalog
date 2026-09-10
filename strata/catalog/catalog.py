@@ -24,6 +24,7 @@ from sqlalchemy import (
     event,
     func,
     insert,
+    inspect,
     or_,
     select,
     update,
@@ -35,7 +36,7 @@ from strata.labels import AnySchema, AnyValue
 from . import tables as t
 from .blobs import BlobBackend, LocalBackend, Location, blob_path, checksum_of
 from .manifest import FILES_DIR, MANIFEST_NAME, Manifest, ManifestSample
-from .schema_version import stamp_if_new
+from .schema_version import require_current, stamp_if_new
 from .split import assign
 
 _SCHEMA = TypeAdapter(AnySchema)
@@ -227,8 +228,17 @@ class Catalog:
         stamp the first ``alembic upgrade`` would replay the baseline
         against tables that already exist.
         """
+        # Whether this call is creating the database or opening one decides
+        # everything. A database that was empty is at head by construction
+        # and can be stamped. One that already held tables and carries no
+        # revision predates migrations — it is at the *baseline*, and
+        # stamping it head would have it claim columns it does not have.
+        empty = not inspect(self.engine).has_table("sample")
         t.metadata.create_all(self.engine)
-        stamp_if_new(self.engine)
+        if empty:
+            stamp_if_new(self.engine)
+        else:
+            require_current(self.engine, "catalog")
         self._mint_identity()
 
     def _mint_identity(self) -> None:

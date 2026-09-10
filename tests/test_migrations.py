@@ -98,3 +98,41 @@ def test_every_migration_has_a_down_path(tmp_path, monkeypatch):
     for script in script_directory().walk_revisions():
         assert Path(script.path).exists()
         assert script.down_revision is not None or script.is_base
+
+
+def test_an_unmigrated_catalog_is_refused_rather_than_mis_stamped(tmp_path, monkeypatch):
+    """The dangerous case: tables but no revision.
+
+    `connect` calls `create_all` on every open, so a database that predates
+    migrations would otherwise be stamped at head — claiming columns it
+    does not have, and leaving a later `upgrade` with nothing to do.
+    """
+    from strata.catalog import Catalog
+    from strata.catalog.schema_version import SchemaOutOfDate
+
+    root = tmp_path / "catalog"
+    Catalog.local(root)
+    engine = create_engine(f"sqlite:///{root / 'catalog.db'}")
+    with engine.begin() as conn:
+        conn.exec_driver_sql("DELETE FROM alembic_version")
+
+    with pytest.raises(SchemaOutOfDate) as raised:
+        Catalog.local(root)
+
+    assert "stamp" in str(raised.value) and "upgrade head" in str(raised.value)
+
+
+def test_a_catalog_behind_head_names_the_upgrade(tmp_path):
+    from strata.catalog import Catalog
+    from strata.catalog.schema_version import SchemaOutOfDate, script_directory
+
+    root = tmp_path / "catalog"
+    Catalog.local(root)
+    engine = create_engine(f"sqlite:///{root / 'catalog.db'}")
+    base = script_directory().get_base()
+    with engine.begin() as conn:
+        conn.exec_driver_sql("DELETE FROM alembic_version")
+        conn.exec_driver_sql(f"INSERT INTO alembic_version VALUES ('{base}')")
+
+    with pytest.raises(SchemaOutOfDate, match="upgrade head"):
+        Catalog.local(root)
