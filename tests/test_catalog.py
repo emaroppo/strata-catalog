@@ -274,13 +274,13 @@ def test_the_split_is_inherited_across_versions(catalog, files, label_set, tmp_p
     first = catalog.materialise(
         catalog.create_dataset("d", label_set, collections=EVERYTHING), tmp_path / "v1"
     )
-    before = {s.id: s.val for s in _manifest(first).samples}
+    before = {s.id: s.split for s in _manifest(first).samples}
 
     annotate_all(catalog, ids[15:], label_set)
     second = catalog.materialise(
         catalog.create_dataset("d", label_set, collections=EVERYTHING), tmp_path / "v2"
     )
-    after = {s.id: s.val for s in _manifest(second).samples}
+    after = {s.id: s.split for s in _manifest(second).samples}
 
     # The whole point: a warm-started model is never scored on a sample an
     # earlier round trained it on
@@ -437,12 +437,12 @@ def test_regrouping_cannot_disturb_a_dataset_already_built(catalog, files, label
     first = catalog.materialise(
         catalog.create_dataset("d", label_set, collections=EVERYTHING), tmp_path / "v1"
     )
-    before = {s.id: s.val for s in _manifest(first).samples}
+    before = {s.id: s.split for s in _manifest(first).samples}
 
     # Membership is materialised, so a later regroup is invisible to a
     # version that already exists
     catalog.ingest(paths, media="image", subtype="frames", group_id="vid1")
-    after = {s.id: s.val for s in _manifest(first).samples}
+    after = {s.id: s.split for s in _manifest(first).samples}
     assert after == before
 
 

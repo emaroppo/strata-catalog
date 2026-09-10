@@ -176,7 +176,7 @@ def test_a_grouped_split_holds(catalog, files, tmp_path):
 
     sides = {}
     for sample in manifest.samples:
-        sides.setdefault(sample.group_id, set()).add(sample.val)
+        sides.setdefault(sample.group_id, set()).add(sample.split)
     assert all(len(v) == 1 for v in sides.values())
 
 

@@ -1319,7 +1319,9 @@ class Catalog:
                     checksum=row.checksum,
                     path=relative,
                     group_id=row.group_id,
-                    val=bool(row.val),
+                    # The index still holds a flag: nothing assigns a
+                    # holdout yet, so there is no third value to store
+                    split="val" if row.val else "train",
                     features=resolved.get(row.id, {}),
                     value=(
                         _VALUE.validate_python(row.value)
