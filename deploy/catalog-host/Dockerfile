@@ -20,7 +20,8 @@ RUN uv pip install --system --no-cache \
       ./packages/labels \
       "./packages/catalog[s3,postgres,serve]"
 
-# Everything else comes from the environment; the server refuses to start
-# without the index URL and the signing secret.
+# Which catalog comes from the config file $STRATA_CONFIG names, and the
+# credentials from the environment; the server refuses to start without the
+# file or the signing secret.
 EXPOSE 8081
 CMD ["strata-blobs"]

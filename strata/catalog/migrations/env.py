@@ -1,11 +1,14 @@
 """Alembic environment for the catalog index.
 
-The URL is not in ``alembic.ini``. ``$STRATA_CATALOG_URL`` is the same
-variable the rest of strata honours as an override, and
-``$STRATA_CATALOG_ROOT`` names a local catalog directory for the SQLite
-case — the two together cover every configuration without this package
-learning to read ``config.toml``, which belongs to the labeller and which
-``strata.catalog`` may not import.
+The URL is not in ``alembic.ini``. It comes from where every other reader of
+a catalog gets it: the ``[catalog]`` tables of ``config.toml`` — the file
+``$STRATA_CONFIG`` names, or ``./config.toml`` — and their default, or the
+one named with ``-x catalog=<name>``. The password comes from
+``$PGPASSWORD``, as it does everywhere.
+
+``$STRATA_CATALOG_URL``, or ``$STRATA_CATALOG_ROOT`` for a SQLite directory,
+points a run at one database directly, which is how a test migrates a
+scratch one.
 """
 
 from __future__ import annotations
@@ -34,10 +37,22 @@ def database_url() -> str:
     root = os.environ.get("STRATA_CATALOG_ROOT")
     if root:
         return f"sqlite:///{Path(root) / 'catalog.db'}"
-    raise SystemExit(
-        "No catalog to migrate. Set STRATA_CATALOG_URL to the index, or "
-        "STRATA_CATALOG_ROOT to a local catalog directory."
-    )
+
+    from strata.catalog.config import CONFIG_ENV, CatalogConfigError, load_catalogs
+
+    path = Path(os.environ.get(CONFIG_ENV) or "config.toml")
+    if not path.exists():
+        raise SystemExit(
+            f"No catalog to migrate: there is no {path}. Run from the directory "
+            f"holding config.toml, set ${CONFIG_ENV} to it, or set "
+            f"STRATA_CATALOG_URL to the index."
+        )
+    name = context.get_x_argument(as_dictionary=True).get("catalog", "")
+    try:
+        config = load_catalogs(path).named(name)
+    except CatalogConfigError as e:
+        raise SystemExit(str(e)) from None
+    return config.url or f"sqlite:///{Path(config.root) / 'catalog.db'}"
 
 
 def run_migrations_offline() -> None:

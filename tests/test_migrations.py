@@ -65,6 +65,47 @@ def test_the_chain_and_create_all_agree_on_the_tables(url, monkeypatch, tmp_path
     assert migrated - {"alembic_version"} == built
 
 
+def _head_of(db) -> str | None:
+    with create_engine(f"sqlite:///{db}").connect() as conn:
+        return MigrationContext.configure(conn).get_current_revision()
+
+
+def test_the_catalog_to_migrate_comes_from_config_toml(tmp_path, monkeypatch):
+    """Where every other reader gets it, so migrating is not a configuration of its own."""
+    for name in ("STRATA_CATALOG_URL", "STRATA_CATALOG_ROOT"):
+        monkeypatch.delenv(name, raising=False)
+    (tmp_path / "catalog").mkdir()
+    config = tmp_path / "config.toml"
+    config.write_text(f'[catalog]\nroot = "{tmp_path / "catalog"}"\n')
+    monkeypatch.setenv("STRATA_CONFIG", str(config))
+
+    command.upgrade(_config(""), "head")
+
+    assert _head_of(tmp_path / "catalog" / "catalog.db") == script_directory().get_current_head()
+
+
+def test_a_named_catalog_can_be_migrated(tmp_path, monkeypatch):
+    import argparse
+
+    for name in ("STRATA_CATALOG_URL", "STRATA_CATALOG_ROOT"):
+        monkeypatch.delenv(name, raising=False)
+    for name in ("a", "b"):
+        (tmp_path / name).mkdir()
+    config = tmp_path / "config.toml"
+    config.write_text(
+        f'[catalog]\ndefault = "a"\n\n[catalog.a]\nroot = "{tmp_path / "a"}"\n\n'
+        f'[catalog.b]\nroot = "{tmp_path / "b"}"\n'
+    )
+    monkeypatch.setenv("STRATA_CONFIG", str(config))
+    alembic_config = _config("")
+    alembic_config.cmd_opts = argparse.Namespace(x=["catalog=b"])
+
+    command.upgrade(alembic_config, "head")
+
+    assert _head_of(tmp_path / "b" / "catalog.db") == script_directory().get_current_head()
+    assert not (tmp_path / "a" / "catalog.db").exists()
+
+
 def test_a_created_catalog_is_stamped_at_head(tmp_path):
     """Otherwise its first upgrade replays the baseline over live tables."""
     from strata.catalog import Catalog

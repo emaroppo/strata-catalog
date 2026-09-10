@@ -1,0 +1,24 @@
+# The catalog the blob server serves. Copy to config.toml beside this file
+# (gitignored); the compose file mounts it into the container.
+#
+# The same format as every other machine's config.toml, and the default is
+# the catalog served. Pointing this machine at another catalog is changing
+# the default and restarting:  docker compose up -d blobs
+#
+# Written from inside the compose network: the index is the catalog-db
+# service, and Garage is on the host. No secrets here — the database
+# password, the S3 keys and the signing secret come from .env.
+
+[catalog]
+s3_endpoint = "http://host.docker.internal:3900"
+default = "main"
+
+[catalog.main]
+url = "postgresql+psycopg://strata@catalog-db:5432/strata"
+s3_bucket = "mydata"
+
+# new-catalog.sh prints the table to add for each catalog it makes:
+#
+#   [catalog.demo]
+#   url = "postgresql+psycopg://strata@catalog-db:5432/demo"
+#   s3_bucket = "demo"

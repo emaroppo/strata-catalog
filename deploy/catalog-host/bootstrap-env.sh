@@ -16,60 +16,24 @@
 # script says so and leaves placeholders rather than writing something that
 # looks configured and is not.
 #
+# Where the catalog is goes in config.toml beside this file, not in .env:
+# the blob server serves that file's default catalog, so switching it is an
+# edit there and a restart. The file is written from the example if there is
+# none yet.
+#
 #   GARAGE="docker exec -i garage /garage" ./deploy/minipc/bootstrap-env.sh
 #
 set -euo pipefail
 
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 env_file="$here/.env"
+config_file="$here/config.toml"
 bucket=${STRATA_S3_BUCKET:-mydata}
 key_name=${STRATA_KEY_NAME:-strata-serve}
 
-# How to invoke Garage, worked out rather than assumed.
-#
-# A shell alias is the usual way people reach a containerised Garage, and an
-# alias is exactly what a script cannot see: non-interactive shells do not
-# read them. So this looks for the binary, then for a running container,
-# then for the alias definition in the usual rc files — and reports which
-# one it used, because "not reachable" when the thing is plainly running is
-# a confusing way to end up with placeholders.
-resolve_garage() {
-    if [ -n "${GARAGE:-}" ]; then
-        printf '%s' "$GARAGE"
-        return
-    fi
-    if command -v garage >/dev/null 2>&1; then
-        printf 'garage'
-        return
-    fi
-    if command -v docker >/dev/null 2>&1; then
-        local container
-        container=$(docker ps --format '{{.Names}} {{.Image}}' 2>/dev/null |
-            grep -i garage | head -1 | cut -d' ' -f1 || true)
-        if [ -n "$container" ]; then
-            printf 'docker exec -i %s /garage' "$container"
-            return
-        fi
-    fi
-    local defined
-    for rc in "$HOME/.bashrc" "$HOME/.bash_aliases" "$HOME/.zshrc" "$HOME/.profile"; do
-        [ -r "$rc" ] || continue
-        defined=$(sed -nE "s/^[[:space:]]*alias[[:space:]]+garage=['\"]?(.*[^'\"])['\"]?[[:space:]]*$/\1/p" \
-            "$rc" | tail -1)
-        if [ -n "$defined" ]; then
-            # -t allocates a pseudo-TTY, which injects carriage returns into
-            # output this script matches hex against. Harmless interactively,
-            # fatal here, and the failure would look like a parse problem.
-            printf '%s' "${defined//-it/-i}"
-            return
-        fi
-    done
-}
-
+# shellcheck source=garage.sh
+source "$here/garage.sh"
 garage=$(resolve_garage)
-if [ -z "$garage" ]; then
-    garage="garage"
-fi
 
 # Refuse rather than overwrite. The file holds the only copy of a running
 # deployment's credentials, and regenerating them silently would leave a
@@ -125,15 +89,22 @@ cat > "$env_file" <<EOF
 # host verifies them. Copy it into the desktop's password manager as
 # 'strata-blob-secret'. A mismatch fails as a 403 on every image, which reads
 # as a broken deployment rather than as a wrong string.
+#
+# Credentials only. Which catalog is served is config.toml's business.
 
 STRATA_DB_PASSWORD=$db_password
 STRATA_BLOB_SECRET=$blob_secret
 
-STRATA_S3_BUCKET=$bucket
 STRATA_S3_ACCESS_KEY=$access_key
 STRATA_S3_SECRET_KEY=$secret_key
 EOF
 chmod 600 "$env_file"
+
+if [ ! -e "$config_file" ]; then
+    sed "s/^s3_bucket = \"mydata\"/s3_bucket = \"$bucket\"/" \
+        "$here/config.example.toml" > "$config_file"
+    echo "Wrote $config_file from the example, serving bucket '$bucket'."
+fi
 
 echo
 echo "Wrote $env_file (0600)."
@@ -146,8 +117,11 @@ if [ "$access_key" = "REPLACE_ME" ]; then
 fi
 echo "  - Copy the signing secret to the desktop's password manager:"
 echo "      grep STRATA_BLOB_SECRET $env_file"
-echo "  - Start the index:"
+echo "  - Check $config_file names the catalog to serve"
+echo "  - Start the index, then the blob server:"
 echo "      docker compose -f $here/docker-compose.yml up -d catalog-db"
+echo "      docker compose -f $here/docker-compose.yml up -d blobs"
 echo "  - The database password is new. After catalog-copy, the desktop's"
-echo "    config.toml and its 'strata-catalog-db' entry both need the new URL:"
+echo "    'strata-catalog-db' entry needs it, for PGPASSWORD:"
 echo "      grep STRATA_DB_PASSWORD $env_file"
+echo "  - More catalogs later: $here/new-catalog.sh <name>"
