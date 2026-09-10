@@ -19,6 +19,13 @@ The third is the reason this is not a one-line UPDATE. Both answers were
 made by a person looking at the sample, and a merge is not in a position to
 decide which of them was right. It keeps one, remembers the other, and puts
 the pair in front of a human.
+
+**Unless one of them was not a person.** Each answer travels with its source,
+and sources are ranked (``tables.AUTHORITY``): a person over an import. A
+person's answer arriving where the target holds an import replaces it, or
+confirms it if they agree; an import arriving where a person answered is
+left out. Neither is a disagreement between two people, so neither is put
+in front of one. Only answers of equal standing that differ are conflicts.
 """
 
 from __future__ import annotations
@@ -47,6 +54,16 @@ class MergeReport:
     conflicted: int = 0
     #: Skips copied, where the target had nothing at all.
     skipped: int = 0
+    #: Answers the target had that an arriving source outranking them
+    #: replaced — an import superseded by a person's answer.
+    superseded: int = 0
+    #: Answers the target had that an arriving source outranking them
+    #: confirmed unchanged, which raises their standing: a person agreed
+    #: with what was only an import.
+    confirmed: int = 0
+    #: Arriving answers left alone because what the target holds outranks
+    #: them — an import landing where a person already answered.
+    outranked: int = 0
     #: Source answers whose sample is not in the target, by checksum.
     unknown_samples: list[str] = field(default_factory=list)
     #: Label sets present in the source and not in the target, by name.
@@ -54,7 +71,20 @@ class MergeReport:
 
     @property
     def total(self) -> int:
-        return self.copied + self.agreed + self.conflicted + self.skipped
+        return (
+            self.copied
+            + self.agreed
+            + self.conflicted
+            + self.skipped
+            + self.superseded
+            + self.confirmed
+            + self.outranked
+        )
+
+    @property
+    def written(self) -> int:
+        """Answers the target now holds that it did not before."""
+        return self.copied + self.superseded + self.confirmed
 
     def lines(self) -> list[str]:
         out = [
@@ -63,6 +93,14 @@ class MergeReport:
             f"{self.conflicted} conflicting",
             f"{self.skipped} skips copied",
         ]
+        # Only when they happen: a merge between two catalogs nobody
+        # imported into never sees them, and four zeros are noise
+        if self.superseded:
+            out.append(f"{self.superseded} imported answers replaced by a person's")
+        if self.confirmed:
+            out.append(f"{self.confirmed} imported answers confirmed by a person")
+        if self.outranked:
+            out.append(f"{self.outranked} imported answers left out — a person had answered")
         if self.unknown_samples:
             out.append(f"{len(self.unknown_samples)} for samples not in the target")
         if self.unknown_label_sets:
@@ -111,10 +149,10 @@ def merge_annotations(
             continue
 
         rows = _answers(source, source_set_id)
-        for done, (checksum, state, value) in enumerate(rows, start=1):
+        for done, (checksum, state, value, answered_by) in enumerate(rows, start=1):
             _merge_one(
                 target, target_set_id, schema, source.id, checksum, state, value,
-                report, dry_run,
+                answered_by, report, dry_run,
             )
             if on_progress is not None:
                 on_progress(done, len(rows))
@@ -122,7 +160,7 @@ def merge_annotations(
 
 
 def _merge_one(
-    target, target_set_id, schema, origin, checksum, state, raw, report, dry_run
+    target, target_set_id, schema, origin, checksum, state, raw, answered_by, report, dry_run
 ) -> None:
     sample = target.by_checksum(checksum)
     if sample is None:
@@ -132,24 +170,52 @@ def _merge_one(
         report.unknown_samples.append(checksum)
         return
 
+    here = _row_of(target, sample.id, target_set_id)
+
     if state == t.SKIPPED:
-        if _state_of(target, sample.id, target_set_id) is None:
+        if here is None:
             report.skipped += 1
             if not dry_run:
-                target.skip(sample.id, target_set_id)
+                target.skip(sample.id, target_set_id, source=answered_by)
         return
 
     value = _VALUE.validate_python(raw)
-    theirs = target.annotation_of(sample.id, target_set_id)
-    if theirs is None:
+    rank = t.AUTHORITY.get(answered_by, 0)
+    standing = None if here is None else t.AUTHORITY.get(here.source, 0)
+
+    if here is None or here.state == t.SKIPPED:
         # Absent, or skipped there and answered here. An answer beats a
-        # skip: someone got further with the sample than someone else did.
+        # skip: someone got further with the sample than someone else did —
+        # unless the skip was a person's and the answer an import's, where
+        # nobody got further and a guess arrived.
+        if standing is not None and standing > rank:
+            report.outranked += 1
+            return
         report.copied += 1
         if not dry_run:
             schema.validate_value(value)
-            target.annotate(sample.id, target_set_id, value)
-    elif theirs == value:
-        report.agreed += 1
+            target.annotate(sample.id, target_set_id, value, source=answered_by)
+        return
+
+    theirs = _VALUE.validate_python(here.value)
+    if theirs == value:
+        if rank > standing:
+            # The same answer from a source that outranks the one here: a
+            # person on the other side confirmed what was only an import.
+            report.confirmed += 1
+            if not dry_run:
+                target.annotate(sample.id, target_set_id, value, source=answered_by)
+        else:
+            report.agreed += 1
+    elif rank > standing:
+        # A person's answer against an import's is not two people
+        # disagreeing, so there is nothing to put in front of anyone.
+        report.superseded += 1
+        if not dry_run:
+            schema.validate_value(value)
+            target.annotate(sample.id, target_set_id, value, source=answered_by)
+    elif rank < standing:
+        report.outranked += 1
     else:
         report.conflicted += 1
         if not dry_run:
@@ -166,18 +232,29 @@ def _label_sets(catalog: Catalog) -> list[tuple[str, int]]:
         ]
 
 
-def _answers(catalog: Catalog, label_set_id: int) -> list[tuple[str, str, dict | None]]:
+def _answers(
+    catalog: Catalog, label_set_id: int
+) -> list[tuple[str, str, dict | None, str]]:
     """Every answer in a label set, keyed by content rather than by id.
 
     Ids agree across a copy, but content addressing is what actually
     survives — and a merge that matched on ids would have no way to notice
     if it were wrong.
+
+    Each carries where it came from. Left behind, every answer arriving
+    would be written as a person's, and an import made on a laptop would
+    come home looking reviewed.
     """
     with catalog.engine.connect() as conn:
         return [
-            (row.checksum, row.state, row.value)
+            (row.checksum, row.state, row.value, row.source)
             for row in conn.execute(
-                select(t.sample.c.checksum, t.annotation.c.state, t.annotation.c.value)
+                select(
+                    t.sample.c.checksum,
+                    t.annotation.c.state,
+                    t.annotation.c.value,
+                    t.annotation.c.source,
+                )
                 .select_from(
                     t.annotation.join(t.sample, t.annotation.c.sample_id == t.sample.c.id)
                 )
@@ -187,16 +264,17 @@ def _answers(catalog: Catalog, label_set_id: int) -> list[tuple[str, str, dict |
         ]
 
 
-def _state_of(catalog: Catalog, sample_id: int, label_set_id: int) -> str | None:
+def _row_of(catalog: Catalog, sample_id: int, label_set_id: int):
+    """What the target holds for one sample: state, value and source, or None."""
     with catalog.engine.connect() as conn:
         return conn.execute(
-            select(t.annotation.c.state).where(
+            select(t.annotation.c.state, t.annotation.c.value, t.annotation.c.source).where(
                 and_(
                     t.annotation.c.sample_id == sample_id,
                     t.annotation.c.label_set_id == label_set_id,
                 )
             )
-        ).scalar()
+        ).first()
 
 
 __all__ = ["MergeError", "MergeReport", "merge_annotations"]

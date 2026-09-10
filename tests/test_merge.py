@@ -255,3 +255,121 @@ def test_merging_twice_changes_nothing_the_second_time(pair):
     # quiet rather than turn every copied answer into a conflict with itself
     assert (second.copied, second.conflicted) == (0, 0)
     assert second.agreed == 1
+
+
+# ----------------------------------------------------------------------
+# Where an answer came from travels with it
+# ----------------------------------------------------------------------
+
+
+def test_an_import_comes_home_as_an_import(pair):
+    """Written as a person's, it would read as reviewed when nobody looked."""
+    main, laptop, ids = pair
+    laptop_set, _ = laptop.label_set("demo")
+    laptop.annotate(ids[0], laptop_set, Choices(values=["cat"]), source="import")
+
+    merge_annotations(laptop, main)
+
+    main_set, _ = main.label_set("demo")
+    # Discarding by source is the public way to ask what a row's source is
+    assert main.discard(main_set, "import") == 1
+
+
+def test_a_person_there_supersedes_an_import_here(pair):
+    main, laptop, ids = pair
+    main_set, _ = main.label_set("demo")
+    laptop_set, _ = laptop.label_set("demo")
+    main.annotate(ids[0], main_set, Choices(values=["cat"]), source="import")
+    laptop.annotate(ids[0], laptop_set, Choices(values=["dog"]))
+
+    report = merge_annotations(laptop, main)
+
+    # Not a conflict: a person against a guess is not two people disagreeing
+    assert (report.superseded, report.conflicted) == (1, 0)
+    assert main.annotation_of(ids[0], main_set) == Choices(values=["dog"])
+    assert main.conflicts(main_set, "*") == []
+    assert main.discard(main_set, "import") == 0
+
+
+def test_an_import_there_leaves_a_person_here_alone(pair):
+    main, laptop, ids = pair
+    main_set, _ = main.label_set("demo")
+    laptop_set, _ = laptop.label_set("demo")
+    main.annotate(ids[0], main_set, Choices(values=["cat"]))
+    laptop.annotate(ids[0], laptop_set, Choices(values=["dog"]), source="import")
+
+    report = merge_annotations(laptop, main)
+
+    assert (report.outranked, report.conflicted) == (1, 0)
+    assert main.annotation_of(ids[0], main_set) == Choices(values=["cat"])
+    assert main.conflicts(main_set, "*") == []
+
+
+def test_a_person_confirming_an_import_raises_its_standing(pair):
+    main, laptop, ids = pair
+    main_set, _ = main.label_set("demo")
+    laptop_set, _ = laptop.label_set("demo")
+    main.annotate(ids[0], main_set, Choices(values=["cat"]), source="import")
+    laptop.annotate(ids[0], laptop_set, Choices(values=["cat"]))
+
+    report = merge_annotations(laptop, main)
+
+    assert (report.confirmed, report.agreed) == (1, 0)
+    # Now a person's answer, so no longer something an import discard removes
+    assert main.discard(main_set, "import") == 0
+    assert main.annotation_of(ids[0], main_set) == Choices(values=["cat"])
+
+
+def test_an_import_does_not_beat_a_persons_skip(pair):
+    """An answer beats a skip because someone got further — an import got nowhere."""
+    main, laptop, ids = pair
+    main_set, _ = main.label_set("demo")
+    laptop_set, _ = laptop.label_set("demo")
+    main.skip(ids[0], main_set)
+    laptop.annotate(ids[0], laptop_set, Choices(values=["cat"]), source="import")
+
+    report = merge_annotations(laptop, main)
+
+    assert (report.outranked, report.copied) == (1, 0)
+    assert [s.id for s in main.skipped(main_set, "*")] == [ids[0]]
+
+
+def test_two_imports_that_disagree_are_a_conflict(pair):
+    """Equal standing, so neither may decide: the same rule as two people."""
+    main, laptop, ids = pair
+    main_set, _ = main.label_set("demo")
+    laptop_set, _ = laptop.label_set("demo")
+    main.annotate(ids[0], main_set, Choices(values=["cat"]), source="import")
+    laptop.annotate(ids[0], laptop_set, Choices(values=["dog"]), source="import")
+
+    report = merge_annotations(laptop, main)
+
+    assert report.conflicted == 1
+    assert main.annotation_of(ids[0], main_set) == Choices(values=["cat"])
+
+
+def test_a_dry_run_counts_what_the_ranking_would_do_and_writes_nothing(pair):
+    main, laptop, ids = pair
+    main_set, _ = main.label_set("demo")
+    laptop_set, _ = laptop.label_set("demo")
+    main.annotate(ids[0], main_set, Choices(values=["cat"]), source="import")
+    laptop.annotate(ids[0], laptop_set, Choices(values=["dog"]))
+
+    report = merge_annotations(laptop, main, dry_run=True)
+
+    assert report.superseded == 1
+    assert main.annotation_of(ids[0], main_set) == Choices(values=["cat"])
+    assert main.discard(main_set, "import") == 1
+
+
+def test_a_superseded_import_is_quiet_the_second_time(pair):
+    main, laptop, ids = pair
+    main_set, _ = main.label_set("demo")
+    laptop_set, _ = laptop.label_set("demo")
+    main.annotate(ids[0], main_set, Choices(values=["cat"]), source="import")
+    laptop.annotate(ids[0], laptop_set, Choices(values=["dog"]))
+
+    merge_annotations(laptop, main)
+    second = merge_annotations(laptop, main)
+
+    assert (second.superseded, second.agreed, second.written) == (0, 1, 0)
