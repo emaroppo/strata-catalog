@@ -39,17 +39,11 @@ _SECRETS = {
     "blob_secret": "STRATA_BLOB_SECRET",
 }
 
-#: Keys once accepted under ``[catalog]``, and what to do instead. They are
-#: refused like any unknown key; these only make the refusal useful.
+#: Keys refused under ``[catalog]``, and what to do instead. They would be
+#: refused anyway as unknown; these only make the refusal useful.
 _MOVED = {
-    "blobs_prefix": (
-        "It names the blob mount inside the Label Studio container, so it "
-        "moved to [label_studio]."
-    ),
-    **{
-        key: f"It is a credential, and comes from ${variable} only."
-        for key, variable in _SECRETS.items()
-    },
+    key: f"It is a credential, and comes from ${variable} only."
+    for key, variable in _SECRETS.items()
 }
 
 
@@ -82,6 +76,11 @@ class CatalogConfig:
     #: The catalog's blob server, e.g. ``http://minipc:8081``. Empty means
     #: Label Studio reads files off a mount instead.
     serve_url: str = ""
+    #: What this catalog's blob directory is called inside the Label Studio
+    #: container, for tasks that read files off that mount — and to read
+    #: back tasks made that way, whose URLs keep the name after a blob
+    #: server takes over. Per catalog: two catalogs are two mounts.
+    blobs_prefix: str = "blobs"
 
     # Credentials, filled from the environment. Out of repr, so a config
     # printed while troubleshooting does not print them.

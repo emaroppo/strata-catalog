@@ -186,9 +186,18 @@ def test_a_credential_in_the_file_is_refused(tmp_path):
         load_catalogs(_write(tmp_path, '[catalog]\ns3_secret_key = "oops"\n'))
 
 
-def test_blobs_prefix_says_where_it_went(tmp_path):
-    with pytest.raises(CatalogConfigError, match=r"\[label_studio\]"):
-        load_catalogs(_write(tmp_path, '[catalog]\nblobs_prefix = "blobs"\n'))
+def test_each_catalog_names_its_own_blob_mount(tmp_path):
+    """Two catalogs read off mounts are two mounts in Label Studio, with two names."""
+    catalogs = load_catalogs(_write(tmp_path, """
+[catalog.main]
+root = "main"
+
+[catalog.emails]
+root = "emails"
+blobs_prefix = "blobs-emails"
+"""))
+    assert catalogs.named("main").blobs_prefix == "blobs"
+    assert catalogs.named("emails").blobs_prefix == "blobs-emails"
 
 
 # ----------------------------------------------------------------------
