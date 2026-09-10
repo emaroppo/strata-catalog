@@ -30,6 +30,7 @@ interface.
 from .blobs import BlobBackend, LocalBackend, Location, blob_path, checksum_of
 from .catalog import EVERYTHING, AnnotateReport, Catalog, CatalogError, SampleRow
 from .copy import CopyError, CopyReport, copy_index
+from .materialised import Materialised, ensure_materialised
 from .merge import MergeError, MergeReport, merge_annotations
 from .prepared import PREPARED_NAME, PreparedIndex, PreparedSample
 from .preparers import Prepared, Preparer, PreparerError
@@ -47,6 +48,7 @@ __all__ = [
     "CopyReport",
     "LocalBackend",
     "Location",
+    "Materialised",
     "Prepared",
     "PreparedIndex",
     "PreparedSample",
@@ -60,6 +62,7 @@ __all__ = [
     "blob_path",
     "checksum_of",
     "copy_index",
+    "ensure_materialised",
     "merge_annotations",
     "MergeError",
     "MergeReport",
