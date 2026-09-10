@@ -28,7 +28,7 @@ interface.
 """
 
 from .blobs import BlobBackend, LocalBackend, Location, blob_path, checksum_of
-from .catalog import EVERYTHING, Catalog, CatalogError, SampleRow
+from .catalog import EVERYTHING, AnnotateReport, Catalog, CatalogError, SampleRow
 from .copy import CopyError, CopyReport, copy_index
 from .merge import MergeError, MergeReport, merge_annotations
 from .prepared import PREPARED_NAME, PreparedIndex, PreparedSample
@@ -39,6 +39,7 @@ from .split import SplitError, assign
 __all__ = [
     "PREPARED_NAME",
     "EVERYTHING",
+    "AnnotateReport",
     "BlobBackend",
     "Catalog",
     "CatalogError",

@@ -662,3 +662,56 @@ def test_discard_clears_the_class_index_too(catalog, files):
 def test_discard_names_a_source_that_is_not_there(catalog):
     label_set_id = catalog.create_label_set("x", ClassificationSchema(classes=["cat"]))
     assert catalog.discard(label_set_id, "nobody") == 0
+
+
+# ----------------------------------------------------------------------
+# Which source may replace which
+# ----------------------------------------------------------------------
+
+
+def test_an_import_does_not_replace_a_persons_answer(catalog, files, label_set):
+    """Re-running an import after a review pass must not undo the review."""
+    ids = catalog.ingest(files(2), media="image")
+    catalog.annotate(ids[0], label_set, Choices(values=["dog"]))
+
+    written = catalog.annotate_many(
+        label_set, [(i, Choices(values=["cat"])) for i in ids], source="import"
+    )
+
+    assert (written.annotated, written.kept) == (1, 1)
+    assert catalog.annotation_of(ids[0], label_set) == Choices(values=["dog"])
+    assert catalog.annotation_of(ids[1], label_set) == Choices(values=["cat"])
+    # The class index follows what was kept, not what was offered
+    assert [s.id for s in catalog.with_class(label_set, "cat", EVERYTHING)] == [ids[1]]
+
+
+def test_an_import_does_not_replace_a_persons_skip(catalog, files, label_set):
+    """A skip is an answer too: someone looked and found nothing applicable."""
+    [sample] = catalog.ingest(files(1), media="image")
+    catalog.skip(sample, label_set)
+
+    assert not catalog.annotate(sample, label_set, Choices(values=["cat"]), source="import")
+    assert [s.id for s in catalog.skipped(label_set, EVERYTHING)] == [sample]
+
+
+def test_a_person_replaces_an_import(catalog, files, label_set):
+    [sample] = catalog.ingest(files(1), media="image")
+    catalog.annotate(sample, label_set, Choices(values=["cat"]), source="import")
+
+    assert catalog.annotate(sample, label_set, Choices(values=["dog"]))
+    assert catalog.annotation_of(sample, label_set) == Choices(values=["dog"])
+
+
+def test_an_import_replaces_an_import(catalog, files, label_set):
+    """The same batch landed twice, or a corrected one: equal standing, so the later wins."""
+    [sample] = catalog.ingest(files(1), media="image")
+    catalog.annotate(sample, label_set, Choices(values=["cat"]), source="import")
+
+    assert catalog.annotate(sample, label_set, Choices(values=["dog"]), source="import")
+    assert catalog.annotation_of(sample, label_set) == Choices(values=["dog"])
+
+
+def test_a_source_nobody_ranked_is_refused(catalog, files, label_set):
+    [sample] = catalog.ingest(files(1), media="image")
+    with pytest.raises(CatalogError, match="Unknown annotation source"):
+        catalog.annotate(sample, label_set, Choices(values=["cat"]), source="Human")

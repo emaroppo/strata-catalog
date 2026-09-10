@@ -15,6 +15,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from typing import NamedTuple
 
 from pydantic import TypeAdapter
 from sqlalchemy import (
@@ -180,6 +181,18 @@ class SampleRow:
     #: Excluding it is also the truer reading: two rows for the same sample
     #: are the same sample, whatever is recorded about where it came from.
     metadata: dict | None = field(default=None, compare=False)
+
+
+class AnnotateReport(NamedTuple):
+    """What a bulk write did."""
+
+    #: Answers recorded.
+    annotated: int
+    #: Skips recorded.
+    skipped: int
+    #: Left alone, because a source outranking the one writing had already
+    #: answered — an import landing on a sample a person dealt with.
+    kept: int
 
 
 class Catalog:
@@ -438,13 +451,17 @@ class Catalog:
         sample_id: int,
         label_set_id: int,
         value: AnyValue,
-        source: str = "human",
-    ) -> None:
-        """Record what a sample is, and index the classes it asserts."""
+        source: str = t.HUMAN,
+    ) -> bool:
+        """Record what a sample is, and index the classes it asserts.
+
+        Returns whether it was recorded: not when a source outranking this
+        one already answered (see :data:`tables.AUTHORITY`).
+        """
         _, schema = self._label_set_by_id(label_set_id)
         schema.validate_value(value)
         with self.engine.begin() as conn:
-            self._upsert_annotation(
+            written = self._upsert_annotation(
                 conn,
                 sample_id,
                 label_set_id,
@@ -452,66 +469,79 @@ class Catalog:
                 value=json.loads(value.model_dump_json()),
                 source=source,
             )
+            if not written:
+                return False
             # Someone has looked again, which is what a conflict was asking
             # for. Whichever way they went, it is settled.
             self._clear_conflict(conn, sample_id, label_set_id)
             self._reindex_classes(
                 conn, sample_id, label_set_id, schema.classes_asserted(value)
             )
+        return True
 
-    def skip(self, sample_id: int, label_set_id: int) -> None:
+    def skip(self, sample_id: int, label_set_id: int, source: str = t.HUMAN) -> bool:
         """Mark a sample reviewed with nothing applicable.
 
         Excluded from datasets and from the review queue alike, so it does
-        not come back round.
+        not come back round. Returns whether it was recorded, on the same
+        terms as :meth:`annotate`.
         """
         with self.engine.begin() as conn:
-            self._upsert_annotation(
-                conn, sample_id, label_set_id, state=t.SKIPPED, value=None, source="human"
-            )
+            if not self._upsert_annotation(
+                conn, sample_id, label_set_id, state=t.SKIPPED, value=None, source=source
+            ):
+                return False
             self._reindex_classes(conn, sample_id, label_set_id, set())
+        return True
 
     def annotate_many(
         self,
         label_set_id: int,
         items: Iterable[tuple[int, AnyValue | None]],
-        source: str = "human",
+        source: str = t.HUMAN,
         on_item: Callable[[int], None] | None = None,
-    ) -> tuple[int, int]:
-        """Record many annotations in one transaction; return (annotated, skipped).
+    ) -> "AnnotateReport":
+        """Record many annotations in one transaction.
 
         A ``None`` value means skipped, mirroring the column: there is no
         answer, as against an empty value, which is the answer "nothing
         here". Bulk because a commit per annotation costs an fsync, and the
         schema is fetched once rather than per row.
+
+        An item landing on an answer from a source that outranks this one is
+        left alone and counted in ``kept`` (see :data:`tables.AUTHORITY`).
         """
         _, schema = self._label_set_by_id(label_set_id)
-        annotated = skipped = 0
+        annotated = skipped = kept = 0
         with self.engine.begin() as conn:
             for sample_id, value in items:
                 if value is None:
-                    self._upsert_annotation(
+                    if self._upsert_annotation(
                         conn, sample_id, label_set_id, state=t.SKIPPED, value=None, source=source
-                    )
-                    self._reindex_classes(conn, sample_id, label_set_id, set())
-                    skipped += 1
+                    ):
+                        self._reindex_classes(conn, sample_id, label_set_id, set())
+                        skipped += 1
+                    else:
+                        kept += 1
                 else:
                     schema.validate_value(value)
-                    self._upsert_annotation(
+                    if self._upsert_annotation(
                         conn,
                         sample_id,
                         label_set_id,
                         state=t.ANNOTATED,
                         value=json.loads(value.model_dump_json()),
                         source=source,
-                    )
-                    self._reindex_classes(
-                        conn, sample_id, label_set_id, schema.classes_asserted(value)
-                    )
-                    annotated += 1
+                    ):
+                        self._reindex_classes(
+                            conn, sample_id, label_set_id, schema.classes_asserted(value)
+                        )
+                        annotated += 1
+                    else:
+                        kept += 1
                 if on_item is not None:
                     on_item(sample_id)
-        return annotated, skipped
+        return AnnotateReport(annotated, skipped, kept)
 
     def unskip(self, label_set_id: int, sample_ids: Iterable[int]) -> int:
         """Return skipped samples to the queue; returns how many moved.
@@ -574,13 +604,27 @@ class Catalog:
                 self._reindex_classes(conn, row.sample_id, label_set_id, set())
         return len(rows)
 
-    def _upsert_annotation(self, conn, sample_id, label_set_id, *, state, value, source):
+    def _upsert_annotation(self, conn, sample_id, label_set_id, *, state, value, source) -> bool:
+        """Write one annotation, unless what is there outranks ``source``.
+
+        Returns whether it wrote. See :data:`tables.AUTHORITY`: an import
+        landing on a sample a person already answered leaves the answer
+        alone rather than replacing it with the guess it may have corrected.
+        """
+        if source not in t.AUTHORITY:
+            raise CatalogError(
+                f"Unknown annotation source {source!r}; expected one of "
+                f"{', '.join(t.SOURCES)}. Which answer may replace which depends "
+                f"on it, so an unrecognised one cannot be ranked."
+            )
         where = and_(
             t.annotation.c.sample_id == sample_id,
             t.annotation.c.label_set_id == label_set_id,
         )
-        exists = conn.execute(select(t.annotation.c.sample_id).where(where)).first()
-        if exists:
+        existing = conn.execute(select(t.annotation.c.source).where(where)).first()
+        if existing is not None:
+            if t.AUTHORITY.get(existing.source, 0) > t.AUTHORITY[source]:
+                return False
             conn.execute(
                 update(t.annotation).where(where).values(state=state, value=value, source=source)
             )
@@ -594,6 +638,7 @@ class Catalog:
                     source=source,
                 )
             )
+        return True
 
     def _reindex_classes(self, conn, sample_id, label_set_id, classes: set[str]) -> None:
         conn.execute(

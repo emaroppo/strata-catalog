@@ -46,7 +46,14 @@ STATES = (ANNOTATED, SKIPPED)
 #: Where an annotation came from. Predictions are not annotations and do not
 #: belong in this table, but an imported guess that a human then accepted is
 #: worth telling apart from one typed from scratch.
-SOURCES = ("human", "model", "import")
+HUMAN, IMPORT, MODEL = "human", "import", "model"
+SOURCES = (HUMAN, MODEL, IMPORT)
+
+#: Which source may replace which. A write never replaces an answer from a
+#: source that outranks it: labels that arrived with a corpus are trusted
+#: over a model's guess and never over a person's answer. So re-running an
+#: import after a review pass cannot quietly undo the review.
+AUTHORITY = {MODEL: 0, IMPORT: 1, HUMAN: 2}
 
 
 #: Who this catalog is. One row, written once.
