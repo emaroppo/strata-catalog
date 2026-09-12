@@ -140,9 +140,11 @@ def _within(collections) -> object | None:
     match would swallow. That distinction lives here rather than at each
     call site.
     """
-    if collections == EVERYTHING:
-        return None
     names = [collections] if isinstance(collections, str) else list(collections)
+    if names == [EVERYTHING]:
+        # The marker alone, bare or as a list's only member: a request that
+        # arrived through a config carries a list, and means the same thing
+        return None
     if not names:
         raise CatalogError(
             "No collections given. Name what to draw from, or pass EVERYTHING "
