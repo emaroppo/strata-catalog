@@ -23,7 +23,7 @@ def test_a_metadata_feature_reaches_the_manifest(catalog, files, label_set, tmp_
         paths, media="image", metadata_for=lambda p: {"species": f"sp-{p.stem[-1]}"}
     )
     for i in ids:
-        catalog.annotate(i, label_set, Choices(values=["cat"]))
+        catalog.annotations.annotate(i, label_set, Choices(values=["cat"]))
     dataset = catalog.create_dataset("d", label_set, collections=EVERYTHING)
 
     out = catalog.materialise(
@@ -46,8 +46,8 @@ def test_a_label_set_feature_reaches_the_manifest(catalog, files, label_set, tmp
     )
     ids = catalog.ingest(files(4), media="image")
     for n, i in enumerate(ids):
-        catalog.annotate(i, label_set, Choices(values=["cat"]))
-        catalog.annotate(i, other, Choices(values=["tomato" if n % 2 else "potato"]))
+        catalog.annotations.annotate(i, label_set, Choices(values=["cat"]))
+        catalog.annotations.annotate(i, other, Choices(values=["tomato" if n % 2 else "potato"]))
     dataset = catalog.create_dataset("d", label_set, collections=EVERYTHING)
 
     out = catalog.materialise(
@@ -72,8 +72,8 @@ def test_a_sample_the_feature_does_not_cover_is_left_absent(
     other = catalog.label_sets.create("species", ClassificationSchema(classes=["tomato"]))
     ids = catalog.ingest(files(3), media="image")
     for i in ids:
-        catalog.annotate(i, label_set, Choices(values=["cat"]))
-    catalog.annotate(ids[0], other, Choices(values=["tomato"]))
+        catalog.annotations.annotate(i, label_set, Choices(values=["cat"]))
+    catalog.annotations.annotate(ids[0], other, Choices(values=["tomato"]))
     dataset = catalog.create_dataset("d", label_set, collections=EVERYTHING)
 
     out = catalog.materialise(
@@ -95,7 +95,7 @@ def test_a_feature_naming_a_missing_label_set_is_refused(
 ):
     ids = catalog.ingest(files(2), media="image")
     for i in ids:
-        catalog.annotate(i, label_set, Choices(values=["cat"]))
+        catalog.annotations.annotate(i, label_set, Choices(values=["cat"]))
     dataset = catalog.create_dataset("d", label_set, collections=EVERYTHING)
 
     with pytest.raises(FeatureError, match="does not have"):

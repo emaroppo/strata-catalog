@@ -156,7 +156,7 @@ def _merge_one(
         if here is None:
             report.skipped += 1
             if not dry_run:
-                target.skip(sample.id, target_set_id, source=answered_by)
+                target.annotations.skip(sample.id, target_set_id, source=answered_by)
         return
 
     value = VALUE.validate_python(raw)
@@ -174,7 +174,7 @@ def _merge_one(
         report.copied += 1
         if not dry_run:
             schema.validate_value(value)
-            target.annotate(sample.id, target_set_id, value, source=answered_by)
+            target.annotations.annotate(sample.id, target_set_id, value, source=answered_by)
         return
 
     theirs = VALUE.validate_python(here.value)
@@ -184,7 +184,7 @@ def _merge_one(
             # person on the other side confirmed what was only an import.
             report.confirmed += 1
             if not dry_run:
-                target.annotate(sample.id, target_set_id, value, source=answered_by)
+                target.annotations.annotate(sample.id, target_set_id, value, source=answered_by)
         else:
             report.agreed += 1
     elif rank > standing:
@@ -193,13 +193,13 @@ def _merge_one(
         report.superseded += 1
         if not dry_run:
             schema.validate_value(value)
-            target.annotate(sample.id, target_set_id, value, source=answered_by)
+            target.annotations.annotate(sample.id, target_set_id, value, source=answered_by)
     elif rank < standing:
         report.outranked += 1
     else:
         report.conflicted += 1
         if not dry_run:
-            target.record_conflict(
+            target.annotations.record_conflict(
                 sample.id, target_set_id, kept=theirs, other=value, other_origin=origin
             )
 

@@ -28,7 +28,7 @@ def stocked(tmp_path, config):
         paths.append(path)
     ids = catalog.ingest(paths, media="image", collections=["photos"])
     label_set = catalog.label_sets.create("presence", ClassificationSchema(classes=["cat", "dog"]))
-    catalog.annotate_many(label_set, [(i, Choices(values=["cat"])) for i in ids[:4]])
+    catalog.annotations.annotate_many(label_set, [(i, Choices(values=["cat"])) for i in ids[:4]])
     return catalog
 
 
@@ -116,7 +116,7 @@ def test_merge_reports_before_it_writes(stocked, config, tmp_path, capsys):
     copy_index(stocked, other)
     label_set = other.label_sets.get("presence")[0]
     pool = other.unlabelled(label_set, EVERYTHING)
-    other.annotate(pool[0].id, label_set, Choices(values=["dog"]))
+    other.annotations.annotate(pool[0].id, label_set, Choices(values=["dog"]))
 
     code, out = run(capsys, "--config", str(config), "merge", "--from", other_url)
     assert code == 0 and "Nothing was written" in out

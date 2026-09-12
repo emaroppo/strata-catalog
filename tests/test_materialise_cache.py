@@ -42,7 +42,7 @@ def stocked(catalog, files):
         paths, media="image", metadata_for=lambda p: {"source_path": str(p)}
     )
     label_set_id = catalog.label_sets.create("x", ClassificationSchema(classes=["a"]))
-    catalog.annotate_many(label_set_id, [(i, Choices(values=["a"])) for i in ids])
+    catalog.annotations.annotate_many(label_set_id, [(i, Choices(values=["a"])) for i in ids])
     dataset_id = catalog.create_dataset("d", label_set_id, collections=EVERYTHING)
     return catalog, dataset_id
 

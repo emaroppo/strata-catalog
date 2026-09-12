@@ -139,8 +139,8 @@ def test_annotations_and_the_class_index(catalog, files):
     label_set_id = catalog.label_sets.create(
         "presence", ClassificationSchema(classes=["cat", "dog"])
     )
-    catalog.annotate(ids[0], label_set_id, Choices(values=["cat"]))
-    catalog.annotate(ids[1], label_set_id, Choices(values=["cat", "dog"]))
+    catalog.annotations.annotate(ids[0], label_set_id, Choices(values=["cat"]))
+    catalog.annotations.annotate(ids[1], label_set_id, Choices(values=["cat", "dog"]))
 
     assert {s.id for s in catalog.with_class(label_set_id, "cat", EVERYTHING)} == {ids[0], ids[1]}
     assert len(catalog.labelled(label_set_id, EVERYTHING)) == 2
@@ -150,8 +150,8 @@ def test_annotations_and_the_class_index(catalog, files):
 def test_the_three_states_partition(catalog, files):
     ids = catalog.ingest(files(5), media="image")
     label_set_id = catalog.label_sets.create("x", ClassificationSchema(classes=["a"]))
-    catalog.annotate(ids[0], label_set_id, Choices(values=["a"]))
-    catalog.skip(ids[1], label_set_id)
+    catalog.annotations.annotate(ids[0], label_set_id, Choices(values=["a"]))
+    catalog.annotations.skip(ids[1], label_set_id)
     assert (
         len(catalog.labelled(label_set_id, EVERYTHING)),
         len(catalog.skipped(label_set_id, EVERYTHING)),
@@ -166,7 +166,7 @@ def test_a_grouped_split_holds(catalog, files, tmp_path):
             files(5, prefix=f"v{group}_"), media="image",
             subtype="frames", group_id=f"vid{group}",
         )
-        catalog.annotate_many(label_set_id, [(i, Choices(values=["a"])) for i in ids])
+        catalog.annotations.annotate_many(label_set_id, [(i, Choices(values=["a"])) for i in ids])
 
     dataset_id = catalog.create_dataset("d", label_set_id, collections=EVERYTHING)
     from strata.labels import Manifest
@@ -183,7 +183,7 @@ def test_a_grouped_split_holds(catalog, files, tmp_path):
 def test_a_version_is_reused_when_the_selection_has_not_changed(catalog, files):
     ids = catalog.ingest(files(6), media="image")
     label_set_id = catalog.label_sets.create("x", ClassificationSchema(classes=["a"]))
-    catalog.annotate_many(label_set_id, [(i, Choices(values=["a"])) for i in ids])
+    catalog.annotations.annotate_many(label_set_id, [(i, Choices(values=["a"])) for i in ids])
     first = catalog.create_dataset("d", label_set_id, collections=EVERYTHING)
     assert first == catalog.create_dataset("d", label_set_id, collections=EVERYTHING)
 
@@ -207,10 +207,10 @@ def populated(tmp_path, files):
             files(4, prefix=f"{group}_"), media="image", subtype="frames",
             group_id=group, metadata_for=lambda p: {"source_path": p.name},
         )
-    source.annotate_many(
+    source.annotations.annotate_many(
         label_set_id, [(i, Choices(values=["cat"])) for i in ids[:5]]
     )
-    source.skip(ids[5], label_set_id)
+    source.annotations.skip(ids[5], label_set_id)
     source.create_dataset("d", label_set_id, collections=EVERYTHING)
     return source, label_set_id, ids
 
@@ -241,7 +241,7 @@ def test_annotations_and_their_index_arrive(populated, catalog):
 
     source, label_set_id, ids = populated
     copy_index(source, catalog)
-    assert catalog.annotation_of(ids[0], label_set_id) == Choices(values=["cat"])
+    assert catalog.annotations.annotation_of(ids[0], label_set_id) == Choices(values=["cat"])
     assert len(catalog.with_class(label_set_id, "cat", EVERYTHING)) == 5
     assert len(catalog.skipped(label_set_id, EVERYTHING)) == 1
 

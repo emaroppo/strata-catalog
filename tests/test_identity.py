@@ -75,15 +75,15 @@ def test_a_conflict_keeps_both_answers(tmp_path):
     from strata.labels import Choices
 
     catalog, sample_id, label_set_id = _stocked(tmp_path)
-    catalog.annotate(sample_id, label_set_id, Choices(values=["cat"]))
-    catalog.record_conflict(
+    catalog.annotations.annotate(sample_id, label_set_id, Choices(values=["cat"]))
+    catalog.annotations.record_conflict(
         sample_id, label_set_id,
         kept=Choices(values=["cat"]),
         other=Choices(values=["dog"]),
         other_origin="20260101T000000-abcdef12",
     )
 
-    [conflict] = catalog.conflicts(label_set_id, "*")
+    [conflict] = catalog.annotations.conflicts(label_set_id, "*")
     # What disagreed is the useful thing to show a person, and it is lost
     # the moment either answer is discarded
     assert conflict["kept"] == Choices(values=["cat"])
@@ -95,14 +95,14 @@ def test_the_catalog_keeps_the_answer_it_had(tmp_path):
     from strata.labels import Choices
 
     catalog, sample_id, label_set_id = _stocked(tmp_path)
-    catalog.annotate(sample_id, label_set_id, Choices(values=["cat"]))
-    catalog.record_conflict(
+    catalog.annotations.annotate(sample_id, label_set_id, Choices(values=["cat"]))
+    catalog.annotations.record_conflict(
         sample_id, label_set_id, Choices(values=["cat"]), Choices(values=["dog"])
     )
 
     # Disputed is not unlabelled. Everything that reads an annotation wants
     # the answer, not a set of candidates.
-    assert catalog.annotation_of(sample_id, label_set_id) == Choices(values=["cat"])
+    assert catalog.annotations.annotation_of(sample_id, label_set_id) == Choices(values=["cat"])
     assert catalog.labelled(label_set_id, "*")
 
 
@@ -110,30 +110,30 @@ def test_answering_again_settles_it(tmp_path):
     from strata.labels import Choices
 
     catalog, sample_id, label_set_id = _stocked(tmp_path)
-    catalog.annotate(sample_id, label_set_id, Choices(values=["cat"]))
-    catalog.record_conflict(
+    catalog.annotations.annotate(sample_id, label_set_id, Choices(values=["cat"]))
+    catalog.annotations.record_conflict(
         sample_id, label_set_id, Choices(values=["cat"]), Choices(values=["dog"])
     )
 
-    catalog.annotate(sample_id, label_set_id, Choices(values=["dog"]))
+    catalog.annotations.annotate(sample_id, label_set_id, Choices(values=["dog"]))
 
     # Someone looked again, which is what the conflict was asking for —
     # whichever way they went
-    assert catalog.conflicts(label_set_id, "*") == []
+    assert catalog.annotations.conflicts(label_set_id, "*") == []
 
 
 def test_a_third_disagreement_replaces_the_second(tmp_path):
     from strata.labels import Choices
 
     catalog, sample_id, label_set_id = _stocked(tmp_path)
-    catalog.annotate(sample_id, label_set_id, Choices(values=["cat"]))
-    catalog.record_conflict(
+    catalog.annotations.annotate(sample_id, label_set_id, Choices(values=["cat"]))
+    catalog.annotations.record_conflict(
         sample_id, label_set_id, Choices(values=["cat"]), Choices(values=["dog"])
     )
-    catalog.record_conflict(
+    catalog.annotations.record_conflict(
         sample_id, label_set_id, Choices(values=["cat"]), Choices(values=[])
     )
 
     # The pair being shown matters more than the history of who disagreed
-    [conflict] = catalog.conflicts(label_set_id, "*")
+    [conflict] = catalog.annotations.conflicts(label_set_id, "*")
     assert conflict["other"] == Choices(values=[])

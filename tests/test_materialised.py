@@ -17,7 +17,7 @@ from strata.labels import MANIFEST_NAME, Choices
 @pytest.fixture
 def version(catalog, files, label_set) -> int:
     ids = catalog.ingest(files(4), media="image")
-    catalog.annotate_many(label_set, [(i, Choices(values=["cat"])) for i in ids])
+    catalog.annotations.annotate_many(label_set, [(i, Choices(values=["cat"])) for i in ids])
     return catalog.create_dataset("d", label_set, collections=EVERYTHING)
 
 

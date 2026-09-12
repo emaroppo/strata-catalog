@@ -272,7 +272,7 @@ def test_materialising_from_a_bucket_pulls_shards_not_members(store, tmp_path):
             paths, media="image", subtype="frames", group_id=group,
             metadata_for=lambda p: {"source_path": p.name},
         )
-        catalog.annotate_many(label_set_id, [(i, Choices(values=["a"])) for i in ids])
+        catalog.annotations.annotate_many(label_set_id, [(i, Choices(values=["a"])) for i in ids])
 
     store.ranges.clear()
     directory = catalog.materialise(
@@ -301,7 +301,7 @@ def test_a_materialised_file_is_not_re_fetched(store, tmp_path):
             [a_file(tmp_path, f"{group}{i}.jpg", f"{group}{i}".encode() * 40) for i in range(3)],
             media="image", group_id=group,
         )
-        catalog.annotate_many(label_set_id, [(i, Choices(values=["a"])) for i in ids])
+        catalog.annotations.annotate_many(label_set_id, [(i, Choices(values=["a"])) for i in ids])
 
     dataset_id = catalog.create_dataset("d", label_set_id, collections=EVERYTHING)
     out = tmp_path / "out"

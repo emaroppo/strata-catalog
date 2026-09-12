@@ -24,7 +24,7 @@ def stocked(catalog, files):
     ids = []
     for group in range(5):
         ids += catalog.ingest(files(4, prefix=f"vid{group}"), media="image", group_id=f"vid{group}")
-    catalog.annotate_many(label_set, [(i, Choices(values=["cat"])) for i in ids])
+    catalog.annotations.annotate_many(label_set, [(i, Choices(values=["cat"])) for i in ids])
     return catalog
 
 

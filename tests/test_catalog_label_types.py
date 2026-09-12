@@ -40,10 +40,10 @@ def test_a_label_set_keeps_its_schema(catalog, example):
 def test_an_annotation_survives_the_catalog(catalog, tmp_path, example):
     [sample_id, _] = _samples(catalog, tmp_path, example.media)
     label_set_id = catalog.label_sets.create("x", example.schema)
-    catalog.annotate(sample_id, label_set_id, example.value)
+    catalog.annotations.annotate(sample_id, label_set_id, example.value)
     # The whole point of the catalog: what a person said outlives the tool
     # that collected it, unchanged
-    assert catalog.annotation_of(sample_id, label_set_id) == example.value
+    assert catalog.annotations.annotation_of(sample_id, label_set_id) == example.value
 
 
 @each_type
@@ -51,11 +51,11 @@ def test_an_empty_answer_is_not_the_same_as_no_answer(catalog, tmp_path, example
     [sample_id, _] = _samples(catalog, tmp_path, example.media)
     label_set_id = catalog.label_sets.create("x", example.schema)
     empty = type(example.value)()
-    catalog.annotate(sample_id, label_set_id, empty)
+    catalog.annotations.annotate(sample_id, label_set_id, empty)
     # A reviewer who looked and found none of the classes present has
     # answered. Only the annotation existing distinguishes that from a
     # sample nobody has seen.
-    assert catalog.annotation_of(sample_id, label_set_id) == empty
+    assert catalog.annotations.annotation_of(sample_id, label_set_id) == empty
     assert catalog.labelled(label_set_id, "*")
 
 
@@ -63,7 +63,7 @@ def test_an_empty_answer_is_not_the_same_as_no_answer(catalog, tmp_path, example
 def test_a_materialised_dataset_carries_the_type(catalog, tmp_path, example):
     label_set_id = catalog.label_sets.create("x", example.schema)
     for sample_id in _samples(catalog, tmp_path, example.media):
-        catalog.annotate(sample_id, label_set_id, example.value)
+        catalog.annotations.annotate(sample_id, label_set_id, example.value)
     dataset_id = catalog.create_dataset("d", label_set_id, collections="*")
 
     directory = catalog.materialise(dataset_id, tmp_path / "out")
@@ -85,7 +85,7 @@ def test_an_undeclared_overlap_is_refused_where_it_would_be_stored(catalog, tmp_
     label_set_id = catalog.label_sets.create("x", SpanSchema(classes=["name", "place"]))
 
     with pytest.raises(SchemaError, match="overlap"):
-        catalog.annotate(
+        catalog.annotations.annotate(
             sample_id,
             label_set_id,
             Spans(

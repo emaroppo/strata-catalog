@@ -66,48 +66,48 @@ def test_an_unknown_label_set_is_an_error(catalog):
 
 def test_annotating_stores_the_value(catalog, files, label_set):
     [sample_id] = catalog.ingest(files(1), media="image")
-    catalog.annotate(sample_id, label_set, Choices(values=["cat"]))
-    assert catalog.annotation_of(sample_id, label_set) == Choices(values=["cat"])
+    catalog.annotations.annotate(sample_id, label_set, Choices(values=["cat"]))
+    assert catalog.annotations.annotation_of(sample_id, label_set) == Choices(values=["cat"])
 
 
 def test_an_annotation_is_validated_against_its_schema(catalog, files, label_set):
     [sample_id] = catalog.ingest(files(1), media="image")
     with pytest.raises(SchemaError, match="fish"):
-        catalog.annotate(sample_id, label_set, Choices(values=["fish"]))
+        catalog.annotations.annotate(sample_id, label_set, Choices(values=["fish"]))
 
 
 def test_annotating_twice_replaces_rather_than_duplicates(catalog, files, label_set):
     [sample_id] = catalog.ingest(files(1), media="image")
-    catalog.annotate(sample_id, label_set, Choices(values=["cat"]))
-    catalog.annotate(sample_id, label_set, Choices(values=["dog"]))
-    assert catalog.annotation_of(sample_id, label_set) == Choices(values=["dog"])
+    catalog.annotations.annotate(sample_id, label_set, Choices(values=["cat"]))
+    catalog.annotations.annotate(sample_id, label_set, Choices(values=["dog"]))
+    assert catalog.annotations.annotation_of(sample_id, label_set) == Choices(values=["dog"])
 
 
 def test_an_empty_annotation_is_a_real_answer(catalog, files, label_set):
     # A human looked and found nothing. Distinct from nobody having looked,
     # which is the absence of a row
     [sample_id] = catalog.ingest(files(1), media="image")
-    catalog.annotate(sample_id, label_set, Choices())
-    assert catalog.annotation_of(sample_id, label_set) == Choices()
+    catalog.annotations.annotate(sample_id, label_set, Choices())
+    assert catalog.annotations.annotation_of(sample_id, label_set) == Choices()
     assert catalog.unlabelled(label_set, EVERYTHING) == []
 
 
 def test_a_skipped_sample_has_no_value(catalog, files, label_set):
     [sample_id] = catalog.ingest(files(1), media="image")
-    catalog.skip(sample_id, label_set)
-    assert catalog.annotation_of(sample_id, label_set) is None
+    catalog.annotations.skip(sample_id, label_set)
+    assert catalog.annotations.annotation_of(sample_id, label_set) is None
 
 
 def test_a_skipped_sample_leaves_the_review_queue(catalog, files, label_set):
     ids = catalog.ingest(files(3), media="image")
-    catalog.skip(ids[0], label_set)
+    catalog.annotations.skip(ids[0], label_set)
     assert {s.id for s in catalog.unlabelled(label_set, EVERYTHING)} == set(ids[1:])
 
 
 def test_a_skipped_sample_is_not_training_data(catalog, files, label_set):
     ids = catalog.ingest(files(3), media="image")
-    catalog.skip(ids[0], label_set)
-    catalog.annotate(ids[1], label_set, Choices(values=["cat"]))
+    catalog.annotations.skip(ids[0], label_set)
+    catalog.annotations.annotate(ids[1], label_set, Choices(values=["cat"]))
     assert {s.id for s in catalog.labelled(label_set, EVERYTHING)} == {ids[1]}
 
 
@@ -121,7 +121,7 @@ def test_unlabelled_is_per_label_set(catalog, files):
     ids = catalog.ingest(files(3), media="image")
     presence = catalog.label_sets.create("presence", ClassificationSchema(classes=["cat"]))
     other = catalog.label_sets.create("other", ClassificationSchema(classes=["cat"]))
-    catalog.annotate(ids[0], presence, Choices(values=["cat"]))
+    catalog.annotations.annotate(ids[0], presence, Choices(values=["cat"]))
 
     assert len(catalog.unlabelled(presence, EVERYTHING)) == 2
     assert len(catalog.unlabelled(other, EVERYTHING)) == 3
@@ -134,17 +134,17 @@ def test_unlabelled_honours_a_limit(catalog, files, label_set):
 
 def test_with_class_finds_every_sample_asserting_it(catalog, files, label_set):
     ids = catalog.ingest(files(4), media="image")
-    catalog.annotate(ids[0], label_set, Choices(values=["cat"]))
-    catalog.annotate(ids[1], label_set, Choices(values=["cat", "dog"]))
-    catalog.annotate(ids[2], label_set, Choices(values=["dog"]))
+    catalog.annotations.annotate(ids[0], label_set, Choices(values=["cat"]))
+    catalog.annotations.annotate(ids[1], label_set, Choices(values=["cat", "dog"]))
+    catalog.annotations.annotate(ids[2], label_set, Choices(values=["dog"]))
 
     assert {s.id for s in catalog.with_class(label_set, "cat", EVERYTHING)} == {ids[0], ids[1]}
 
 
 def test_the_class_index_follows_a_correction(catalog, files, label_set):
     [sample_id] = catalog.ingest(files(1), media="image")
-    catalog.annotate(sample_id, label_set, Choices(values=["cat"]))
-    catalog.annotate(sample_id, label_set, Choices(values=["dog"]))
+    catalog.annotations.annotate(sample_id, label_set, Choices(values=["cat"]))
+    catalog.annotations.annotate(sample_id, label_set, Choices(values=["dog"]))
 
     assert catalog.with_class(label_set, "cat", EVERYTHING) == []
     assert len(catalog.with_class(label_set, "dog", EVERYTHING)) == 1
@@ -152,8 +152,8 @@ def test_the_class_index_follows_a_correction(catalog, files, label_set):
 
 def test_skipping_clears_the_class_index(catalog, files, label_set):
     [sample_id] = catalog.ingest(files(1), media="image")
-    catalog.annotate(sample_id, label_set, Choices(values=["cat"]))
-    catalog.skip(sample_id, label_set)
+    catalog.annotations.annotate(sample_id, label_set, Choices(values=["cat"]))
+    catalog.annotations.skip(sample_id, label_set)
     assert catalog.with_class(label_set, "cat", EVERYTHING) == []
 
 
@@ -164,7 +164,7 @@ def test_skipping_clears_the_class_index(catalog, files, label_set):
 
 def annotate_all(catalog, ids, label_set):
     for i in ids:
-        catalog.annotate(i, label_set, Choices(values=["cat"]))
+        catalog.annotations.annotate(i, label_set, Choices(values=["cat"]))
 
 
 def test_a_dataset_defaults_to_everything_labelled(catalog, files, label_set):
@@ -211,7 +211,7 @@ def test_a_corrected_answer_makes_a_new_version(catalog, files, label_set):
     annotate_all(catalog, ids, label_set)
     first = catalog.create_dataset("d", label_set, collections=EVERYTHING)
 
-    catalog.annotate_many(label_set, [(ids[0], Choices(values=["dog"]))])
+    catalog.annotations.annotate_many(label_set, [(ids[0], Choices(values=["dog"]))])
 
     assert catalog.create_dataset("d", label_set, collections=EVERYTHING) != first
 
@@ -225,10 +225,14 @@ def test_a_guess_becoming_an_answer_makes_a_new_version(catalog, files, label_se
     conflates them cannot say which it trained on.
     """
     ids = catalog.ingest(files(4), media="image")
-    catalog.annotate_many(label_set, [(i, Choices(values=["cat"])) for i in ids], source="import")
+    catalog.annotations.annotate_many(
+        label_set, [(i, Choices(values=["cat"])) for i in ids], source="import"
+    )
     first = catalog.create_dataset("d", label_set, collections=EVERYTHING)
 
-    catalog.annotate_many(label_set, [(ids[0], Choices(values=["cat"]))], source="human")
+    catalog.annotations.annotate_many(
+        label_set, [(ids[0], Choices(values=["cat"]))], source="human"
+    )
 
     assert catalog.create_dataset("d", label_set, collections=EVERYTHING) != first
 
@@ -346,10 +350,10 @@ def test_annotations_travel_with_the_files(materialised):
 def test_a_manifest_says_whether_each_label_was_reviewed(catalog, files, label_set, tmp_path):
     """Imports are trained on either way; the record is what makes a poor result readable."""
     ids = catalog.ingest(files(4), media="image")
-    catalog.annotate_many(
+    catalog.annotations.annotate_many(
         label_set, [(i, Choices(values=["cat"])) for i in ids[:2]], source="import"
     )
-    catalog.annotate_many(label_set, [(i, Choices(values=["cat"])) for i in ids[2:]])
+    catalog.annotations.annotate_many(label_set, [(i, Choices(values=["cat"])) for i in ids[2:]])
     dataset_id = catalog.create_dataset("d", label_set, collections=EVERYTHING)
 
     directory = catalog.materialise(dataset_id, tmp_path / "out")
@@ -402,7 +406,7 @@ def test_an_unsplittable_ratio_is_recorded_rather_than_hidden(catalog, files, tm
             files(5, prefix=video), media="image", subtype="frames", group_id=video
         )
         for i in ids:
-            catalog.annotate(i, label_set, Choices(values=["cat"]))
+            catalog.annotations.annotate(i, label_set, Choices(values=["cat"]))
 
     dataset_id = catalog.create_dataset("frames", label_set, collections=EVERYTHING, val_ratio=0.2)
     manifest = _manifest(catalog.materialise(dataset_id, tmp_path / "frames"))
@@ -447,9 +451,9 @@ def test_re_ingesting_does_not_duplicate(catalog, files):
 
 def test_re_ingesting_leaves_annotations_alone(catalog, files, label_set):
     [sample_id] = catalog.ingest(files(1), media="image")
-    catalog.annotate(sample_id, label_set, Choices(values=["cat"]))
+    catalog.annotations.annotate(sample_id, label_set, Choices(values=["cat"]))
     catalog.ingest(files(1), media="image", group_id="vid1")
-    assert catalog.annotation_of(sample_id, label_set) == Choices(values=["cat"])
+    assert catalog.annotations.annotation_of(sample_id, label_set) == Choices(values=["cat"])
 
 
 def test_regrouping_cannot_disturb_a_dataset_already_built(catalog, files, label_set, tmp_path):
@@ -489,9 +493,9 @@ def test_a_materialised_file_still_has_the_right_bytes(materialised):
 
 def test_skipped_samples_can_be_listed(catalog, files, label_set):
     ids = catalog.ingest(files(4), media="image")
-    catalog.skip(ids[0], label_set)
-    catalog.skip(ids[1], label_set)
-    catalog.annotate(ids[2], label_set, Choices(values=["cat"]))
+    catalog.annotations.skip(ids[0], label_set)
+    catalog.annotations.skip(ids[1], label_set)
+    catalog.annotations.annotate(ids[2], label_set, Choices(values=["cat"]))
     # They belong to neither the labelled set nor the queue, so anything
     # reconstructing the whole picture needs them named
     assert {s.id for s in catalog.skipped(label_set, EVERYTHING)} == {ids[0], ids[1]}
@@ -499,8 +503,8 @@ def test_skipped_samples_can_be_listed(catalog, files, label_set):
 
 def test_the_three_states_partition_the_catalog(catalog, files, label_set):
     ids = catalog.ingest(files(6), media="image")
-    catalog.skip(ids[0], label_set)
-    catalog.annotate(ids[1], label_set, Choices(values=["cat"]))
+    catalog.annotations.skip(ids[0], label_set)
+    catalog.annotations.annotate(ids[1], label_set, Choices(values=["cat"]))
     counts = (
         len(catalog.labelled(label_set, EVERYTHING)),
         len(catalog.skipped(label_set, EVERYTHING)),
@@ -659,31 +663,31 @@ def test_discard_removes_one_source_and_returns_samples_to_the_queue(catalog, fi
     """An unreviewed import is not an answer, and should not read as one."""
     label_set_id = catalog.label_sets.create("x", ClassificationSchema(classes=["cat"]))
     ids = catalog.ingest(files(2), media="image")
-    catalog.annotate(ids[0], label_set_id, Choices(values=["cat"]), source="import")
-    catalog.annotate(ids[1], label_set_id, Choices(values=["cat"]), source="human")
+    catalog.annotations.annotate(ids[0], label_set_id, Choices(values=["cat"]), source="import")
+    catalog.annotations.annotate(ids[1], label_set_id, Choices(values=["cat"]), source="human")
 
-    assert catalog.discard(label_set_id, "import") == 1
+    assert catalog.annotations.discard(label_set_id, "import") == 1
 
     # The imported one is unlabelled again, the answered one untouched
     assert [row.id for row in catalog.unlabelled(label_set_id, EVERYTHING)] == [ids[0]]
     assert [row.id for row in catalog.labelled(label_set_id, EVERYTHING)] == [ids[1]]
-    assert catalog.annotation_of(ids[0], label_set_id) is None
+    assert catalog.annotations.annotation_of(ids[0], label_set_id) is None
 
 
 def test_discard_clears_the_class_index_too(catalog, files):
     """Otherwise a discarded row still answers 'which samples have a cat'."""
     label_set_id = catalog.label_sets.create("x", ClassificationSchema(classes=["cat"]))
     ids = catalog.ingest(files(1), media="image")
-    catalog.annotate(ids[0], label_set_id, Choices(values=["cat"]), source="import")
+    catalog.annotations.annotate(ids[0], label_set_id, Choices(values=["cat"]), source="import")
     assert catalog.with_class(label_set_id, "cat", EVERYTHING)
 
-    catalog.discard(label_set_id, "import")
+    catalog.annotations.discard(label_set_id, "import")
     assert catalog.with_class(label_set_id, "cat", EVERYTHING) == []
 
 
 def test_discard_names_a_source_that_is_not_there(catalog):
     label_set_id = catalog.label_sets.create("x", ClassificationSchema(classes=["cat"]))
-    assert catalog.discard(label_set_id, "nobody") == 0
+    assert catalog.annotations.discard(label_set_id, "nobody") == 0
 
 
 # ----------------------------------------------------------------------
@@ -694,15 +698,15 @@ def test_discard_names_a_source_that_is_not_there(catalog):
 def test_an_import_does_not_replace_a_persons_answer(catalog, files, label_set):
     """Re-running an import after a review pass must not undo the review."""
     ids = catalog.ingest(files(2), media="image")
-    catalog.annotate(ids[0], label_set, Choices(values=["dog"]))
+    catalog.annotations.annotate(ids[0], label_set, Choices(values=["dog"]))
 
-    written = catalog.annotate_many(
+    written = catalog.annotations.annotate_many(
         label_set, [(i, Choices(values=["cat"])) for i in ids], source="import"
     )
 
     assert (written.annotated, written.kept) == (1, 1)
-    assert catalog.annotation_of(ids[0], label_set) == Choices(values=["dog"])
-    assert catalog.annotation_of(ids[1], label_set) == Choices(values=["cat"])
+    assert catalog.annotations.annotation_of(ids[0], label_set) == Choices(values=["dog"])
+    assert catalog.annotations.annotation_of(ids[1], label_set) == Choices(values=["cat"])
     # The class index follows what was kept, not what was offered
     assert [s.id for s in catalog.with_class(label_set, "cat", EVERYTHING)] == [ids[1]]
 
@@ -710,33 +714,35 @@ def test_an_import_does_not_replace_a_persons_answer(catalog, files, label_set):
 def test_an_import_does_not_replace_a_persons_skip(catalog, files, label_set):
     """A skip is an answer too: someone looked and found nothing applicable."""
     [sample] = catalog.ingest(files(1), media="image")
-    catalog.skip(sample, label_set)
+    catalog.annotations.skip(sample, label_set)
 
-    assert not catalog.annotate(sample, label_set, Choices(values=["cat"]), source="import")
+    assert not catalog.annotations.annotate(
+        sample, label_set, Choices(values=["cat"]), source="import"
+    )
     assert [s.id for s in catalog.skipped(label_set, EVERYTHING)] == [sample]
 
 
 def test_a_person_replaces_an_import(catalog, files, label_set):
     [sample] = catalog.ingest(files(1), media="image")
-    catalog.annotate(sample, label_set, Choices(values=["cat"]), source="import")
+    catalog.annotations.annotate(sample, label_set, Choices(values=["cat"]), source="import")
 
-    assert catalog.annotate(sample, label_set, Choices(values=["dog"]))
-    assert catalog.annotation_of(sample, label_set) == Choices(values=["dog"])
+    assert catalog.annotations.annotate(sample, label_set, Choices(values=["dog"]))
+    assert catalog.annotations.annotation_of(sample, label_set) == Choices(values=["dog"])
 
 
 def test_an_import_replaces_an_import(catalog, files, label_set):
     """The same batch landed twice, or a corrected one: equal standing, so the later wins."""
     [sample] = catalog.ingest(files(1), media="image")
-    catalog.annotate(sample, label_set, Choices(values=["cat"]), source="import")
+    catalog.annotations.annotate(sample, label_set, Choices(values=["cat"]), source="import")
 
-    assert catalog.annotate(sample, label_set, Choices(values=["dog"]), source="import")
-    assert catalog.annotation_of(sample, label_set) == Choices(values=["dog"])
+    assert catalog.annotations.annotate(sample, label_set, Choices(values=["dog"]), source="import")
+    assert catalog.annotations.annotation_of(sample, label_set) == Choices(values=["dog"])
 
 
 def test_a_source_nobody_ranked_is_refused(catalog, files, label_set):
     [sample] = catalog.ingest(files(1), media="image")
     with pytest.raises(CatalogError, match="Unknown annotation source"):
-        catalog.annotate(sample, label_set, Choices(values=["cat"]), source="Human")
+        catalog.annotations.annotate(sample, label_set, Choices(values=["cat"]), source="Human")
 
 
 # ----------------------------------------------------------------------
@@ -753,7 +759,7 @@ def _sides(manifest) -> dict[str, set[int]]:
 
 def test_a_version_holds_out_what_it_was_asked_to(catalog, files, label_set, tmp_path):
     ids = catalog.ingest(files(20), media="image")
-    catalog.annotate_many(label_set, [(i, Choices(values=["cat"])) for i in ids])
+    catalog.annotations.annotate_many(label_set, [(i, Choices(values=["cat"])) for i in ids])
     dataset_id = catalog.create_dataset(
         "d", label_set, collections=EVERYTHING, val_ratio=0.2, holdout_ratio=0.1
     )
@@ -770,14 +776,14 @@ def test_a_holdout_is_inherited_and_only_new_samples_can_join_it(
     catalog, files, label_set, tmp_path
 ):
     first = catalog.ingest(files(20), media="image")
-    catalog.annotate_many(label_set, [(i, Choices(values=["cat"])) for i in first])
+    catalog.annotations.annotate_many(label_set, [(i, Choices(values=["cat"])) for i in first])
     v1 = catalog.create_dataset(
         "d", label_set, collections=EVERYTHING, val_ratio=0.2, holdout_ratio=0.1
     )
     before = _sides(_manifest(catalog.materialise(v1, tmp_path / "v1")))
 
     more = catalog.ingest(files(20, prefix="more"), media="image")
-    catalog.annotate_many(label_set, [(i, Choices(values=["cat"])) for i in more])
+    catalog.annotations.annotate_many(label_set, [(i, Choices(values=["cat"])) for i in more])
     v2 = catalog.create_dataset(
         "d", label_set, collections=EVERYTHING, val_ratio=0.2, holdout_ratio=0.1
     )
@@ -801,7 +807,7 @@ def test_a_version_of_only_inherited_samples_reports_an_empty_holdout(
     before there were any draws its own split and records the draw.
     """
     ids = catalog.ingest(files(10), media="image")
-    catalog.annotate_many(label_set, [(i, Choices(values=["cat"])) for i in ids])
+    catalog.annotations.annotate_many(label_set, [(i, Choices(values=["cat"])) for i in ids])
     catalog.create_dataset("d", label_set, collections=EVERYTHING, val_ratio=0.2)
     v2 = catalog.create_dataset(
         "d", label_set, collections=EVERYTHING, val_ratio=0.2, holdout_ratio=0.2
@@ -816,7 +822,7 @@ def test_asking_for_a_holdout_is_a_new_version_even_over_the_same_members(
     catalog, files, label_set
 ):
     ids = catalog.ingest(files(10), media="image")
-    catalog.annotate_many(label_set, [(i, Choices(values=["cat"])) for i in ids])
+    catalog.annotations.annotate_many(label_set, [(i, Choices(values=["cat"])) for i in ids])
     v1 = catalog.create_dataset("d", label_set, collections=EVERYTHING)
     assert catalog.create_dataset("d", label_set, collections=EVERYTHING) == v1
     assert catalog.create_dataset("d", label_set, collections=EVERYTHING, holdout_ratio=0.2) != v1
