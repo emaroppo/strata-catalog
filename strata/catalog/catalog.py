@@ -937,13 +937,9 @@ class Catalog:
     ) -> int:
         """Freeze a selection into a new version, inheriting the previous split.
 
-        Membership is written down rather than derived, and every sample the
-        previous version already placed keeps its side. Only what is new gets
-        decided, so the split cannot drift as the labelled set grows.
-
-        ``holdout_ratio`` is zero unless asked for: a holdout is a study's
-        instrument, not a round's, and a version frozen without one reads
-        exactly as it did before there could be one.
+        Every sample the previous version placed keeps its side; only what
+        is new is decided. ``holdout_ratio`` is zero unless asked for. See
+        ``docs/adr/0003``.
         """
         if sample_ids is None:
             if collections is None:
@@ -1025,14 +1021,9 @@ class Catalog:
     ) -> str:
         """What this label set currently says about these samples, as a digest.
 
-        Over the answer and not merely its presence: the state, the source
-        and the value itself, because a reviewer changing ``cat`` to ``dog``
-        and a reviewer changing an imported guess into a human answer are
-        both changes a frozen version must not pretend it already holds.
-
-        Ordered by sample id and serialised with sorted keys, so the digest
-        is a function of the answers rather than of the order a query
-        happened to return them in.
+        Over state, source and value, ordered by sample id and serialised
+        with sorted keys, so it is a function of the answers alone. See
+        ``docs/adr/0003``.
         """
         digest = hashlib.sha256()
         for chunk in _chunks(list(sample_ids), 500):
@@ -1073,15 +1064,8 @@ class Catalog:
     ) -> int | None:
         """The latest version of ``name``, if it froze exactly this.
 
-        Exactly this means the same members *and* the same answers about
-        them. Membership alone was the whole test until a correction was
-        shown to leave it unchanged — the round then reused the previous
-        version, skipped materialising because its manifest was already on
-        disk, and trained on the values the correction had replaced.
-
-        And the same sides asked for: a version frozen without a holdout is
-        not the version a study that wants one asked for, however identical
-        its members.
+        Exactly this: the same members, the same answers about them, and
+        the same holdout ratio asked for. See ``docs/adr/0003``.
         """
         latest = conn.execute(
             select(

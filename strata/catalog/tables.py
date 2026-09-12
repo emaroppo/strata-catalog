@@ -173,25 +173,14 @@ dataset = Table(
     # materialising in the first place.
     Column("query", JSON, nullable=True),
     # The answers this version froze, as a digest over its members'
-    # annotations. A version is *samples and what was said about them*, and
-    # membership alone cannot tell the two apart: correcting a label leaves
-    # the sample set identical, so a round that follows a correction was
-    # handed the previous version and trained on the materialised copy of
-    # the values it had just fixed.
-    #
-    # A digest rather than a timestamp watermark, because updated_at is
-    # second-resolution here — one bulk annotate writes thousands of rows
-    # sharing a second, so a correction inside that second moves no
-    # watermark. Null means a version frozen before this column existed:
-    # unknown, and unknown is not a match.
+    # annotations: a version is samples *and* what was said about them.
+    # Null means frozen before this column existed — unknown, and unknown
+    # is not a match. See docs/adr/0003.
     Column("annotation_digest", String(64), nullable=True),
-    # Both, because grouping can make the target unreachable: a corpus of
-    # two videos cannot hold out 20% of itself, and a caller that asked for
-    # 20% and got 50% should be able to find that out afterwards.
+    # Asked for and reached, because grouping can make a target unreachable.
     Column("val_ratio", Float, nullable=False, default=0.2),
     Column("val_ratio_achieved", Float, nullable=False, default=0.0),
-    # The holdout the same way. Zero by default, so a version frozen by a
-    # round that never asked for one reads exactly as it did before.
+    # Zero unless a study asked for one.
     Column("holdout_ratio", Float, nullable=False, default=0.0),
     Column("holdout_ratio_achieved", Float, nullable=False, default=0.0),
     Column("created_at", DateTime, server_default=func.now()),
@@ -199,15 +188,9 @@ dataset = Table(
 )
 
 
-#: Membership is written down rather than recomputed. That is what makes the
-#: split stable: version N+1 inherits every shared sample's side and assigns
-#: only what is new, so a warm-started model is never scored on something an
-#: earlier round trained it on.
-#:
-#: The side is a name, not a flag: ``train``, ``val`` or ``holdout``. A flag
-#: had no room for a third, and a held-out sample read as "not validation"
-#: would be trained on — silently, and on exactly the samples kept back to
-#: be measured on honestly. See :mod:`strata.catalog.split`.
+#: Membership is written down, and version N+1 inherits every side version
+#: N decided. The side is a name — ``train``, ``val`` or ``holdout`` — not a
+#: flag. See :mod:`strata.catalog.split` and docs/adr/0003.
 dataset_member = Table(
     "dataset_member",
     metadata,

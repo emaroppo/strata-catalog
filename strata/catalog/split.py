@@ -1,19 +1,9 @@
 """Deciding which side each sample is on, once.
 
-Membership is written into a dataset version rather than recomputed, and a
-new version inherits every side its predecessor already decided. That is the
-whole point: rounds warm-start from the previous checkpoint, so a sample
-that migrates into validation between rounds is scored by a model that has
-already trained on it, and the number comes out flattering.
-
-Three sides. ``train`` and ``val`` are what a round uses. ``holdout`` never
-reaches a model, in training or in validation: it is what a study that
-selects on validation is measured on afterwards, and it is drawn first, so
-that what validation gets is what holdout left.
-
-Grouping is not a special case. A standalone sample is a group of one, so
-the same code keeps a video's frames together and splits plain images
-individually — which is why one catalog can hold both.
+Three sides: ``train`` and ``val`` are what a round uses, ``holdout`` never
+reaches a model and is drawn first. A new version inherits every side its
+predecessor decided. A standalone sample is a group of one. See
+``docs/adr/0003``.
 """
 
 import random
@@ -48,9 +38,8 @@ def assign(
     is its own group. ``inherited`` carries the previous version's
     decisions, which are never overruled.
 
-    The achieved ratios are returned rather than assumed because grouping
-    can make a target unreachable — see the fallback below — and a caller
-    that asked for 20% deserves to know it got 50%.
+    The achieved ratios are returned because grouping can make a target
+    unreachable (the fallback below); see ``docs/adr/0003``.
     """
     if not members:
         return {}, Achieved(0.0, 0.0)
