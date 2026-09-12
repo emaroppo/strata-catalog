@@ -187,3 +187,67 @@ def test_a_catalog_behind_head_names_the_upgrade(tmp_path):
 
     with pytest.raises(SchemaOutOfDate, match="upgrade head"):
         Catalog.local(root)
+
+
+def test_spans_written_with_one_label_are_rewritten_to_labels(url, monkeypatch):
+    """The single-label form is migrated in place, conflicts included."""
+    import json
+
+    from sqlalchemy import text
+
+    from strata.labels import Spans
+
+    monkeypatch.setenv("STRATA_CATALOG_URL", url)
+    command.upgrade(_config(url), "7d3f0c1a9b2e")
+
+    old = {"kind": "spans", "values": [{"label": "PER", "start": 0, "end": 3, "text": "Ada"}]}
+    blank = {"kind": "spans", "values": [{"label": "", "start": 4, "end": 5, "text": ""}]}
+    choices = {"kind": "choices", "values": ["cat"]}
+    engine = create_engine(url)
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                "INSERT INTO sample (id, checksum, location, offset, length, media, subtype) "
+                "VALUES (1, 'a', 'x', 0, 1, 'text', 'plain')"
+            )
+        )
+        for i in (1, 2, 3):
+            conn.execute(
+                text("INSERT INTO label_set (id, name, schema) VALUES (:i, :n, '{}')"),
+                {"i": i, "n": f"s{i}"},
+            )
+        for i, value in enumerate((old, blank, choices), start=1):
+            conn.execute(
+                text(
+                    "INSERT INTO annotation (sample_id, label_set_id, state, source, value) "
+                    "VALUES (1, :i, 'labelled', 'human', :v)"
+                ),
+                {"i": i, "v": json.dumps(value)},
+            )
+        conn.execute(
+            text(
+                "INSERT INTO annotation_conflict "
+                "(sample_id, label_set_id, kept_value, other_value) VALUES (1, 1, :k, :o)"
+            ),
+            {"k": json.dumps(old), "o": json.dumps(choices)},
+        )
+
+    command.upgrade(_config(url), "head")
+
+    with engine.connect() as conn:
+        rows = dict(conn.execute(text("SELECT label_set_id, value FROM annotation")).all())
+        kept, other = conn.execute(
+            text("SELECT kept_value, other_value FROM annotation_conflict")
+        ).one()
+    assert Spans.model_validate_json(rows[1]).values[0].labels == ["PER"]
+    assert Spans.model_validate_json(rows[2]).values[0].labels == []
+    assert json.loads(rows[3]) == choices
+    assert Spans.model_validate_json(kept).values[0].labels == ["PER"]
+    assert json.loads(other) == choices
+
+    # Walked back, a single label is a label again
+    command.downgrade(_config(url), "7d3f0c1a9b2e")
+    with engine.connect() as conn:
+        rows = dict(conn.execute(text("SELECT label_set_id, value FROM annotation")).all())
+    assert json.loads(rows[1]) == old
+    assert json.loads(rows[2]) == blank
