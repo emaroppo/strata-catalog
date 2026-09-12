@@ -4,8 +4,8 @@ A sample type says what the catalog holds — which files are admitted, what
 canonical form they are in, what is recorded about each one. Almost no
 corpus arrives that way. Mail arrives as ``.eml`` or as a blob of message
 JSON; frames arrive as video. Something has to turn the second into the
-first, and today that is a script beside the repository rather than part of
-it.
+first, and a preparer is that something, shipped as a distribution of its
+own (``strata-prepare-email``, ``strata-prepare-video``).
 
 **Upstream of ingest, and separate from it.** A preparer writes files and an
 index; ``ingest`` catalogues them. Keeping the two apart is what stops a
