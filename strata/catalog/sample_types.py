@@ -1,41 +1,11 @@
 """What a sample is, and what that implies at ingest.
 
-A photograph, a video frame, a satellite scene, a document. This belongs to
-the catalog: it is a fact about the data, not about whatever tool collected
-it, and it decides four things nothing else can.
-
-- **Which files are allowed.** An allow list, checked and reported — not a
-  filter applied quietly. Ingest walks what it is pointed at, because a
-  sensibly arranged folder is the user's job; what it must never do is take
-  in less than it was given without saying so.
-- **What is recorded about each one.** A satellite scene has bounds and a
-  capture time; a frame has an index. The catalog holds arbitrary metadata
-  per sample and has never had a way to fill it.
-- **How samples group.** Frames of one video must not straddle a train/val
-  split. Grouping is per sample in the schema already; this is the rule that
-  assigns it.
-- **What canonical form the bytes are in.** A line ending or a byte order
-  mark is not a difference between two documents, but it is a difference
-  between two checksums — and for anything annotated by character offset it
-  is a difference between two sets of offsets. Semantically null, idempotent
-  and safe at ingest; see :meth:`SampleType.canonicalise` for the line
-  between this and normalisation, which is not safe there at all.
-
-Types are plugins, registered through the ``strata.sample_types`` entry
-point group, and they inherit. ``Satellite(Image)`` overrides how metadata
-is read and keeps everything else.
-
-**Inheritance is safe here, and is not for label sets.** A label set's
-classes map to a checkpoint's output neurons by position, so a parent
-gaining one silently reindexes its children — which is why label sets are
-copied rather than inherited. A type is code. Nothing acts at a distance.
-
-**Substitution has to hold in two places.** Where an image is expected a
-satellite scene should do: in code that is ``issubclass``, and in queries it
-is a subtype *path* matched by prefix, the same rule collections use.
-``satellite`` matches ``satellite/multispectral`` and never
-``satellite_old``. The stored pair is a denormalisation of the class chain,
-so both are checked when a type is defined.
+A type decides four things: which files are admitted, what is recorded
+about each, how samples group, and what canonical form their bytes take.
+Types are plugins under the ``strata.sample_types`` entry point group, and
+they inherit: ``Satellite(Image)`` overrides one method and keeps the
+rest. In queries a subtype is a path matched by prefix, the rule
+collections use. See ``docs/adr/0010``.
 """
 
 from importlib.metadata import entry_points
@@ -130,22 +100,11 @@ class SampleType:
     def canonicalise(self, data: bytes) -> bytes:
         """These bytes in the one form the catalog stores them in.
 
-        Semantically null and idempotent: a line ending, a byte order mark,
-        a unicode composition. What it buys is an honest checksum — two
-        files that read identically should not ingest as two samples — and,
-        for anything annotated by character offset, one answer to what the
-        characters are.
-
-        **The test that separates this from normalisation:** would two
-        independent implementations produce identical bytes? If yes it is
-        canonicalisation and belongs here. If it encodes a preference —
-        column names, key order, whitespace someone prefers — it does not.
-        A checksum would then depend on our own version, and ``merge``
-        matches samples on checksum precisely so that two hosts on
-        different releases still agree about what a sample is.
-
-        The default returns the bytes untouched, and ingest reads no file at
-        all for a type that leaves it that way.
+        Semantically null and idempotent. The test: would two independent
+        implementations produce identical bytes? If it encodes a
+        preference it is normalisation and does not belong here. The
+        default returns the bytes untouched, and ingest reads no file for
+        a type that leaves it that way. See ``docs/adr/0010``.
         """
         return data
 
@@ -177,14 +136,9 @@ class SampleType:
     def group_id_for(self, path: Path, root: Path) -> str | None:
         """Which group this sample belongs to, or None for its own.
 
-        Samples sharing a group are never split across train and validation,
-        because near-duplicates on both sides make a validation score
-        meaningless.
-
-        The default is what a conversion declared. That is the better place
-        for it: a converter turning one video into frames knows they are one
-        video, where a type can only infer it from a directory layout both
-        sides have to agree about.
+        Samples sharing a group are never split across sides. The default
+        is what a conversion declared, which knows better than a directory
+        layout.
         """
         prepared = index_for(root)
         entry = prepared.entry_for(path, root) if prepared is not None else None
@@ -216,12 +170,7 @@ def available() -> dict[str, str]:
 
 
 def resolve(name: str) -> type[SampleType]:
-    """The class a type name refers to.
-
-    Built-in names are reserved. A plugin registering ``image`` would change
-    how everything is ingested and nothing would report it, so the clash is
-    refused rather than resolved by whichever was loaded first.
-    """
+    """The class a type name refers to. Built-in names are reserved."""
     entry = plugins.find(
         entries(), name, what="sample type", error=SampleTypeError, reserved=_builtin_names()
     )

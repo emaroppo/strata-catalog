@@ -1,25 +1,10 @@
 """What a prepared corpus carries beside its files.
 
-A converter turns whatever a corpus arrives as — a mailbox, a video, a blob
-of message JSON — into the shape a sample type stores. The files are the
-point, but a conversion knows things about them that a filename cannot hold:
-which video a frame came from, who sent a message, when it was captured.
-
-That travels in one index at the corpus root rather than a sidecar per file,
-because a corpus is tens of thousands of samples and a second file each is a
-second corpus to move.
-
-A conversion of a corpus that arrived *labelled* — this mailbox, a CoNLL
-file, somebody's exported dataset — knows the candidate annotations too, and
-they travel here rather than in a sidecar of their own. What lands them is a
-separate step, because a guess a regex made is not an answer.
-
-**Read here rather than in each converter.** ``SampleType.metadata_for`` and
-``group_id_for`` consult it by default, so a type gets prepared metadata and
-prepared grouping without knowing a converter exists, and a converter states
-grouping as a fact about the data rather than encoding it in a directory
-layout the type has to agree about. ``Frames`` keeps its directory rule for
-corpora that were never prepared.
+One index at the corpus root: what a conversion knew about each file that
+a filename cannot hold — metadata, grouping, and any candidate annotation
+the corpus arrived with. ``SampleType.metadata_for`` and ``group_id_for``
+read it by default, so a type gets both without knowing a converter
+exists. See ``docs/adr/0010``.
 """
 
 import json

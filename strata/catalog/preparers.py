@@ -1,30 +1,11 @@
 """Getting a corpus into the shape a sample type stores.
 
-A sample type says what the catalog holds — which files are admitted, what
-canonical form they are in, what is recorded about each one. Almost no
-corpus arrives that way. Mail arrives as ``.eml`` or as a blob of message
-JSON; frames arrive as video. Something has to turn the second into the
-first, and a preparer is that something, shipped as a distribution of its
-own (``strata-prepare-email``, ``strata-prepare-video``).
-
-**Upstream of ingest, and separate from it.** A preparer writes files and an
-index; ``ingest`` catalogues them. Keeping the two apart is what stops a
-converter becoming a second implementation of content addressing, grouping
-and collections — the reason the email import was already two phases with
-``ingest`` in the middle.
-
-**A plugin surface, like the other three.** Entry point group, registry, a
-``resolve()`` that refuses ambiguity rather than picking a winner, and a
-conformance suite. Converters carry dependencies — a video decoder, a mail
-parser — and none of them belong in a package whose job is a catalog, so
-they ship as their own distributions and this package never imports one.
-
-**What a preparer promises**, and what :mod:`preparer_conformance` checks:
-its output is admitted by the type it claims to produce, it is already in
-that type's canonical form, and the same input twice produces the same
-bytes. Determinism is the load-bearing one — a corpus that changes when it
-is re-prepared re-checksums, and re-checksumming a corpus that has already
-been annotated orphans the annotations.
+A preparer converts what a corpus arrives as into what a type stores,
+writes the files and an index, and stops; ``ingest`` catalogues. Each
+ships as its own distribution and this package never imports one. What a
+preparer promises, and :mod:`preparer_conformance` checks: its output is
+admitted by the type it claims, already canonical, and the same bytes on a
+second run. See ``docs/adr/0010``.
 """
 
 from dataclasses import dataclass, field
@@ -189,11 +170,8 @@ def resolve(name: str) -> type[Preparer]:
 def for_source(produces: str, path: Path) -> type[Preparer]:
     """The preparer that turns this file into ``produces``.
 
-    Resolved from the pair rather than the extension alone: ``.json`` is a
-    mailbox to one converter and something else entirely to another, and the
-    sample type being aimed at is what separates them. Ambiguity is refused
-    with both names, because picking one silently would decide what a corpus
-    is made of.
+    Resolved from the pair, since an extension alone is ambiguous across
+    types; ambiguity is refused with both names rather than picked.
     """
     candidates = []
     for name in sorted(available()):

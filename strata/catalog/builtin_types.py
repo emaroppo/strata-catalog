@@ -23,13 +23,7 @@ class Image(SampleType):
 
 
 class Frames(Image):
-    """Video frames, one directory per video.
-
-    The grouping is the whole point. Consecutive frames are near-duplicates,
-    so a split that puts some of a video in train and the rest in validation
-    scores a model on what it has already memorised — which reads as a very
-    good model.
-    """
+    """Video frames, one directory per video, grouped so a video never straddles a split."""
 
     segment: ClassVar[str] = "frames"
 
@@ -48,28 +42,17 @@ class Frames(Image):
 class Text(SampleType):
     """A document, read as characters rather than pixels.
 
-    The one media where canonical form is load-bearing rather than tidy. A
-    span annotation is a pair of character offsets, so the reviewer's
-    browser and the model's tokenizer have to be reading the same
-    characters; a document that is UTF-8 with LF endings everywhere is how
-    that is guaranteed rather than hoped for.
+    The one media where canonical form is load-bearing: a span is a pair of
+    character offsets. See ``docs/adr/0010``.
     """
 
     media: ClassVar[str] = "text"
     extensions: ClassVar[frozenset[str]] = frozenset({"txt", "md"})
 
     def canonicalise(self, data: bytes) -> bytes:
-        """UTF-8, no BOM, LF endings, NFC.
+        """UTF-8, no BOM, LF endings, NFC. Encoding is refused, not guessed.
 
-        Four rules, each of which two independent implementations would
-        agree on, and none of which changes what the document says.
-
-        Encoding is refused rather than guessed. A mojibake document is
-        worse than a rejected one: it ingests, it displays as something
-        plausible, and every offset annotated against it is against
-        characters that were never there. Converting an encoding is a
-        conversion, and conversions belong to a preparer, which knows what
-        the corpus actually is.
+        Converting an encoding is a preparer's job. See ``docs/adr/0010``.
         """
         if data.startswith(b"\xef\xbb\xbf"):
             data = data[3:]
