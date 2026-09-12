@@ -1,20 +1,9 @@
 """Serving sample bytes over HTTP.
 
-What lets Label Studio stop reading samples off a local mount, and with it
-the duplicate copy of the corpus that the mount required. A reviewer's
-browser asks this for one blob at a time — an image to display, a document
-to read — and it turns that into one range read against whatever backend
-the catalog has.
-
-Deliberately one endpoint. Anything that answers questions about samples
-belongs in the query layer, and mixing the two here would make the thing
-serving a review queue also the thing a training run depends on.
-
-Blobs are addressed by checksum rather than by sample id. The URL is then
-the same key Label Studio already holds, it survives blobs being repacked
-into shards, and — because content-addressed bytes never change — the
-response is cacheable forever, which is what keeps a review queue feeling
-fast over a LAN.
+One endpoint: a signed URL naming a checksum, answered with one range read
+against whatever backend the catalog has, cacheable forever because the
+bytes never change. Questions about samples belong to the query layer.
+See ``docs/adr/0001`` and ``docs/adr/0013``.
 """
 
 import mimetypes

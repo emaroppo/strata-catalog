@@ -78,15 +78,9 @@ class BlobBackend(Protocol):
 def blob_path(checksum: str, suffix: str = "") -> str:
     """Where a blob sits under a local root, from its checksum alone.
 
-    Module level rather than a method because it is the one part of the
-    local layout that outlives the local backend. Label Studio serves images
-    off this path and has to keep doing so after the bytes are also in a
-    bucket — a sample's location becomes a shard, but its checksum does not
-    move, so a URL built from the checksum survives the repack and a URL
-    built from the location does not.
-
-    Two levels of fan-out: a flat directory of a million entries is slow to
-    stat on most filesystems.
+    Module level because the layout outlives the local backend: anything
+    serving files off a root keeps resolving after a repack. Two levels of
+    fan-out. See ``docs/adr/0001``.
     """
     return f"{checksum[:2]}/{checksum[2:4]}/{checksum}{suffix}"
 

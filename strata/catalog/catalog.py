@@ -795,14 +795,10 @@ class Catalog:
             return self._rows(conn, self._scoped(stmt, collections))
 
     def by_checksum(self, checksum: str) -> SampleRow | None:
-        """The sample with these bytes.
+        """The sample with these bytes, or None.
 
-        How a Label Studio task is recognised on the way back. Keyed on the
-        checksum rather than on where the bytes sit, because a location is a
-        storage detail that moves — repacking files into shards rewrites
-        every one of them — while a task URL created months earlier does
-        not. Content addressing is the only identity here that survives the
-        blobs being moved.
+        The lookup behind every reference that has to survive a move: a
+        task URL, a cache key, a manifest entry. See ``docs/adr/0001``.
         """
         stmt = select(*self._COLUMNS).where(
             and_(self._live(), t.sample.c.checksum == checksum)
