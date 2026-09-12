@@ -1,7 +1,7 @@
 # The blob server, and nothing else.
 #
-# Built from the workspace root so the two packages it needs are in context;
-# labels comes along because catalog depends on it.
+# Built from the workspace root so the packages it needs are in context:
+# labels and common come along because catalog depends on them.
 FROM python:3.13-slim
 
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
@@ -12,12 +12,14 @@ WORKDIR /app
 # package that does not exist on any index and the build fails.
 COPY pyproject.toml /app/pyproject.toml
 COPY packages/labels /app/packages/labels
+COPY packages/common /app/packages/common
 COPY packages/catalog /app/packages/catalog
 
 # Installed rather than mounted: the container should hold a fixed version,
 # not whatever the checkout happens to be at.
 RUN uv pip install --system --no-cache \
       ./packages/labels \
+      "./packages/common[migrations,service]" \
       "./packages/catalog[s3,postgres,serve]"
 
 # Which catalog comes from the config file $STRATA_CONFIG names, and the
