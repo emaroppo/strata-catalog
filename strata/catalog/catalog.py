@@ -753,19 +753,12 @@ class Catalog:
         would say why. Keeping what is already answered while asking for no
         more is what skipping is for.
         """
-        stmt = (
-            select(*self._COLUMNS)
-            .join(t.annotation, t.annotation.c.sample_id == t.sample.c.id)
-            .where(
-                and_(
-                    self._live(),
-                    t.annotation.c.label_set_id == label_set_id,
-                    t.annotation.c.state == t.ANNOTATED,
-                )
-            )
+        return self._joined(
+            t.annotation,
+            t.annotation.c.label_set_id == label_set_id,
+            t.annotation.c.state == t.ANNOTATED,
+            collections=collections,
         )
-        with self.engine.connect() as conn:
-            return self._rows(conn, self._scoped(stmt, collections))
 
     def skipped(self, label_set_id: int, collections) -> list[SampleRow]:
         """Samples reviewed with nothing applicable.
@@ -773,32 +766,28 @@ class Catalog:
         Neither training data nor queue: they belong to neither of the other
         two, so anything reconstructing the whole picture needs them named.
         """
-        stmt = (
-            select(*self._COLUMNS)
-            .join(t.annotation, t.annotation.c.sample_id == t.sample.c.id)
-            .where(
-                and_(
-                    self._live(),
-                    t.annotation.c.label_set_id == label_set_id,
-                    t.annotation.c.state == t.SKIPPED,
-                )
-            )
+        return self._joined(
+            t.annotation,
+            t.annotation.c.label_set_id == label_set_id,
+            t.annotation.c.state == t.SKIPPED,
+            collections=collections,
         )
-        with self.engine.connect() as conn:
-            return self._rows(conn, self._scoped(stmt, collections))
 
     def with_class(self, label_set_id: int, class_name: str, collections) -> list[SampleRow]:
         """Every sample asserting a class — the join the index table exists for."""
+        return self._joined(
+            t.annotation_class,
+            t.annotation_class.c.label_set_id == label_set_id,
+            t.annotation_class.c.class_name == class_name,
+            collections=collections,
+        )
+
+    def _joined(self, table, *predicates, collections) -> list[SampleRow]:
+        """Live samples with a row in ``table`` meeting ``predicates``, in scope."""
         stmt = (
             select(*self._COLUMNS)
-            .join(t.annotation_class, t.annotation_class.c.sample_id == t.sample.c.id)
-            .where(
-                and_(
-                    self._live(),
-                    t.annotation_class.c.label_set_id == label_set_id,
-                    t.annotation_class.c.class_name == class_name,
-                )
-            )
+            .join(table, table.c.sample_id == t.sample.c.id)
+            .where(and_(self._live(), *predicates))
         )
         with self.engine.connect() as conn:
             return self._rows(conn, self._scoped(stmt, collections))
