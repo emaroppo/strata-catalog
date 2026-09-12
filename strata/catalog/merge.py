@@ -1,31 +1,10 @@
 """Folding one catalog's answers back into another.
 
-The case this exists for: a laptop takes a copy of the catalog, goes
-somewhere with no network, and comes back with a few hundred annotations
-that the main index has never seen. :func:`copy_index` made the copy; this
-brings the answers home.
-
-Only annotations move. Samples do not, and that is a deliberate limit
-rather than an oversight — see :class:`MergeError` below.
-
-Three things can be true of a sample the source has answered:
-
-* the target has no answer — the annotation is copied
-* the target has the same answer — nothing happens
-* the target has a different answer — the target keeps its own, and the
-  disagreement is recorded
-
-The third is the reason this is not a one-line UPDATE. Both answers were
-made by a person looking at the sample, and a merge is not in a position to
-decide which of them was right. It keeps one, remembers the other, and puts
-the pair in front of a human.
-
-**Unless one of them was not a person.** Each answer travels with its source,
-and sources are ranked (``tables.AUTHORITY``): a person over an import. A
-person's answer arriving where the target holds an import replaces it, or
-confirms it if they agree; an import arriving where a person answered is
-left out. Neither is a disagreement between two people, so neither is put
-in front of one. Only answers of equal standing that differ are conflicts.
+Only annotations move. An answer the target lacks is copied; the same
+answer is nothing; a different answer of equal standing is a conflict the
+target keeps its own side of and records; an answer that outranks what the
+target holds replaces or confirms it, and one that is outranked is left
+out (``tables.AUTHORITY``). See ``docs/adr/0009``.
 """
 
 from __future__ import annotations

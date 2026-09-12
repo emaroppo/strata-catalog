@@ -501,13 +501,10 @@ class Catalog:
     ) -> "AnnotateReport":
         """Record many annotations in one transaction.
 
-        A ``None`` value means skipped, mirroring the column: there is no
-        answer, as against an empty value, which is the answer "nothing
-        here". Bulk because a commit per annotation costs an fsync, and the
-        schema is fetched once rather than per row.
-
-        An item landing on an answer from a source that outranks this one is
-        left alone and counted in ``kept`` (see :data:`tables.AUTHORITY`).
+        A ``None`` value means skipped: no answer, as against an empty
+        value, which is the answer "nothing here". An item landing on an
+        answer from a source that outranks this one is left alone and
+        counted in ``kept`` (:data:`tables.AUTHORITY`).
         """
         _, schema = self._label_set_by_id(label_set_id)
         annotated = skipped = kept = 0
@@ -544,10 +541,8 @@ class Catalog:
     def unskip(self, label_set_id: int, sample_ids: Iterable[int]) -> int:
         """Return skipped samples to the queue; returns how many moved.
 
-        The row is deleted rather than flagged, because the queue is defined
-        by the absence of one. Anything annotated is left alone: a skip is
-        the only state this undoes, and quietly discarding an answer would
-        be a far worse thing to do by accident.
+        Deletes the row, since unlabelled is the absence of one; anything
+        annotated is left alone. See ``docs/adr/0009``.
         """
         moved = 0
         with self.engine.begin() as conn:
@@ -565,20 +560,9 @@ class Catalog:
     def discard(self, label_set_id: int, source: str) -> int:
         """Delete annotations from one source; returns how many went.
 
-        For rows that were never really answers. A batch imported from
-        somewhere else is a set of candidates: useful to review against,
-        and not something to train on until somebody has confirmed it.
-        Left in place it is indistinguishable from an answer, and a
-        document annotated only in part is worse than one not annotated at
-        all — every class nobody marked reads as a deliberate negative.
-
-        The row is deleted rather than flagged, for the reason ``unskip``
-        deletes: unlabelled is the absence of a row, and that is exactly
-        the state an unreviewed import should be returned to.
-
-        Scoped by source, and the source has to be named, so an answer a
-        person actually gave is never removed by a call that meant
-        something else.
+        For candidates that were never answers, such as an unreviewed
+        import. The source has to be named, so a person's answer is never
+        removed by a call that meant something else. See ``docs/adr/0009``.
         """
         with self.engine.begin() as conn:
             rows = conn.execute(

@@ -49,9 +49,7 @@ HUMAN, IMPORT, MODEL = "human", "import", "model"
 SOURCES = (HUMAN, MODEL, IMPORT)
 
 #: Which source may replace which. A write never replaces an answer from a
-#: source that outranks it: labels that arrived with a corpus are trusted
-#: over a model's guess and never over a person's answer. So re-running an
-#: import after a review pass cannot quietly undo the review.
+#: source that outranks it. See docs/adr/0009.
 AUTHORITY = {MODEL: 0, IMPORT: 1, HUMAN: 2}
 
 
