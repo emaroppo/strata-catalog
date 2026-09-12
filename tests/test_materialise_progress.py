@@ -8,20 +8,13 @@ interface rather than a nicety.
 
 import pytest
 
-from strata.catalog import EVERYTHING, Catalog
+from strata.catalog import EVERYTHING
 from strata.labels import Choices, ClassificationSchema
 
 
 @pytest.fixture
-def stocked(tmp_path):
-    catalog = Catalog.local(tmp_path / "catalog")
-    root = tmp_path / "raw"
-    root.mkdir()
-    paths = []
-    for i in range(5):
-        path = root / f"img{i}.jpg"
-        path.write_bytes(f"image {i}".encode())
-        paths.append(path)
+def stocked(catalog, files):
+    paths = files(5)
     ids = catalog.ingest(paths, media="image")
     label_set_id = catalog.create_label_set("x", ClassificationSchema(classes=["a"]))
     catalog.annotate_many(label_set_id, [(i, Choices(values=["a"])) for i in ids])

@@ -10,7 +10,6 @@ import time
 import pytest
 from fastapi.testclient import TestClient
 
-from strata.catalog import Catalog
 from strata.catalog.server import create_app
 from strata.catalog.signing import (
     DEFAULT_TTL,
@@ -25,15 +24,8 @@ SECRET = "not the real one"
 
 
 @pytest.fixture
-def stocked(tmp_path):
-    catalog = Catalog.local(tmp_path / "catalog")
-    root = tmp_path / "raw"
-    root.mkdir()
-    paths = []
-    for i in range(3):
-        path = root / f"img{i}.jpg"
-        path.write_bytes(f"image {i} bytes".encode())
-        paths.append(path)
+def stocked(catalog, files):
+    paths = files(3)
     catalog.ingest(paths, media="image")
     return catalog
 

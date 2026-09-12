@@ -10,7 +10,7 @@ import hashlib
 
 import pytest
 
-from strata.catalog import Catalog, blob_path
+from strata.catalog import blob_path
 
 
 class Refuses:
@@ -35,15 +35,8 @@ class Refuses:
 
 
 @pytest.fixture
-def stocked(tmp_path):
-    catalog = Catalog.local(tmp_path / "catalog")
-    root = tmp_path / "raw"
-    root.mkdir()
-    paths = []
-    for i in range(4):
-        path = root / f"img{i}.jpg"
-        path.write_bytes(f"image number {i}".encode())
-        paths.append(path)
+def stocked(catalog, files):
+    paths = files(4)
     catalog.ingest(paths, media="image", metadata_for=lambda p: {"source_path": str(p)})
     with catalog.engine.connect() as conn:
         from sqlalchemy import select
