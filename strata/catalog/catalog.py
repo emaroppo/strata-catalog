@@ -834,28 +834,6 @@ class Catalog:
             rows = self._rows(conn, stmt)
         return rows[0] if rows else None
 
-    def by_location(self, container: str, offset: int = 0) -> SampleRow | None:
-        """The sample whose bytes sit at a blob location.
-
-        How a Label Studio task is recognised on the way back: its image URL
-        names a location, and a location names one sample.
-
-        Both halves are needed. A container was one file when blobs were
-        files, so matching on it alone was unambiguous; a tar shard holds
-        hundreds, and matching on it alone returns whichever of them the
-        database reaches first. The offset is what tells them apart.
-        """
-        stmt = select(*self._COLUMNS).where(
-            and_(
-                self._live(),
-                t.sample.c.location == container,
-                t.sample.c.offset == offset,
-            )
-        )
-        with self.engine.connect() as conn:
-            rows = self._rows(conn, stmt)
-        return rows[0] if rows else None
-
     # ------------------------------------------------------------------
     # Disagreement
     # ------------------------------------------------------------------

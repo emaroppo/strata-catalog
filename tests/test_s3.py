@@ -313,29 +313,3 @@ def test_a_materialised_file_is_not_re_fetched(store, tmp_path):
     # Re-materialising a version rewrites the manifest and fetches nothing
     assert store.ranges == []
     assert len(store.objects) == calls
-
-
-def test_two_samples_in_one_shard_are_told_apart(store, tmp_path):
-    """A container was one file when blobs were files.
-
-    A shard holds hundreds, so matching a location by container alone
-    returns whichever the database reaches first — the wrong sample, with no
-    error to say so.
-    """
-    from strata.catalog import Catalog
-
-    backend = S3Backend(store, bucket="test", shard_bytes=1 << 20)
-    catalog = Catalog.connect(f"sqlite:///{tmp_path / 'index.db'}", backend)
-    catalog.ingest(
-        [a_file(tmp_path, f"{i}.jpg", f"body {i}".encode() * 50) for i in range(4)],
-        media="image",
-    )
-    label_set_id = catalog.create_label_set(
-        "x", __import__("strata.labels", fromlist=["C"]).ClassificationSchema()
-    )
-    rows = {r.id: r for r in catalog.unlabelled(label_set_id, EVERYTHING)}
-    assert len({r.location.container for r in rows.values()}) == 1
-
-    for sample_id, row in rows.items():
-        found = catalog.by_location(row.location.container, row.location.offset)
-        assert found.id == sample_id

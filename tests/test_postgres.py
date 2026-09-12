@@ -188,13 +188,6 @@ def test_a_version_is_reused_when_the_selection_has_not_changed(catalog, files):
     assert first == catalog.create_dataset("d", label_set_id, collections=EVERYTHING)
 
 
-def test_by_location_resolves(catalog, files):
-    catalog.ingest(files(3), media="image")
-    label_set_id = catalog.create_label_set("x", ClassificationSchema(classes=["a"]))
-    row = catalog.unlabelled(label_set_id, EVERYTHING)[0]
-    assert catalog.by_location(row.location.container).id == row.id
-
-
 # ----------------------------------------------------------------------
 # Moving an index
 # ----------------------------------------------------------------------
