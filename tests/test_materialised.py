@@ -43,7 +43,7 @@ def _rewrite(directory, change) -> None:
 
 
 def test_a_dataset_id_says_what_it_names(catalog, version):
-    ref = catalog.dataset_named(version)
+    ref = catalog.datasets.named(version)
     assert (ref.name, ref.version) == ("d", 1)
     # What a round sends with the id, so a host can tell its own dataset
     # from a copy's that happens to share the number

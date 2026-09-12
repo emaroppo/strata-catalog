@@ -20,8 +20,9 @@ from strata.common.canonical import short_hash
 from strata.common.stages import Stage
 from strata.labels import MANIFEST_NAME, Manifest
 
-from .catalog import Catalog, _link_or_copy
+from .catalog import Catalog
 from .features import FeatureSpec
+from .files import link_or_copy
 from .materialised import ensure_materialised
 from .rows import CatalogError
 from .split import HOLDOUT, TRAIN, VAL, assign
@@ -102,7 +103,7 @@ def dataset(request: DatasetRequest, context: Context) -> DatasetRecord:
         holdout_ratio=request.holdout_ratio,
         seed=request.seed,
     )
-    ref = catalog.dataset_named(dataset_id)
+    ref = catalog.datasets.named(dataset_id)
     return DatasetRecord(
         dataset_id=dataset_id,
         name=ref.name,
@@ -245,7 +246,7 @@ def split(request: SplitRequest, context: Context) -> SplitRecord:
             target = directory / sample.path
             target.parent.mkdir(parents=True, exist_ok=True)
             if not target.exists():
-                _link_or_copy(source / sample.path, target)
+                link_or_copy(source / sample.path, target)
         (directory / MANIFEST_NAME).write_text(drawn.model_dump_json(indent=2))
     return SplitRecord(directory=directory, drawn=True, seed=request.seed, sides=_sides(drawn))
 

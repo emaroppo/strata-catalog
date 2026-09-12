@@ -375,3 +375,32 @@ class Annotations:
                     ).encode()
                 )
         return digest.hexdigest()
+
+    def asserted(
+        self, conn, label_set_id: int, schema: AnySchema, sample_ids: Sequence[int]
+    ) -> dict[int, list[str]]:
+        """The classes each sample's answer asserts, through the schema's indexing contract.
+
+        Read that way rather than by reaching into a payload this does not
+        understand — the same reason a new task type becomes queryable
+        without the catalog learning about it. Samples with no answer, or
+        an answer asserting nothing, are absent.
+        """
+        found: dict[int, list[str]] = {}
+        for chunk in chunks(list(sample_ids)):
+            rows = conn.execute(
+                select(t.annotation.c.sample_id, t.annotation.c.value).where(
+                    and_(
+                        t.annotation.c.label_set_id == label_set_id,
+                        t.annotation.c.state == t.ANNOTATED,
+                        t.annotation.c.sample_id.in_(chunk),
+                    )
+                )
+            ).all()
+            for sample_id, raw in rows:
+                if raw is None:
+                    continue
+                asserted = sorted(schema.classes_asserted(VALUE.validate_python(raw)))
+                if asserted:
+                    found[sample_id] = asserted
+        return found

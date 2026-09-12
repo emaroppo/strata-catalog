@@ -46,14 +46,14 @@ def ensure_materialised(
 ) -> Materialised:
     """The directory for a dataset version under ``root``, built if need be.
 
-    ``catalog`` is anything with ``id``, ``dataset_named`` and
+    ``catalog`` is anything with ``id``, ``datasets.named`` and
     ``materialise`` — a :class:`~strata.catalog.Catalog`, in practice.
 
     Asked before fetching, not after: materialising into staging only to
     find the version was already there meant pulling a whole dataset out of
     object storage to delete it.
     """
-    ref = catalog.dataset_named(dataset_id)
+    ref = catalog.datasets.named(dataset_id)
     name = ref.name
     directory = Path(root) / name / f"v{ref.version:03d}"
     specs = list(features)

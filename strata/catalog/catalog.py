@@ -6,15 +6,13 @@ directory be swapped for Postgres and a bucket without a consumer noticing.
 """
 
 import hashlib
-import os
-import shutil
 import uuid
 from collections.abc import Callable, Iterable, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from sqlalchemy import and_, insert, inspect, select
+from sqlalchemy import insert, inspect, select
 from sqlalchemy.engine import Engine
 
 from strata.common import database
@@ -30,14 +28,14 @@ from strata.labels import (
 from . import tables as t
 from .annotations import Annotations
 from .blobs import BlobBackend, LocalBackend, Location, blob_path, checksum_of
+from .datasets import Datasets
 from .features import FeatureError, FeatureSpec
+from .files import fetch_into, materialised_name, write_out
 from .label_sets import LabelSets
 from .rows import (
     SCHEMA,
     VALUE,
     CatalogError,
-    DatasetRef,
-    chunks,
 )
 from .samples import Samples
 from .schema_version import MIGRATIONS
@@ -76,38 +74,6 @@ def _canonical_source(
     }
 
 
-def _link_or_copy(source: Path, target: Path) -> None:
-    """Put ``source``'s bytes at ``target``, sharing them if the filesystem can.
-
-    A blob is immutable and addressed by its content, and anything derived
-    from it is the same bytes — so the two can share an inode. Without this
-    every dataset version costs a full copy of itself, and a project of any
-    size runs out of disk.
-    """
-    try:
-        os.link(source, target)
-    except OSError:
-        # A different filesystem, or one that will not link. Correctness
-        # does not depend on the link, only disk usage.
-        shutil.copyfile(source, target)
-
-
-def _materialised_name(row) -> str:
-    """What a sample is called inside a materialised dataset.
-
-    Its checksum, not its container. A container was one file when blobs
-    were files, so naming after it happened to be unique; a tar shard holds
-    hundreds, and naming after it gave every sample in the shard the same
-    filename — one file on disk, every manifest entry pointing at it, and a
-    training run over one image repeated with nothing to say so.
-
-    The extension comes from the recorded source path, because a checksum
-    has none and some readers still look.
-    """
-    suffix = Path((row.metadata or {}).get("source_path") or "").suffix
-    return f"{row.checksum}{suffix.lower()}"
-
-
 class Catalog:
     """Samples, what is known about them, and the datasets built from them."""
 
@@ -117,6 +83,7 @@ class Catalog:
         self.label_sets = LabelSets(engine)
         self.annotations = Annotations(engine)
         self.samples = Samples(engine)
+        self.datasets = Datasets(engine)
 
     @classmethod
     def local(cls, root: Path) -> "Catalog":
@@ -312,7 +279,7 @@ class Catalog:
 
         with self.engine.begin() as conn:
             digest = self.annotations.digest(conn, label_set_id, sample_ids)
-            existing = self._identical_version(
+            existing = self.datasets.identical(
                 conn, name, set(sample_ids), digest, val_ratio, holdout_ratio
             )
             if existing is not None:
@@ -321,109 +288,26 @@ class Catalog:
                 # retried against the same version rather than minting a
                 # second one that says exactly the same thing.
                 return existing
-            version = (
-                conn.execute(
-                    select(t.dataset.c.version)
-                    .where(t.dataset.c.name == name)
-                    .order_by(t.dataset.c.version.desc())
-                    .limit(1)
-                ).scalar_one_or_none()
-                or 0
-            ) + 1
-            inherited = self._previous_split(conn, name)
+            version = self.datasets.next_version(conn, name)
+            inherited = self.datasets.previous_split(conn, name)
             groups = self.samples.groups(conn, sample_ids)
             sides, achieved = assign(
                 groups, inherited, val_ratio=val_ratio, holdout_ratio=holdout_ratio, seed=seed
             )
 
-            dataset_id = conn.execute(
-                insert(t.dataset).values(
-                    name=name,
-                    version=version,
-                    label_set_id=label_set_id,
-                    query=query,
-                    annotation_digest=digest,
-                    val_ratio=val_ratio,
-                    val_ratio_achieved=achieved.val,
-                    holdout_ratio=holdout_ratio,
-                    holdout_ratio_achieved=achieved.holdout,
-                )
-            ).inserted_primary_key[0]
-            # One statement per chunk rather than per sample: freezing a
-            # version of a large corpus was 54,000 round trips, all inside
-            # the same transaction and all doing the same thing.
-            members = [
-                {"dataset_id": dataset_id, "sample_id": sample_id, "side": side}
-                for sample_id, side in sides.items()
-            ]
-            for chunk in chunks(members, 500):
-                conn.execute(insert(t.dataset_member), chunk)
+            dataset_id = self.datasets.freeze(
+                conn,
+                name=name,
+                version=version,
+                label_set_id=label_set_id,
+                query=query,
+                digest=digest,
+                val_ratio=val_ratio,
+                holdout_ratio=holdout_ratio,
+                achieved=achieved,
+                sides=sides,
+            )
         return dataset_id
-
-    def _identical_version(
-        self,
-        conn,
-        name: str,
-        wanted: set[int],
-        digest: str | None = None,
-        val_ratio: float | None = None,
-        holdout_ratio: float | None = None,
-    ) -> int | None:
-        """The latest version of ``name``, if it froze exactly this.
-
-        Exactly this: the same members, the same answers about them, and
-        the same holdout ratio asked for. See ``docs/adr/0003``.
-        """
-        latest = conn.execute(
-            select(
-                t.dataset.c.id,
-                t.dataset.c.annotation_digest,
-                t.dataset.c.val_ratio,
-                t.dataset.c.holdout_ratio,
-            )
-            .where(t.dataset.c.name == name)
-            .order_by(t.dataset.c.version.desc())
-            .limit(1)
-        ).first()
-        if latest is None:
-            return None
-        # Null is unknown rather than equal: a version frozen before this
-        # column existed cannot say what answers it holds, so it cannot
-        # claim to hold these. The cost is one extra version per project on
-        # upgrade, which is visible; the alternative is silent staleness.
-        if digest is not None and latest.annotation_digest != digest:
-            return None
-        if val_ratio is not None and latest.val_ratio != val_ratio:
-            return None
-        if holdout_ratio is not None and latest.holdout_ratio != holdout_ratio:
-            return None
-        members = {
-            row[0]
-            for row in conn.execute(
-                select(t.dataset_member.c.sample_id).where(
-                    t.dataset_member.c.dataset_id == latest.id
-                )
-            )
-        }
-        return latest.id if members == wanted else None
-
-    def _previous_split(self, conn, name: str) -> dict[int, str]:
-        """Each member's side in the latest version of ``name``: what N+1 inherits."""
-        previous = conn.execute(
-            select(t.dataset.c.id)
-            .where(t.dataset.c.name == name)
-            .order_by(t.dataset.c.version.desc())
-            .limit(1)
-        ).scalar_one_or_none()
-        if previous is None:
-            return {}
-        return dict(
-            conn.execute(
-                select(t.dataset_member.c.sample_id, t.dataset_member.c.side).where(
-                    t.dataset_member.c.dataset_id == previous
-                )
-            ).all()
-        )
 
     # ------------------------------------------------------------------
     # Materialise
@@ -460,58 +344,9 @@ class Catalog:
         done, total = len(paths) - len(missing), len(paths)
         if on_progress is not None:
             on_progress(done, total)
-        if not missing:
-            return paths
-
-        for _, target in missing:
-            target.parent.mkdir(parents=True, exist_ok=True)
-
-        wanted = dict(missing)
-        path_for = getattr(self.blobs, "path_for", None)
-        if path_for is None:
-            for location, body in self.blobs.fetch(list(wanted)):
-                target = wanted[location]
-                # Through a temporary name: a short file at the address of a
-                # whole one is served as a hit forever, and nothing rehashes
-                # a cache entry to notice.
-                partial = target.with_name(target.name + ".partial")
-                partial.write_bytes(body)
-                partial.replace(target)
-                done += 1
-                if on_progress is not None:
-                    on_progress(done, total)
-        else:
-            for location, target in wanted.items():
-                _link_or_copy(path_for(location), target)
-                done += 1
-                if on_progress is not None:
-                    on_progress(done, total)
+        if missing:
+            fetch_into(self.blobs, missing, on_progress, done, total)
         return paths
-
-    def dataset_named(self, dataset_id: int) -> DatasetRef:
-        """A dataset's name, version and digest, without materialising it.
-
-        So a caller can work out where a version would live, and whether it
-        already holds it, before paying to fetch it. Reading either off the
-        manifest is only possible once the files are written, which is too
-        late to decide not to write them.
-
-        The digest is what a round sends along with the id, so a host can
-        tell its own dataset from a copy's that happens to share the number.
-        """
-        with self.engine.connect() as conn:
-            row = conn.execute(
-                select(
-                    t.dataset.c.name, t.dataset.c.version, t.dataset.c.annotation_digest
-                ).where(t.dataset.c.id == dataset_id)
-            ).first()
-        if row is None:
-            raise CatalogError(f"No dataset with id {dataset_id}")
-        return DatasetRef(row.name, row.version, row.annotation_digest)
-
-    def dataset_version(self, dataset_id: int) -> int:
-        """Which version a dataset id is. See :meth:`dataset_named`."""
-        return self.dataset_named(dataset_id).version
 
     def materialise(
         self,
@@ -549,60 +384,17 @@ class Catalog:
         files = dest / FILES_DIR
         files.mkdir(parents=True, exist_ok=True)
 
-        with self.engine.connect() as conn:
-            info = conn.execute(
-                select(
-                    t.dataset.c.name,
-                    t.dataset.c.version,
-                    t.dataset.c.label_set_id,
-                    t.dataset.c.val_ratio,
-                    t.dataset.c.val_ratio_achieved,
-                    t.dataset.c.holdout_ratio,
-                    t.dataset.c.holdout_ratio_achieved,
-                    t.label_set.c.name.label("label_set"),
-                    t.label_set.c.schema,
-                )
-                .join(t.label_set, t.label_set.c.id == t.dataset.c.label_set_id)
-                .where(t.dataset.c.id == dataset_id)
-            ).first()
-            if info is None:
-                raise CatalogError(f"No dataset with id {dataset_id}")
-            # The label set is resolved above rather than joined in here: an
-            # ON clause cannot reference a table joined after it, and binding
-            # the id drops a three-way join to a two-way one.
-            rows = conn.execute(
-                select(
-                    t.sample.c.id,
-                    t.sample.c.checksum,
-                    t.sample.c.location,
-                    t.sample.c.offset,
-                    t.sample.c.length,
-                    t.sample.c.group_id,
-                    t.sample.c.metadata,
-                    t.dataset_member.c.side,
-                    t.annotation.c.state,
-                    t.annotation.c.value,
-                    t.annotation.c.source,
-                )
-                .join(t.dataset_member, t.dataset_member.c.sample_id == t.sample.c.id)
-                .outerjoin(
-                    t.annotation,
-                    and_(
-                        t.annotation.c.sample_id == t.sample.c.id,
-                        t.annotation.c.label_set_id == info.label_set_id,
-                    ),
-                )
-                .where(t.dataset_member.c.dataset_id == dataset_id)
-            ).all()
+        info = self.datasets.info(dataset_id)
+        rows = self.datasets.members(dataset_id, info.label_set_id)
 
         wanted: dict[Location, Path] = {}
         relatives: dict[int, str] = {}
         for row in rows:
-            relatives[row.id] = f"{FILES_DIR}/{_materialised_name(row)}"
+            relatives[row.id] = f"{FILES_DIR}/{materialised_name(row)}"
             target = dest / relatives[row.id]
             if not target.exists():
                 wanted[Location(row.location, row.offset, row.length)] = target
-        self._write_out(wanted, on_progress, cache)
+        write_out(self.blobs, wanted, on_progress, cache)
 
         resolved = self._resolve_features(features, [row.id for row in rows])
 
@@ -694,111 +486,12 @@ class Catalog:
         return found
 
     def _feature_from_label_set(self, conn, spec, sample_ids) -> dict[int, object]:
-        """Another label set's answer, as the classes it asserts.
-
-        The value is what the annotation *says*, read through the schema's
-        own indexing contract rather than by reaching into a payload this
-        does not understand — the same reason a new task type becomes
-        queryable without the catalog learning about it.
-        """
-        row = conn.execute(
-            select(t.label_set.c.id, t.label_set.c.schema).where(
-                t.label_set.c.name == spec.ref
-            )
-        ).first()
-        if row is None:
+        """Another label set's answer, as the classes it asserts."""
+        try:
+            label_set_id, schema = self.label_sets.get(spec.ref)
+        except CatalogError:
             raise FeatureError(
                 f"Feature {spec.name!r} reads label set {spec.ref!r}, which this "
                 f"catalog does not have."
-            )
-        schema = SCHEMA.validate_python(row.schema)
-        found: dict[int, object] = {}
-        for chunk in chunks(list(sample_ids), 500):
-            rows = conn.execute(
-                select(t.annotation.c.sample_id, t.annotation.c.value).where(
-                    and_(
-                        t.annotation.c.label_set_id == row.id,
-                        t.annotation.c.state == t.ANNOTATED,
-                        t.annotation.c.sample_id.in_(chunk),
-                    )
-                )
-            ).all()
-            for sample_id, raw in rows:
-                if raw is None:
-                    continue
-                asserted = sorted(schema.classes_asserted(VALUE.validate_python(raw)))
-                if asserted:
-                    found[sample_id] = asserted
-        return found
-
-    def _write_out(
-        self, wanted: dict[Location, Path], on_progress=None, cache: Path | None = None
-    ) -> None:
-        """Put every wanted blob where the manifest says it is.
-
-        Split by what the backend can do rather than done uniformly. A
-        backend with files behind it links them, so a dataset version costs
-        no disk. One with blobs packed in a bucket is asked for them
-        together, so a shard is pulled once instead of range-requested per
-        member — which is the difference between one object and a thousand
-        requests for a dataset that lives in one shard.
-        """
-        if not wanted:
-            return
-        for target in wanted.values():
-            target.parent.mkdir(parents=True, exist_ok=True)
-
-        done = 0
-        total = len(wanted)
-
-        def tick() -> None:
-            nonlocal done
-            done += 1
-            if on_progress is not None:
-                on_progress(done, total)
-
-        # The cache first, because a hit costs a link and a miss costs a
-        # network round trip. A materialised file is named for its checksum,
-        # so where it would live in the cache is derivable from where it is
-        # going — no second lookup, and no need to carry checksums here.
-        remaining = wanted
-        if cache is not None:
-            cache = Path(cache)
-            remaining = {}
-            for location, target in wanted.items():
-                candidate = cache / blob_path(target.stem, target.suffix)
-                if candidate.exists():
-                    _link_or_copy(candidate, target)
-                    tick()
-                else:
-                    remaining[location] = target
-
-        if not remaining:
-            # Everything came from the cache. Asking a backend for nothing
-            # is a round trip that can only fail.
-            return
-
-        path_for = getattr(self.blobs, "path_for", None)
-        if path_for is None:
-            for location, body in self.blobs.fetch(list(remaining)):
-                target = remaining[location]
-                if cache is None:
-                    target.write_bytes(body)
-                else:
-                    # Written to the cache and linked from it, so the bytes
-                    # exist once however many versions reference them. Via a
-                    # temporary name: an interrupted write must not leave a
-                    # short file at the address of a whole one, which would
-                    # then be served as a cache hit forever.
-                    cached = cache / blob_path(target.stem, target.suffix)
-                    cached.parent.mkdir(parents=True, exist_ok=True)
-                    partial = cached.with_name(cached.name + ".partial")
-                    partial.write_bytes(body)
-                    partial.replace(cached)
-                    _link_or_copy(cached, target)
-                tick()
-            return
-
-        for location, target in remaining.items():
-            _link_or_copy(path_for(location), target)
-            tick()
+            ) from None
+        return self.annotations.asserted(conn, label_set_id, schema, sample_ids)

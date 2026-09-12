@@ -49,7 +49,7 @@ def _manifest(directory) -> Manifest:
 
 def test_dataset_freezes_a_version_and_says_what_it_is(context):
     record = dataset(_request(holdout_ratio=0.2), context)
-    ref = context.catalog.dataset_named(record.dataset_id)
+    ref = context.catalog.datasets.named(record.dataset_id)
     assert (record.name, record.version) == (ref.name, ref.version) == ("d", 1)
     assert record.annotation_digest == ref.annotation_digest
     assert record.catalog_id == context.catalog.id
