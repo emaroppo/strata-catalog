@@ -933,6 +933,7 @@ class Catalog:
         sample_ids: Sequence[int] | None = None,
         collections=None,
         val_ratio: float = 0.2,
+        holdout_ratio: float = 0.0,
         seed: int = 42,
         query: dict | None = None,
     ) -> int:
@@ -941,6 +942,10 @@ class Catalog:
         Membership is written down rather than derived, and every sample the
         previous version already placed keeps its side. Only what is new gets
         decided, so the split cannot drift as the labelled set grows.
+
+        ``holdout_ratio`` is zero unless asked for: a holdout is a study's
+        instrument, not a round's, and a version frozen without one reads
+        exactly as it did before there could be one.
         """
         if sample_ids is None:
             if collections is None:
@@ -955,7 +960,9 @@ class Catalog:
 
         with self.engine.begin() as conn:
             digest = self._annotation_digest(conn, label_set_id, sample_ids)
-            existing = self._identical_version(conn, name, set(sample_ids), digest)
+            existing = self._identical_version(
+                conn, name, set(sample_ids), digest, val_ratio, holdout_ratio
+            )
             if existing is not None:
                 # A version describes a selection, not an attempt at one. A
                 # round that crashed after freezing its dataset should be
@@ -987,7 +994,9 @@ class Catalog:
                         )
                     ).all()
                 )
-            flags, achieved = assign(groups, inherited, val_ratio=val_ratio, seed=seed)
+            sides, achieved = assign(
+                groups, inherited, val_ratio=val_ratio, holdout_ratio=holdout_ratio, seed=seed
+            )
 
             dataset_id = conn.execute(
                 insert(t.dataset).values(
@@ -997,15 +1006,17 @@ class Catalog:
                     query=query,
                     annotation_digest=digest,
                     val_ratio=val_ratio,
-                    val_ratio_achieved=achieved,
+                    val_ratio_achieved=achieved.val,
+                    holdout_ratio=holdout_ratio,
+                    holdout_ratio_achieved=achieved.holdout,
                 )
             ).inserted_primary_key[0]
             # One statement per chunk rather than per sample: freezing a
             # version of a large corpus was 54,000 round trips, all inside
             # the same transaction and all doing the same thing.
             members = [
-                {"dataset_id": dataset_id, "sample_id": sample_id, "val": is_val}
-                for sample_id, is_val in flags.items()
+                {"dataset_id": dataset_id, "sample_id": sample_id, "side": side}
+                for sample_id, side in sides.items()
             ]
             for chunk in _chunks(members, 500):
                 conn.execute(insert(t.dataset_member), chunk)
@@ -1054,7 +1065,13 @@ class Catalog:
         return digest.hexdigest()
 
     def _identical_version(
-        self, conn, name: str, wanted: set[int], digest: str | None = None
+        self,
+        conn,
+        name: str,
+        wanted: set[int],
+        digest: str | None = None,
+        val_ratio: float | None = None,
+        holdout_ratio: float | None = None,
     ) -> int | None:
         """The latest version of ``name``, if it froze exactly this.
 
@@ -1063,9 +1080,18 @@ class Catalog:
         shown to leave it unchanged — the round then reused the previous
         version, skipped materialising because its manifest was already on
         disk, and trained on the values the correction had replaced.
+
+        And the same sides asked for: a version frozen without a holdout is
+        not the version a study that wants one asked for, however identical
+        its members.
         """
         latest = conn.execute(
-            select(t.dataset.c.id, t.dataset.c.annotation_digest)
+            select(
+                t.dataset.c.id,
+                t.dataset.c.annotation_digest,
+                t.dataset.c.val_ratio,
+                t.dataset.c.holdout_ratio,
+            )
             .where(t.dataset.c.name == name)
             .order_by(t.dataset.c.version.desc())
             .limit(1)
@@ -1078,6 +1104,10 @@ class Catalog:
         # upgrade, which is visible; the alternative is silent staleness.
         if digest is not None and latest.annotation_digest != digest:
             return None
+        if val_ratio is not None and latest.val_ratio != val_ratio:
+            return None
+        if holdout_ratio is not None and latest.holdout_ratio != holdout_ratio:
+            return None
         members = {
             row[0]
             for row in conn.execute(
@@ -1088,7 +1118,8 @@ class Catalog:
         }
         return latest.id if members == wanted else None
 
-    def _previous_split(self, conn, name: str) -> dict[int, bool]:
+    def _previous_split(self, conn, name: str) -> dict[int, str]:
+        """Each member's side in the latest version of ``name``: what N+1 inherits."""
         previous = conn.execute(
             select(t.dataset.c.id)
             .where(t.dataset.c.name == name)
@@ -1099,7 +1130,7 @@ class Catalog:
             return {}
         return dict(
             conn.execute(
-                select(t.dataset_member.c.sample_id, t.dataset_member.c.val).where(
+                select(t.dataset_member.c.sample_id, t.dataset_member.c.side).where(
                     t.dataset_member.c.dataset_id == previous
                 )
             ).all()
@@ -1275,6 +1306,8 @@ class Catalog:
                     t.dataset.c.label_set_id,
                     t.dataset.c.val_ratio,
                     t.dataset.c.val_ratio_achieved,
+                    t.dataset.c.holdout_ratio,
+                    t.dataset.c.holdout_ratio_achieved,
                     t.label_set.c.name.label("label_set"),
                     t.label_set.c.schema,
                 )
@@ -1295,7 +1328,7 @@ class Catalog:
                     t.sample.c.length,
                     t.sample.c.group_id,
                     t.sample.c.metadata,
-                    t.dataset_member.c.val,
+                    t.dataset_member.c.side,
                     t.annotation.c.state,
                     t.annotation.c.value,
                     t.annotation.c.source,
@@ -1331,9 +1364,7 @@ class Catalog:
                     checksum=row.checksum,
                     path=relative,
                     group_id=row.group_id,
-                    # The index still holds a flag: nothing assigns a
-                    # holdout yet, so there is no third value to store
-                    split="val" if row.val else "train",
+                    split=row.side,
                     features=resolved.get(row.id, {}),
                     source=row.source,
                     # From the source, for now: nothing yet records a person
@@ -1357,6 +1388,8 @@ class Catalog:
             label_schema=_SCHEMA.validate_python(info.schema),
             val_ratio=info.val_ratio,
             val_ratio_achieved=info.val_ratio_achieved,
+            holdout_ratio=info.holdout_ratio,
+            holdout_ratio_achieved=info.holdout_ratio_achieved,
             features=[spec.as_dict() for spec in features or ()],
             samples=samples,
         )

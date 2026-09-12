@@ -42,7 +42,7 @@ from .merge import MergeError, MergeReport, merge_annotations
 from .prepared import PREPARED_NAME, PreparedIndex, PreparedSample
 from .preparers import Prepared, Preparer, PreparerError
 from .repack import RepackError, RepackReport, repack_blobs
-from .split import SplitError, assign
+from .split import HOLDOUT, TRAIN, VAL, Achieved, SplitError, assign
 
 __all__ = [
     "PREPARED_NAME",
@@ -65,6 +65,10 @@ __all__ = [
     "RepackError",
     "RepackReport",
     "SampleRow",
+    "HOLDOUT",
+    "TRAIN",
+    "VAL",
+    "Achieved",
     "SplitError",
     "assign",
     "blob_path",

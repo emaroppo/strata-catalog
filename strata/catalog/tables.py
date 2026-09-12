@@ -19,7 +19,6 @@ configuration, one catalog holds standalone images and video frames at once.
 
 from sqlalchemy import (
     JSON,
-    Boolean,
     Column,
     DateTime,
     Float,
@@ -191,22 +190,31 @@ dataset = Table(
     # 20% and got 50% should be able to find that out afterwards.
     Column("val_ratio", Float, nullable=False, default=0.2),
     Column("val_ratio_achieved", Float, nullable=False, default=0.0),
+    # The holdout the same way. Zero by default, so a version frozen by a
+    # round that never asked for one reads exactly as it did before.
+    Column("holdout_ratio", Float, nullable=False, default=0.0),
+    Column("holdout_ratio_achieved", Float, nullable=False, default=0.0),
     Column("created_at", DateTime, server_default=func.now()),
     UniqueConstraint("name", "version"),
 )
 
 
 #: Membership is written down rather than recomputed. That is what makes the
-#: train/val split stable: version N+1 inherits every shared sample's side
-#: and assigns only what is new, so a warm-started model is never scored on
-#: something an earlier round trained it on.
+#: split stable: version N+1 inherits every shared sample's side and assigns
+#: only what is new, so a warm-started model is never scored on something an
+#: earlier round trained it on.
+#:
+#: The side is a name, not a flag: ``train``, ``val`` or ``holdout``. A flag
+#: had no room for a third, and a held-out sample read as "not validation"
+#: would be trained on — silently, and on exactly the samples kept back to
+#: be measured on honestly. See :mod:`strata.catalog.split`.
 dataset_member = Table(
     "dataset_member",
     metadata,
     Column("dataset_id", ForeignKey("dataset.id", ondelete="CASCADE"), primary_key=True),
     Column("sample_id", ForeignKey("sample.id", ondelete="CASCADE"), primary_key=True),
-    Column("val", Boolean, nullable=False, default=False),
-    Index("ix_dataset_member_val", "dataset_id", "val"),
+    Column("side", String(8), nullable=False, default="train"),
+    Index("ix_dataset_member_side", "dataset_id", "side"),
 )
 
 

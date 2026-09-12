@@ -380,6 +380,8 @@ def test_a_manifest_is_json_anyone_can_read(materialised):
         "label_schema",
         "val_ratio",
         "val_ratio_achieved",
+        "holdout_ratio",
+        "holdout_ratio_achieved",
         "features",
         "samples",
     }
@@ -735,3 +737,86 @@ def test_a_source_nobody_ranked_is_refused(catalog, files, label_set):
     [sample] = catalog.ingest(files(1), media="image")
     with pytest.raises(CatalogError, match="Unknown annotation source"):
         catalog.annotate(sample, label_set, Choices(values=["cat"]), source="Human")
+
+
+# ----------------------------------------------------------------------
+# The holdout
+# ----------------------------------------------------------------------
+
+
+def _sides(manifest) -> dict[str, set[int]]:
+    out: dict[str, set[int]] = {"train": set(), "val": set(), "holdout": set()}
+    for sample in manifest.samples:
+        out[sample.split].add(sample.id)
+    return out
+
+
+def test_a_version_holds_out_what_it_was_asked_to(catalog, files, label_set, tmp_path):
+    ids = catalog.ingest(files(20), media="image")
+    catalog.annotate_many(label_set, [(i, Choices(values=["cat"])) for i in ids])
+    dataset_id = catalog.create_dataset(
+        "d", label_set, collections=EVERYTHING, val_ratio=0.2, holdout_ratio=0.1
+    )
+    manifest = _manifest(catalog.materialise(dataset_id, tmp_path / "out"))
+
+    sides = _sides(manifest)
+    assert (len(sides["holdout"]), len(sides["val"]), len(sides["train"])) == (2, 4, 14)
+    assert manifest.holdout_ratio == pytest.approx(0.1)
+    assert manifest.holdout_ratio_achieved == pytest.approx(0.1)
+    assert len(manifest.holdout) == 2
+
+
+def test_a_holdout_is_inherited_and_only_new_samples_can_join_it(
+    catalog, files, label_set, tmp_path
+):
+    first = catalog.ingest(files(20), media="image")
+    catalog.annotate_many(label_set, [(i, Choices(values=["cat"])) for i in first])
+    v1 = catalog.create_dataset(
+        "d", label_set, collections=EVERYTHING, val_ratio=0.2, holdout_ratio=0.1
+    )
+    before = _sides(_manifest(catalog.materialise(v1, tmp_path / "v1")))
+
+    more = catalog.ingest(files(20, prefix="more"), media="image")
+    catalog.annotate_many(label_set, [(i, Choices(values=["cat"])) for i in more])
+    v2 = catalog.create_dataset(
+        "d", label_set, collections=EVERYTHING, val_ratio=0.2, holdout_ratio=0.1
+    )
+    after = _sides(_manifest(catalog.materialise(v2, tmp_path / "v2")))
+
+    # Every side an earlier version decided is kept, holdout included
+    for side in ("train", "val", "holdout"):
+        assert before[side] <= after[side]
+    # The new holdout members come from the new samples alone
+    assert after["holdout"] - before["holdout"] <= set(more)
+    assert len(after["holdout"]) == 4
+
+
+def test_a_version_of_only_inherited_samples_reports_an_empty_holdout(
+    catalog, files, label_set, tmp_path
+):
+    """Inherited sides are never overruled, so there is nothing to draw from.
+
+    Visible rather than silent: the manifest says what was asked and that
+    nothing was achieved. A study wanting a holdout on a dataset frozen
+    before there were any draws its own split and records the draw.
+    """
+    ids = catalog.ingest(files(10), media="image")
+    catalog.annotate_many(label_set, [(i, Choices(values=["cat"])) for i in ids])
+    catalog.create_dataset("d", label_set, collections=EVERYTHING, val_ratio=0.2)
+    v2 = catalog.create_dataset(
+        "d", label_set, collections=EVERYTHING, val_ratio=0.2, holdout_ratio=0.2
+    )
+    manifest = _manifest(catalog.materialise(v2, tmp_path / "v2"))
+    assert manifest.holdout == []
+    assert manifest.holdout_ratio == pytest.approx(0.2)
+    assert manifest.holdout_ratio_achieved == 0.0
+
+
+def test_asking_for_a_holdout_is_a_new_version_even_over_the_same_members(
+    catalog, files, label_set
+):
+    ids = catalog.ingest(files(10), media="image")
+    catalog.annotate_many(label_set, [(i, Choices(values=["cat"])) for i in ids])
+    v1 = catalog.create_dataset("d", label_set, collections=EVERYTHING)
+    assert catalog.create_dataset("d", label_set, collections=EVERYTHING) == v1
+    assert catalog.create_dataset("d", label_set, collections=EVERYTHING, holdout_ratio=0.2) != v1
