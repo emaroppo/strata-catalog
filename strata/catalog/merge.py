@@ -14,7 +14,8 @@ from dataclasses import dataclass, field
 from sqlalchemy import and_, select
 
 from . import tables as t
-from .catalog import _VALUE, Catalog, CatalogError
+from .catalog import Catalog
+from .rows import VALUE, CatalogError
 
 
 class MergeError(CatalogError):
@@ -119,7 +120,7 @@ def merge_annotations(
     report = MergeReport()
     for name, source_set_id in _label_sets(source):
         try:
-            target_set_id, schema = target.label_set(name)
+            target_set_id, schema = target.label_sets.get(name)
         except CatalogError:
             # Reported rather than created: a label set the target has never
             # heard of is far more likely to be a typo or the wrong copy
@@ -158,7 +159,7 @@ def _merge_one(
                 target.skip(sample.id, target_set_id, source=answered_by)
         return
 
-    value = _VALUE.validate_python(raw)
+    value = VALUE.validate_python(raw)
     rank = t.AUTHORITY.get(answered_by, 0)
     standing = None if here is None else t.AUTHORITY.get(here.source, 0)
 
@@ -176,7 +177,7 @@ def _merge_one(
             target.annotate(sample.id, target_set_id, value, source=answered_by)
         return
 
-    theirs = _VALUE.validate_python(here.value)
+    theirs = VALUE.validate_python(here.value)
     if theirs == value:
         if rank > standing:
             # The same answer from a source that outranks the one here: a

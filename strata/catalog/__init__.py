@@ -28,20 +28,14 @@ interface.
 """
 
 from .blobs import BlobBackend, LocalBackend, Location, blob_path, checksum_of
-from .catalog import (
-    EVERYTHING,
-    AnnotateReport,
-    Catalog,
-    CatalogError,
-    DatasetRef,
-    SampleRow,
-)
+from .catalog import Catalog
 from .copy import CopyError, CopyReport, copy_index
 from .materialised import Materialised, ensure_materialised
 from .merge import MergeError, MergeReport, merge_annotations
 from .prepared import PREPARED_NAME, PreparedIndex, PreparedSample
 from .preparers import Prepared, Preparer, PreparerError
 from .repack import RepackError, RepackReport, repack_blobs
+from .rows import EVERYTHING, AnnotateReport, CatalogError, DatasetRef, SampleRow
 from .split import HOLDOUT, TRAIN, VAL, Achieved, SplitError, assign
 
 __all__ = [

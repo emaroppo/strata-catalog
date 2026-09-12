@@ -128,7 +128,7 @@ def test_reserved_words_in_the_schema_are_quoted(catalog, files):
     # either were unquoted this is where it would surface
     [sample_id] = catalog.ingest(files(1), media="image",
                                  metadata_for=lambda p: {"source_path": p.name})
-    label_set_id = catalog.create_label_set("x", ClassificationSchema(classes=["a"]))
+    label_set_id = catalog.label_sets.create("x", ClassificationSchema(classes=["a"]))
     [row] = catalog.unlabelled(label_set_id, EVERYTHING)
     assert row.location.offset == 0
     assert row.metadata["source_path"].endswith(".jpg")
@@ -136,7 +136,7 @@ def test_reserved_words_in_the_schema_are_quoted(catalog, files):
 
 def test_annotations_and_the_class_index(catalog, files):
     ids = catalog.ingest(files(4), media="image")
-    label_set_id = catalog.create_label_set(
+    label_set_id = catalog.label_sets.create(
         "presence", ClassificationSchema(classes=["cat", "dog"])
     )
     catalog.annotate(ids[0], label_set_id, Choices(values=["cat"]))
@@ -149,7 +149,7 @@ def test_annotations_and_the_class_index(catalog, files):
 
 def test_the_three_states_partition(catalog, files):
     ids = catalog.ingest(files(5), media="image")
-    label_set_id = catalog.create_label_set("x", ClassificationSchema(classes=["a"]))
+    label_set_id = catalog.label_sets.create("x", ClassificationSchema(classes=["a"]))
     catalog.annotate(ids[0], label_set_id, Choices(values=["a"]))
     catalog.skip(ids[1], label_set_id)
     assert (
@@ -160,7 +160,7 @@ def test_the_three_states_partition(catalog, files):
 
 
 def test_a_grouped_split_holds(catalog, files, tmp_path):
-    label_set_id = catalog.create_label_set("x", ClassificationSchema(classes=["a"]))
+    label_set_id = catalog.label_sets.create("x", ClassificationSchema(classes=["a"]))
     for group in range(4):
         ids = catalog.ingest(
             files(5, prefix=f"v{group}_"), media="image",
@@ -182,7 +182,7 @@ def test_a_grouped_split_holds(catalog, files, tmp_path):
 
 def test_a_version_is_reused_when_the_selection_has_not_changed(catalog, files):
     ids = catalog.ingest(files(6), media="image")
-    label_set_id = catalog.create_label_set("x", ClassificationSchema(classes=["a"]))
+    label_set_id = catalog.label_sets.create("x", ClassificationSchema(classes=["a"]))
     catalog.annotate_many(label_set_id, [(i, Choices(values=["a"])) for i in ids])
     first = catalog.create_dataset("d", label_set_id, collections=EVERYTHING)
     assert first == catalog.create_dataset("d", label_set_id, collections=EVERYTHING)
@@ -197,7 +197,7 @@ def test_a_version_is_reused_when_the_selection_has_not_changed(catalog, files):
 def populated(tmp_path, files):
     """A SQLite catalog with something of every kind in it."""
     source = Catalog.local(tmp_path / "sqlite")
-    label_set_id = source.create_label_set(
+    label_set_id = source.label_sets.create(
         "presence", ClassificationSchema(classes=["cat", "dog"])
     )
     # Two groups, because one cannot be split and create_dataset says so

@@ -37,6 +37,6 @@ def files(tmp_path):
 
 @pytest.fixture
 def label_set(catalog) -> int:
-    return catalog.create_label_set(
+    return catalog.label_sets.create(
         "presence", ClassificationSchema(classes=["cat", "dog", "bird"])
     )

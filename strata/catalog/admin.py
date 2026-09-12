@@ -14,8 +14,9 @@ from sqlalchemy import func, select
 
 from . import tables as t
 from .blobs import checksum_of
-from .catalog import EVERYTHING, Catalog
+from .catalog import Catalog
 from .config import CatalogConfig, CatalogMissing, Catalogs, blobs_for, open_catalog
+from .rows import EVERYTHING
 
 
 class Strict(BaseModel):
@@ -133,7 +134,7 @@ def stats(catalog: Catalog, where: str) -> Stats:
 
     label_sets = []
     for name in names:
-        label_set_id, schema = catalog.label_set(name)
+        label_set_id, schema = catalog.label_sets.get(name)
         # The whole catalog on purpose: this is the view of everything there
         # is, not of what any one job draws from
         label_sets.append(

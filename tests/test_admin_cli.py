@@ -27,7 +27,7 @@ def stocked(tmp_path, config):
         path.write_bytes(f"image {i}".encode())
         paths.append(path)
     ids = catalog.ingest(paths, media="image", collections=["photos"])
-    label_set = catalog.create_label_set("presence", ClassificationSchema(classes=["cat", "dog"]))
+    label_set = catalog.label_sets.create("presence", ClassificationSchema(classes=["cat", "dog"]))
     catalog.annotate_many(label_set, [(i, Choices(values=["cat"])) for i in ids[:4]])
     return catalog
 
@@ -104,7 +104,7 @@ def test_copy_moves_the_index_and_keeps_ids(stocked, config, tmp_path, capsys):
     assert code == 0 and "row(s) copied" in out
     copied = Catalog.connect(target, stocked.blobs)
     assert copied.id == stocked.id
-    label_set = copied.label_set("presence")[0]
+    label_set = copied.label_sets.get("presence")[0]
     assert len(copied.labelled(label_set, EVERYTHING)) == 4
 
 
@@ -114,20 +114,20 @@ def test_merge_reports_before_it_writes(stocked, config, tmp_path, capsys):
     from strata.catalog import copy_index
 
     copy_index(stocked, other)
-    label_set = other.label_set("presence")[0]
+    label_set = other.label_sets.get("presence")[0]
     pool = other.unlabelled(label_set, EVERYTHING)
     other.annotate(pool[0].id, label_set, Choices(values=["dog"]))
 
     code, out = run(capsys, "--config", str(config), "merge", "--from", other_url)
     assert code == 0 and "Nothing was written" in out
-    assert len(stocked.labelled(stocked.label_set("presence")[0], EVERYTHING)) == 4
+    assert len(stocked.labelled(stocked.label_sets.get("presence")[0], EVERYTHING)) == 4
 
     code, out = run(
         capsys, "--config", str(config), "--json", "merge", "--from", other_url, "--apply"
     )
     assert code == 0
     assert json.loads(out)["copied"] == 1
-    assert len(stocked.labelled(stocked.label_set("presence")[0], EVERYTHING)) == 5
+    assert len(stocked.labelled(stocked.label_sets.get("presence")[0], EVERYTHING)) == 5
 
 
 def test_repack_needs_a_bucket(stocked, config, capsys):

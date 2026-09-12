@@ -41,7 +41,7 @@ def test_a_metadata_feature_reaches_the_manifest(catalog, files, label_set, tmp_
 
 def test_a_label_set_feature_reaches_the_manifest(catalog, files, label_set, tmp_path):
     """The primary case: one project's target is another's feature."""
-    other = catalog.create_label_set(
+    other = catalog.label_sets.create(
         "species", ClassificationSchema(classes=["tomato", "potato"])
     )
     ids = catalog.ingest(files(4), media="image")
@@ -69,7 +69,7 @@ def test_a_sample_the_feature_does_not_cover_is_left_absent(
     catalog, files, label_set, tmp_path
 ):
     """Not filled in. A zero is an answer; 'not known' is not."""
-    other = catalog.create_label_set("species", ClassificationSchema(classes=["tomato"]))
+    other = catalog.label_sets.create("species", ClassificationSchema(classes=["tomato"]))
     ids = catalog.ingest(files(3), media="image")
     for i in ids:
         catalog.annotate(i, label_set, Choices(values=["cat"]))

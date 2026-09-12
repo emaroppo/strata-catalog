@@ -25,7 +25,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from .blobs import BlobBackend, LocalBackend
-from .catalog import Catalog, CatalogError
+from .catalog import Catalog
+from .rows import CatalogError
 
 #: The name a host's single catalog goes by when the file names none.
 DEFAULT_CATALOG = "default"

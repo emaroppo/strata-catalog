@@ -11,23 +11,11 @@ import os
 import shutil
 import uuid
 from collections.abc import Callable, Iterable, Sequence
-from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import NamedTuple
 
-from pydantic import TypeAdapter
-from sqlalchemy import (
-    and_,
-    delete,
-    func,
-    insert,
-    inspect,
-    or_,
-    select,
-    update,
-)
+from sqlalchemy import and_, delete, func, insert, inspect, select, update
 from sqlalchemy.engine import Engine
 
 from strata.common import database
@@ -36,7 +24,6 @@ from strata.labels import (
     FILES_DIR,
     MANIFEST_FORMAT,
     MANIFEST_NAME,
-    AnySchema,
     AnyValue,
     Manifest,
     ManifestSample,
@@ -45,17 +32,22 @@ from strata.labels import (
 from . import tables as t
 from .blobs import BlobBackend, LocalBackend, Location, blob_path, checksum_of
 from .features import FeatureError, FeatureSpec
+from .label_sets import LabelSets
+from .rows import (
+    SAMPLE_COLUMNS,
+    SCHEMA,
+    VALUE,
+    AnnotateReport,
+    CatalogError,
+    DatasetRef,
+    SampleRow,
+    chunks,
+    live,
+    sample_rows,
+    scoped,
+)
 from .schema_version import MIGRATIONS
 from .split import assign
-
-_SCHEMA = TypeAdapter(AnySchema)
-_VALUE = TypeAdapter(AnyValue)
-
-
-def _chunks(items: list, size: int):
-    """SQLite caps parameters per statement, and a review pool is past it."""
-    for start in range(0, len(items), size):
-        yield items[start : start + size]
 
 
 def _canonical_source(
@@ -122,97 +114,13 @@ def _materialised_name(row) -> str:
     return f"{row.checksum}{suffix.lower()}"
 
 
-#: Every collection, said out loud. A query has to name what it wants —
-#: forgetting to scope one is how a project's review queue fills with
-#: another project's data — so this exists to make "all of it" a thing you
-#: choose rather than a thing you get by omission.
-EVERYTHING = "*"
-
-
-def _within(collections) -> object | None:
-    """A condition matching samples in any of ``collections``.
-
-    ``None`` when the answer is everything, so a caller can drop the join
-    entirely rather than filter on a tautology.
-
-    Selecting a collection selects what is under it: ``sat_images`` covers
-    ``sat_images/2024`` but never ``sat_images_old``, which a bare prefix
-    match would swallow. That distinction lives here rather than at each
-    call site.
-    """
-    names = [collections] if isinstance(collections, str) else list(collections)
-    if names == [EVERYTHING]:
-        # The marker alone, bare or as a list's only member: a request that
-        # arrived through a config carries a list, and means the same thing
-        return None
-    if not names:
-        raise CatalogError(
-            "No collections given. Name what to draw from, or pass EVERYTHING "
-            "to mean the whole catalog — an empty list would silently be one "
-            "or the other."
-        )
-    return or_(
-        *[
-            or_(
-                t.sample_collection.c.collection == name,
-                t.sample_collection.c.collection.like(f"{name}/%"),
-            )
-            for name in names
-        ]
-    )
-
-
-class CatalogError(Exception):
-    """A request the catalog cannot honour."""
-
-
-@dataclass(frozen=True)
-class SampleRow:
-    """A sample as callers see it — never a raw database row."""
-
-    id: int
-    checksum: str
-    location: Location
-    media: str
-    subtype: str
-    group_id: str | None
-    #: Out of comparison, and therefore out of the generated hash. A frozen
-    #: dataclass hashes every field it compares, and a dict cannot be
-    #: hashed — so a row carrying metadata could not be put in a set or used
-    #: as a key at all. It stayed usable only while every sample had none.
-    #: Excluding it is also the truer reading: two rows for the same sample
-    #: are the same sample, whatever is recorded about where it came from.
-    metadata: dict | None = field(default=None, compare=False)
-
-
-class DatasetRef(NamedTuple):
-    """Which dataset version an id is, and what it said when it was frozen."""
-
-    name: str
-    version: int
-    #: Over the version's members and their annotations. Null for a version
-    #: frozen before versions carried one.
-    annotation_digest: str | None
-
-
-class AnnotateReport(NamedTuple):
-    """What a bulk write did."""
-
-    #: Answers recorded.
-    annotated: int
-    #: Skips recorded.
-    skipped: int
-    #: Left alone, because a source outranking the one writing had already
-    #: answered — an import landing on a sample a person dealt with.
-    kept: int
-
-
 class Catalog:
     """Samples, what is known about them, and the datasets built from them."""
 
     def __init__(self, engine: Engine, blobs: BlobBackend):
         self.engine = engine
         self.blobs = blobs
+        self.label_sets = LabelSets(engine)
 
     @classmethod
     def local(cls, root: Path) -> "Catalog":
@@ -401,46 +309,6 @@ class Catalog:
         return ids
 
     # ------------------------------------------------------------------
-    # Label sets
-    # ------------------------------------------------------------------
-
-    def create_label_set(self, name: str, schema: AnySchema) -> int:
-        with self.engine.begin() as conn:
-            return conn.execute(
-                insert(t.label_set).values(name=name, schema=json.loads(schema.model_dump_json()))
-            ).inserted_primary_key[0]
-
-    def label_set(self, name: str) -> tuple[int, AnySchema]:
-        """A label set by name, as whatever kind of schema it is.
-
-        Read back through the discriminator rather than as one task's
-        schema: a label set is how a corpus is annotated, and pinning it to
-        classification would mean a catalog could hold boxes it could never
-        hand back.
-        """
-        with self.engine.connect() as conn:
-            row = conn.execute(
-                select(t.label_set.c.id, t.label_set.c.schema).where(t.label_set.c.name == name)
-            ).first()
-        if row is None:
-            raise CatalogError(f"No label set named {name!r}")
-        return row.id, _SCHEMA.validate_python(row.schema)
-
-    def set_classes(self, label_set_id: int, schema: AnySchema) -> None:
-        """Replace a label set's schema.
-
-        Append-only is a convention rather than a constraint here, because a
-        run records the class list it trained with — that, not this table, is
-        what a checkpoint is checked against.
-        """
-        with self.engine.begin() as conn:
-            conn.execute(
-                update(t.label_set)
-                .where(t.label_set.c.id == label_set_id)
-                .values(schema=json.loads(schema.model_dump_json()))
-            )
-
-    # ------------------------------------------------------------------
     # Annotations
     # ------------------------------------------------------------------
 
@@ -456,7 +324,7 @@ class Catalog:
         Returns whether it was recorded: not when a source outranking this
         one already answered (see :data:`tables.AUTHORITY`).
         """
-        _, schema = self._label_set_by_id(label_set_id)
+        _, schema = self.label_sets.by_id(label_set_id)
         schema.validate_value(value)
         with self.engine.begin() as conn:
             written = self._upsert_annotation(
@@ -506,7 +374,7 @@ class Catalog:
         answer from a source that outranks this one is left alone and
         counted in ``kept`` (:data:`tables.AUTHORITY`).
         """
-        _, schema = self._label_set_by_id(label_set_id)
+        _, schema = self.label_sets.by_id(label_set_id)
         annotated = skipped = kept = 0
         with self.engine.begin() as conn:
             for sample_id, value in items:
@@ -638,67 +506,9 @@ class Catalog:
                 )
             )
 
-    def _label_set_by_id(self, label_set_id: int) -> tuple[int, AnySchema]:
-        with self.engine.connect() as conn:
-            row = conn.execute(
-                select(t.label_set.c.schema).where(t.label_set.c.id == label_set_id)
-            ).first()
-        if row is None:
-            raise CatalogError(f"No label set with id {label_set_id}")
-        return label_set_id, _SCHEMA.validate_python(row.schema)
-
     # ------------------------------------------------------------------
     # Queries
     # ------------------------------------------------------------------
-
-    def _live(self):
-        return t.sample.c.deleted_at.is_(None)
-
-    def _scoped(self, stmt, collections):
-        """Restrict a sample query to the collections a caller named.
-
-        An EXISTS rather than a join, because a sample in three collections
-        would otherwise come back three times and need a DISTINCT to fix —
-        and Postgres cannot take DISTINCT over a json column at all, so the
-        obvious shape fails on one dialect and silently duplicates on the
-        other.
-        """
-        within = _within(collections)
-        if within is None:
-            return stmt
-        return stmt.where(
-            select(t.sample_collection.c.sample_id)
-            .where(
-                and_(t.sample_collection.c.sample_id == t.sample.c.id, within)
-            )
-            .exists()
-        )
-
-    def _rows(self, conn, stmt) -> list[SampleRow]:
-        return [
-            SampleRow(
-                id=r.id,
-                checksum=r.checksum,
-                location=Location(r.location, r.offset, r.length),
-                media=r.media,
-                subtype=r.subtype,
-                group_id=r.group_id,
-                metadata=r.metadata,
-            )
-            for r in conn.execute(stmt)
-        ]
-
-    _COLUMNS = (
-        t.sample.c.id,
-        t.sample.c.checksum,
-        t.sample.c.location,
-        t.sample.c.offset,
-        t.sample.c.length,
-        t.sample.c.media,
-        t.sample.c.subtype,
-        t.sample.c.group_id,
-        t.sample.c.metadata,
-    )
 
     def unlabelled(
         self, label_set_id: int, collections, limit: int | None = None
@@ -714,7 +524,7 @@ class Catalog:
         the project's declaration, not the catalog's.
         """
         stmt = (
-            select(*self._COLUMNS)
+            select(*SAMPLE_COLUMNS)
             .outerjoin(
                 t.annotation,
                 and_(
@@ -722,13 +532,13 @@ class Catalog:
                     t.annotation.c.label_set_id == label_set_id,
                 ),
             )
-            .where(and_(self._live(), t.annotation.c.sample_id.is_(None)))
+            .where(and_(live(), t.annotation.c.sample_id.is_(None)))
         )
-        stmt = self._scoped(stmt, collections)
+        stmt = scoped(stmt, collections)
         if limit is not None:
             stmt = stmt.limit(limit)
         with self.engine.connect() as conn:
-            return self._rows(conn, stmt)
+            return sample_rows(conn, stmt)
 
     def labelled(self, label_set_id: int, collections) -> list[SampleRow]:
         """Samples with a real answer — skipped ones are not training data.
@@ -771,12 +581,12 @@ class Catalog:
     def _joined(self, table, *predicates, collections) -> list[SampleRow]:
         """Live samples with a row in ``table`` meeting ``predicates``, in scope."""
         stmt = (
-            select(*self._COLUMNS)
+            select(*SAMPLE_COLUMNS)
             .join(table, table.c.sample_id == t.sample.c.id)
-            .where(and_(self._live(), *predicates))
+            .where(and_(live(), *predicates))
         )
         with self.engine.connect() as conn:
-            return self._rows(conn, self._scoped(stmt, collections))
+            return sample_rows(conn, scoped(stmt, collections))
 
     def by_checksum(self, checksum: str) -> SampleRow | None:
         """The sample with these bytes, or None.
@@ -784,11 +594,11 @@ class Catalog:
         The lookup behind every reference that has to survive a move: a
         task URL, a cache key, a manifest entry. See ``docs/adr/0001``.
         """
-        stmt = select(*self._COLUMNS).where(
-            and_(self._live(), t.sample.c.checksum == checksum)
+        stmt = select(*SAMPLE_COLUMNS).where(
+            and_(live(), t.sample.c.checksum == checksum)
         )
         with self.engine.connect() as conn:
-            rows = self._rows(conn, stmt)
+            rows = sample_rows(conn, stmt)
         return rows[0] if rows else None
 
     # ------------------------------------------------------------------
@@ -856,13 +666,13 @@ class Catalog:
             )
             .where(
                 and_(
-                    self._live(),
+                    live(),
                     t.annotation_conflict.c.label_set_id == label_set_id,
                 )
             )
         )
         def value(raw):
-            return None if raw is None else _VALUE.validate_python(raw)
+            return None if raw is None else VALUE.validate_python(raw)
 
         with self.engine.connect() as conn:
             return [
@@ -873,7 +683,7 @@ class Catalog:
                     "other": value(row.other_value),
                     "origin": row.other_origin,
                 }
-                for row in conn.execute(self._scoped(stmt, collections))
+                for row in conn.execute(scoped(stmt, collections))
             ]
 
     def _clear_conflict(self, conn, sample_id: int, label_set_id: int) -> None:
@@ -902,7 +712,7 @@ class Catalog:
         # Through the discriminator: read back as one task's value, a boxes
         # annotation parses without complaint into an empty Choices, and the
         # catalog silently forgets what a human actually said.
-        return _VALUE.validate_python(row.value)
+        return VALUE.validate_python(row.value)
 
     # ------------------------------------------------------------------
     # Datasets
@@ -964,7 +774,7 @@ class Catalog:
             # another — and failed before the round did anything, which at
             # least made it loud.
             groups: dict[int, str | None] = {}
-            for chunk in _chunks(list(sample_ids), 500):
+            for chunk in chunks(list(sample_ids), 500):
                 groups.update(
                     conn.execute(
                         select(t.sample.c.id, t.sample.c.group_id).where(
@@ -996,7 +806,7 @@ class Catalog:
                 {"dataset_id": dataset_id, "sample_id": sample_id, "side": side}
                 for sample_id, side in sides.items()
             ]
-            for chunk in _chunks(members, 500):
+            for chunk in chunks(members, 500):
                 conn.execute(insert(t.dataset_member), chunk)
         return dataset_id
 
@@ -1010,7 +820,7 @@ class Catalog:
         ``docs/adr/0003``.
         """
         digest = hashlib.sha256()
-        for chunk in _chunks(list(sample_ids), 500):
+        for chunk in chunks(list(sample_ids), 500):
             rows = conn.execute(
                 select(
                     t.annotation.c.sample_id,
@@ -1126,7 +936,7 @@ class Catalog:
         missing: list[tuple[Location, Path]] = []
 
         with self.engine.connect() as conn:
-            for chunk in _chunks(list(checksums), 500):
+            for chunk in chunks(list(checksums), 500):
                 rows = conn.execute(
                     select(
                         t.sample.c.checksum,
@@ -1134,7 +944,7 @@ class Catalog:
                         t.sample.c.offset,
                         t.sample.c.length,
                         t.sample.c.metadata,
-                    ).where(and_(self._live(), t.sample.c.checksum.in_(chunk)))
+                    ).where(and_(live(), t.sample.c.checksum.in_(chunk)))
                 )
                 for row in rows:
                     suffix = Path(
@@ -1194,13 +1004,13 @@ class Catalog:
         """
         stmt = (
             select(t.sample.c.media, t.sample.c.subtype, func.count())
-            .where(self._live())
+            .where(live())
             .group_by(t.sample.c.media, t.sample.c.subtype)
         )
         with self.engine.connect() as conn:
             return {
                 (row[0], row[1]): row[2]
-                for row in conn.execute(self._scoped(stmt, collections))
+                for row in conn.execute(scoped(stmt, collections))
             }
 
     def dataset_named(self, dataset_id: int) -> DatasetRef:
@@ -1338,7 +1148,7 @@ class Catalog:
                     # reviewed one and an import is never reviewed.
                     reviewed=None if row.source is None else row.source == t.HUMAN,
                     value=(
-                        _VALUE.validate_python(row.value)
+                        VALUE.validate_python(row.value)
                         if row.state == t.ANNOTATED and row.value is not None
                         else None
                     ),
@@ -1351,7 +1161,7 @@ class Catalog:
             version=info.version,
             catalog_id=self.id,
             label_set=info.label_set,
-            label_schema=_SCHEMA.validate_python(info.schema),
+            label_schema=SCHEMA.validate_python(info.schema),
             val_ratio=info.val_ratio,
             val_ratio_achieved=info.val_ratio_achieved,
             holdout_ratio=info.holdout_ratio,
@@ -1402,7 +1212,7 @@ class Catalog:
 
     def _feature_from_metadata(self, conn, spec, sample_ids) -> dict[int, object]:
         found: dict[int, object] = {}
-        for chunk in _chunks(list(sample_ids), 500):
+        for chunk in chunks(list(sample_ids), 500):
             rows = conn.execute(
                 select(t.sample.c.id, t.sample.c.metadata).where(t.sample.c.id.in_(chunk))
             ).all()
@@ -1430,9 +1240,9 @@ class Catalog:
                 f"Feature {spec.name!r} reads label set {spec.ref!r}, which this "
                 f"catalog does not have."
             )
-        schema = _SCHEMA.validate_python(row.schema)
+        schema = SCHEMA.validate_python(row.schema)
         found: dict[int, object] = {}
-        for chunk in _chunks(list(sample_ids), 500):
+        for chunk in chunks(list(sample_ids), 500):
             rows = conn.execute(
                 select(t.annotation.c.sample_id, t.annotation.c.value).where(
                     and_(
@@ -1445,7 +1255,7 @@ class Catalog:
             for sample_id, raw in rows:
                 if raw is None:
                     continue
-                asserted = sorted(schema.classes_asserted(_VALUE.validate_python(raw)))
+                asserted = sorted(schema.classes_asserted(VALUE.validate_python(raw)))
                 if asserted:
                     found[sample_id] = asserted
         return found

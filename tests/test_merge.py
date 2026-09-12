@@ -39,7 +39,7 @@ def _catalog(tmp_path, name, files=("a.jpg", "b.jpg", "c.jpg")):
 def pair(tmp_path):
     """A main catalog and a copy of it, as a laptop would take one."""
     main, ids = _catalog(tmp_path, "main")
-    main.create_label_set("demo", ClassificationSchema(classes=["cat", "dog"]))
+    main.label_sets.create("demo", ClassificationSchema(classes=["cat", "dog"]))
     laptop = Catalog.local(tmp_path / "laptop")
     copy_index(main, laptop)
     return main, laptop, ids
@@ -52,20 +52,20 @@ def pair(tmp_path):
 
 def test_an_answer_the_target_lacks_is_copied(pair):
     main, laptop, ids = pair
-    set_id, _ = laptop.label_set("demo")
+    set_id, _ = laptop.label_sets.get("demo")
     laptop.annotate(ids[0], set_id, Choices(values=["cat"]))
 
     report = merge_annotations(laptop, main)
 
-    main_set, _ = main.label_set("demo")
+    main_set, _ = main.label_sets.get("demo")
     assert report.copied == 1
     assert main.annotation_of(ids[0], main_set) == Choices(values=["cat"])
 
 
 def test_the_same_answer_twice_is_not_a_conflict(pair):
     main, laptop, ids = pair
-    main_set, _ = main.label_set("demo")
-    laptop_set, _ = laptop.label_set("demo")
+    main_set, _ = main.label_sets.get("demo")
+    laptop_set, _ = laptop.label_sets.get("demo")
     main.annotate(ids[0], main_set, Choices(values=["cat"]))
     laptop.annotate(ids[0], laptop_set, Choices(values=["cat"]))
 
@@ -79,8 +79,8 @@ def test_the_same_answer_twice_is_not_a_conflict(pair):
 
 def test_disagreement_keeps_both_and_settles_neither(pair):
     main, laptop, ids = pair
-    main_set, _ = main.label_set("demo")
-    laptop_set, _ = laptop.label_set("demo")
+    main_set, _ = main.label_sets.get("demo")
+    laptop_set, _ = laptop.label_sets.get("demo")
     main.annotate(ids[0], main_set, Choices(values=["cat"]))
     laptop.annotate(ids[0], laptop_set, Choices(values=["dog"]))
 
@@ -112,8 +112,8 @@ def test_two_unrelated_catalogs_are_refused(tmp_path):
 
 def test_a_dry_run_reports_without_writing(pair):
     main, laptop, ids = pair
-    main_set, _ = main.label_set("demo")
-    laptop_set, _ = laptop.label_set("demo")
+    main_set, _ = main.label_sets.get("demo")
+    laptop_set, _ = laptop.label_sets.get("demo")
     first, second = ids[0], ids[1]
     main.annotate(first, main_set, Choices(values=["cat"]))
     laptop.annotate(first, laptop_set, Choices(values=["dog"]))
@@ -129,19 +129,19 @@ def test_a_dry_run_reports_without_writing(pair):
 
 def test_an_unknown_label_set_is_reported_not_invented(pair):
     main, laptop, ids = pair
-    other = laptop.create_label_set("elsewhere", ClassificationSchema(classes=["x"]))
+    other = laptop.label_sets.create("elsewhere", ClassificationSchema(classes=["x"]))
     laptop.annotate(ids[0], other, Choices(values=["x"]))
 
     report = merge_annotations(laptop, main)
 
     assert report.unknown_label_sets == ["elsewhere"]
     with pytest.raises(Exception, match="No label set"):
-        main.label_set("elsewhere")
+        main.label_sets.get("elsewhere")
 
 
 def test_an_answer_for_a_sample_the_target_lacks_is_reported(tmp_path):
     main, _ = _catalog(tmp_path, "main")
-    main.create_label_set("demo", ClassificationSchema(classes=["cat", "dog"]))
+    main.label_sets.create("demo", ClassificationSchema(classes=["cat", "dog"]))
     laptop = Catalog.local(tmp_path / "laptop")
     copy_index(main, laptop)
 
@@ -151,7 +151,7 @@ def test_an_answer_for_a_sample_the_target_lacks_is_reported(tmp_path):
     new = root / "d.jpg"
     new.write_bytes(b"a sample from the field")
     [new_id] = laptop.ingest([new], media="image")
-    laptop_set, _ = laptop.label_set("demo")
+    laptop_set, _ = laptop.label_sets.get("demo")
     laptop.annotate(new_id, laptop_set, Choices(values=["dog"]))
 
     report = merge_annotations(laptop, main)
@@ -169,20 +169,20 @@ def test_an_answer_for_a_sample_the_target_lacks_is_reported(tmp_path):
 
 def test_a_skip_is_copied_where_the_target_knows_nothing(pair):
     main, laptop, ids = pair
-    laptop_set, _ = laptop.label_set("demo")
+    laptop_set, _ = laptop.label_sets.get("demo")
     laptop.skip(ids[0], laptop_set)
 
     report = merge_annotations(laptop, main)
 
-    main_set, _ = main.label_set("demo")
+    main_set, _ = main.label_sets.get("demo")
     assert report.skipped == 1
     assert [s.id for s in main.skipped(main_set, "*")] == [ids[0]]
 
 
 def test_an_answer_beats_a_skip(pair):
     main, laptop, ids = pair
-    main_set, _ = main.label_set("demo")
-    laptop_set, _ = laptop.label_set("demo")
+    main_set, _ = main.label_sets.get("demo")
+    laptop_set, _ = laptop.label_sets.get("demo")
     main.skip(ids[0], main_set)
     laptop.annotate(ids[0], laptop_set, Choices(values=["cat"]))
 
@@ -196,8 +196,8 @@ def test_an_answer_beats_a_skip(pair):
 
 def test_a_skip_does_not_overwrite_an_answer(pair):
     main, laptop, ids = pair
-    main_set, _ = main.label_set("demo")
-    laptop_set, _ = laptop.label_set("demo")
+    main_set, _ = main.label_sets.get("demo")
+    laptop_set, _ = laptop.label_sets.get("demo")
     main.annotate(ids[0], main_set, Choices(values=["cat"]))
     laptop.skip(ids[0], laptop_set)
 
@@ -215,12 +215,12 @@ def test_a_skip_does_not_overwrite_an_answer(pair):
 
 def test_boxes_merge_and_disagree_like_anything_else(tmp_path):
     main, ids = _catalog(tmp_path, "main")
-    main.create_label_set("boxes", BBoxSchema(classes=["cat"]))
+    main.label_sets.create("boxes", BBoxSchema(classes=["cat"]))
     laptop = Catalog.local(tmp_path / "laptop")
     copy_index(main, laptop)
 
-    main_set, _ = main.label_set("boxes")
-    laptop_set, _ = laptop.label_set("boxes")
+    main_set, _ = main.label_sets.get("boxes")
+    laptop_set, _ = laptop.label_sets.get("boxes")
     first, second = ids[0], ids[1]
     here = Boxes(values=[Box(label="cat", x=0.1, y=0.1, width=0.2, height=0.2)])
     there = Boxes(values=[Box(label="cat", x=0.5, y=0.5, width=0.2, height=0.2)])
@@ -245,7 +245,7 @@ def test_boxes_merge_and_disagree_like_anything_else(tmp_path):
 
 def test_merging_twice_changes_nothing_the_second_time(pair):
     main, laptop, ids = pair
-    laptop_set, _ = laptop.label_set("demo")
+    laptop_set, _ = laptop.label_sets.get("demo")
     laptop.annotate(ids[0], laptop_set, Choices(values=["cat"]))
 
     merge_annotations(laptop, main)
@@ -265,20 +265,20 @@ def test_merging_twice_changes_nothing_the_second_time(pair):
 def test_an_import_comes_home_as_an_import(pair):
     """Written as a person's, it would read as reviewed when nobody looked."""
     main, laptop, ids = pair
-    laptop_set, _ = laptop.label_set("demo")
+    laptop_set, _ = laptop.label_sets.get("demo")
     laptop.annotate(ids[0], laptop_set, Choices(values=["cat"]), source="import")
 
     merge_annotations(laptop, main)
 
-    main_set, _ = main.label_set("demo")
+    main_set, _ = main.label_sets.get("demo")
     # Discarding by source is the public way to ask what a row's source is
     assert main.discard(main_set, "import") == 1
 
 
 def test_a_person_there_supersedes_an_import_here(pair):
     main, laptop, ids = pair
-    main_set, _ = main.label_set("demo")
-    laptop_set, _ = laptop.label_set("demo")
+    main_set, _ = main.label_sets.get("demo")
+    laptop_set, _ = laptop.label_sets.get("demo")
     main.annotate(ids[0], main_set, Choices(values=["cat"]), source="import")
     laptop.annotate(ids[0], laptop_set, Choices(values=["dog"]))
 
@@ -293,8 +293,8 @@ def test_a_person_there_supersedes_an_import_here(pair):
 
 def test_an_import_there_leaves_a_person_here_alone(pair):
     main, laptop, ids = pair
-    main_set, _ = main.label_set("demo")
-    laptop_set, _ = laptop.label_set("demo")
+    main_set, _ = main.label_sets.get("demo")
+    laptop_set, _ = laptop.label_sets.get("demo")
     main.annotate(ids[0], main_set, Choices(values=["cat"]))
     laptop.annotate(ids[0], laptop_set, Choices(values=["dog"]), source="import")
 
@@ -307,8 +307,8 @@ def test_an_import_there_leaves_a_person_here_alone(pair):
 
 def test_a_person_confirming_an_import_raises_its_standing(pair):
     main, laptop, ids = pair
-    main_set, _ = main.label_set("demo")
-    laptop_set, _ = laptop.label_set("demo")
+    main_set, _ = main.label_sets.get("demo")
+    laptop_set, _ = laptop.label_sets.get("demo")
     main.annotate(ids[0], main_set, Choices(values=["cat"]), source="import")
     laptop.annotate(ids[0], laptop_set, Choices(values=["cat"]))
 
@@ -323,8 +323,8 @@ def test_a_person_confirming_an_import_raises_its_standing(pair):
 def test_an_import_does_not_beat_a_persons_skip(pair):
     """An answer beats a skip because someone got further — an import got nowhere."""
     main, laptop, ids = pair
-    main_set, _ = main.label_set("demo")
-    laptop_set, _ = laptop.label_set("demo")
+    main_set, _ = main.label_sets.get("demo")
+    laptop_set, _ = laptop.label_sets.get("demo")
     main.skip(ids[0], main_set)
     laptop.annotate(ids[0], laptop_set, Choices(values=["cat"]), source="import")
 
@@ -337,8 +337,8 @@ def test_an_import_does_not_beat_a_persons_skip(pair):
 def test_two_imports_that_disagree_are_a_conflict(pair):
     """Equal standing, so neither may decide: the same rule as two people."""
     main, laptop, ids = pair
-    main_set, _ = main.label_set("demo")
-    laptop_set, _ = laptop.label_set("demo")
+    main_set, _ = main.label_sets.get("demo")
+    laptop_set, _ = laptop.label_sets.get("demo")
     main.annotate(ids[0], main_set, Choices(values=["cat"]), source="import")
     laptop.annotate(ids[0], laptop_set, Choices(values=["dog"]), source="import")
 
@@ -350,8 +350,8 @@ def test_two_imports_that_disagree_are_a_conflict(pair):
 
 def test_a_dry_run_counts_what_the_ranking_would_do_and_writes_nothing(pair):
     main, laptop, ids = pair
-    main_set, _ = main.label_set("demo")
-    laptop_set, _ = laptop.label_set("demo")
+    main_set, _ = main.label_sets.get("demo")
+    laptop_set, _ = laptop.label_sets.get("demo")
     main.annotate(ids[0], main_set, Choices(values=["cat"]), source="import")
     laptop.annotate(ids[0], laptop_set, Choices(values=["dog"]))
 
@@ -364,8 +364,8 @@ def test_a_dry_run_counts_what_the_ranking_would_do_and_writes_nothing(pair):
 
 def test_a_superseded_import_is_quiet_the_second_time(pair):
     main, laptop, ids = pair
-    main_set, _ = main.label_set("demo")
-    laptop_set, _ = laptop.label_set("demo")
+    main_set, _ = main.label_sets.get("demo")
+    laptop_set, _ = laptop.label_sets.get("demo")
     main.annotate(ids[0], main_set, Choices(values=["cat"]), source="import")
     laptop.annotate(ids[0], laptop_set, Choices(values=["dog"]))
 

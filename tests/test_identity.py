@@ -65,7 +65,7 @@ def _stocked(tmp_path):
     path = root / "a.jpg"
     path.write_bytes(b"bytes")
     [sample_id] = catalog.ingest([path], media="image")
-    label_set_id = catalog.create_label_set(
+    label_set_id = catalog.label_sets.create(
         "x", ClassificationSchema(classes=["cat", "dog"])
     )
     return catalog, sample_id, label_set_id

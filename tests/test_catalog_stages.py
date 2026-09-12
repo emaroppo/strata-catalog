@@ -20,7 +20,7 @@ from strata.labels import MANIFEST_NAME, Choices, ClassificationSchema, Manifest
 @pytest.fixture
 def stocked(catalog, files):
     """Twenty labelled samples in five groups, and a label set over them."""
-    label_set = catalog.create_label_set("presence", ClassificationSchema(classes=["cat"]))
+    label_set = catalog.label_sets.create("presence", ClassificationSchema(classes=["cat"]))
     ids = []
     for group in range(5):
         ids += catalog.ingest(files(4, prefix=f"vid{group}"), media="image", group_id=f"vid{group}")
@@ -62,7 +62,7 @@ def test_an_unknown_label_set_is_refused_with_the_way_forward(context):
 
 
 def test_nothing_labelled_is_refused(catalog, tmp_path):
-    catalog.create_label_set("presence", ClassificationSchema(classes=["cat"]))
+    catalog.label_sets.create("presence", ClassificationSchema(classes=["cat"]))
     with pytest.raises(CatalogError, match="Nothing is labelled"):
         dataset(_request(), Context(catalog, tmp_path / "datasets"))
 

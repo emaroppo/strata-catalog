@@ -20,9 +20,10 @@ from strata.common.canonical import short_hash
 from strata.common.stages import Stage
 from strata.labels import MANIFEST_NAME, Manifest
 
-from .catalog import Catalog, CatalogError, _link_or_copy
+from .catalog import Catalog, _link_or_copy
 from .features import FeatureSpec
 from .materialised import ensure_materialised
+from .rows import CatalogError
 from .split import HOLDOUT, TRAIN, VAL, assign
 
 #: The kinds these stages link, for a chain to be checked before it runs.
@@ -81,7 +82,7 @@ class DatasetRecord(Strict):
 def dataset(request: DatasetRequest, context: Context) -> DatasetRecord:
     catalog = context.catalog
     try:
-        label_set_id, _ = catalog.label_set(request.label_set)
+        label_set_id, _ = catalog.label_sets.get(request.label_set)
     except CatalogError as exc:
         raise CatalogError(
             f"No label set named {request.label_set!r} in the catalog. "

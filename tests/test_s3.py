@@ -241,7 +241,7 @@ def test_an_ingest_failure_leaves_no_rows_naming_a_missing_shard(tmp_path):
     with pytest.raises(OSError):
         catalog.ingest(paths, media="image")
 
-    label_set_id = catalog.create_label_set(
+    label_set_id = catalog.label_sets.create(
         "x", __import__("strata.labels", fromlist=["C"]).ClassificationSchema()
     )
     assert catalog.unlabelled(label_set_id, EVERYTHING) == []
@@ -259,7 +259,7 @@ def test_materialising_from_a_bucket_pulls_shards_not_members(store, tmp_path):
     backend = S3Backend(store, bucket="test", shard_bytes=1 << 20)
     catalog = Catalog.connect(f"sqlite:///{tmp_path / 'index.db'}", backend)
 
-    label_set_id = catalog.create_label_set("x", ClassificationSchema(classes=["a"]))
+    label_set_id = catalog.label_sets.create("x", ClassificationSchema(classes=["a"]))
     bodies = {}
     for group in ("vid1", "vid2"):
         paths = []
@@ -295,7 +295,7 @@ def test_a_materialised_file_is_not_re_fetched(store, tmp_path):
 
     backend = S3Backend(store, bucket="test", shard_bytes=1 << 20)
     catalog = Catalog.connect(f"sqlite:///{tmp_path / 'index.db'}", backend)
-    label_set_id = catalog.create_label_set("x", ClassificationSchema(classes=["a"]))
+    label_set_id = catalog.label_sets.create("x", ClassificationSchema(classes=["a"]))
     for group in ("a", "b"):
         ids = catalog.ingest(
             [a_file(tmp_path, f"{group}{i}.jpg", f"{group}{i}".encode() * 40) for i in range(3)],

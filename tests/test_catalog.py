@@ -42,7 +42,7 @@ def test_a_standalone_sample_has_no_group(catalog, files, label_set):
 
 def test_the_bytes_come_back(catalog, files):
     [sample_id] = catalog.ingest(files(1), media="image")
-    label_set_id = catalog.create_label_set("x", ClassificationSchema())
+    label_set_id = catalog.label_sets.create("x", ClassificationSchema())
     [row] = [s for s in catalog.unlabelled(label_set_id, EVERYTHING) if s.id == sample_id]
     assert catalog.blobs.get(row.location) == b"contents of img0"
 
@@ -54,14 +54,14 @@ def test_the_bytes_come_back(catalog, files):
 
 def test_a_label_set_round_trips_its_schema(catalog):
     schema = ClassificationSchema(classes=["a", "b"], multiple=False)
-    catalog.create_label_set("single", schema)
-    _, restored = catalog.label_set("single")
+    catalog.label_sets.create("single", schema)
+    _, restored = catalog.label_sets.get("single")
     assert restored == schema
 
 
 def test_an_unknown_label_set_is_an_error(catalog):
     with pytest.raises(CatalogError, match="No label set"):
-        catalog.label_set("nope")
+        catalog.label_sets.get("nope")
 
 
 def test_annotating_stores_the_value(catalog, files, label_set):
@@ -119,8 +119,8 @@ def test_a_skipped_sample_is_not_training_data(catalog, files, label_set):
 def test_unlabelled_is_per_label_set(catalog, files):
     # A sample can be classified and still waiting for boxes
     ids = catalog.ingest(files(3), media="image")
-    presence = catalog.create_label_set("presence", ClassificationSchema(classes=["cat"]))
-    other = catalog.create_label_set("other", ClassificationSchema(classes=["cat"]))
+    presence = catalog.label_sets.create("presence", ClassificationSchema(classes=["cat"]))
+    other = catalog.label_sets.create("other", ClassificationSchema(classes=["cat"]))
     catalog.annotate(ids[0], presence, Choices(values=["cat"]))
 
     assert len(catalog.unlabelled(presence, EVERYTHING)) == 2
@@ -396,7 +396,7 @@ def test_the_manifest_records_what_the_split_actually_achieved(materialised):
 
 
 def test_an_unsplittable_ratio_is_recorded_rather_than_hidden(catalog, files, tmp_path):
-    label_set = catalog.create_label_set("v", ClassificationSchema(classes=["cat"]))
+    label_set = catalog.label_sets.create("v", ClassificationSchema(classes=["cat"]))
     for video in ("vid1", "vid2"):
         ids = catalog.ingest(
             files(5, prefix=video), media="image", subtype="frames", group_id=video
@@ -651,13 +651,13 @@ def test_a_label_set_keeps_whatever_kind_of_schema_it_is(tmp_path):
         ("spans", SpanSchema(classes=["name"])),
         ("choices", ClassificationSchema(classes=["a"])),
     ]:
-        catalog.create_label_set(name, schema)
-        assert catalog.label_set(name)[1] == schema
+        catalog.label_sets.create(name, schema)
+        assert catalog.label_sets.get(name)[1] == schema
 
 
 def test_discard_removes_one_source_and_returns_samples_to_the_queue(catalog, files):
     """An unreviewed import is not an answer, and should not read as one."""
-    label_set_id = catalog.create_label_set("x", ClassificationSchema(classes=["cat"]))
+    label_set_id = catalog.label_sets.create("x", ClassificationSchema(classes=["cat"]))
     ids = catalog.ingest(files(2), media="image")
     catalog.annotate(ids[0], label_set_id, Choices(values=["cat"]), source="import")
     catalog.annotate(ids[1], label_set_id, Choices(values=["cat"]), source="human")
@@ -672,7 +672,7 @@ def test_discard_removes_one_source_and_returns_samples_to_the_queue(catalog, fi
 
 def test_discard_clears_the_class_index_too(catalog, files):
     """Otherwise a discarded row still answers 'which samples have a cat'."""
-    label_set_id = catalog.create_label_set("x", ClassificationSchema(classes=["cat"]))
+    label_set_id = catalog.label_sets.create("x", ClassificationSchema(classes=["cat"]))
     ids = catalog.ingest(files(1), media="image")
     catalog.annotate(ids[0], label_set_id, Choices(values=["cat"]), source="import")
     assert catalog.with_class(label_set_id, "cat", EVERYTHING)
@@ -682,7 +682,7 @@ def test_discard_clears_the_class_index_too(catalog, files):
 
 
 def test_discard_names_a_source_that_is_not_there(catalog):
-    label_set_id = catalog.create_label_set("x", ClassificationSchema(classes=["cat"]))
+    label_set_id = catalog.label_sets.create("x", ClassificationSchema(classes=["cat"]))
     assert catalog.discard(label_set_id, "nobody") == 0
 
 

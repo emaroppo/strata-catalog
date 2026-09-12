@@ -32,14 +32,14 @@ def _samples(catalog, tmp_path, media: str) -> list[int]:
 
 @each_type
 def test_a_label_set_keeps_its_schema(catalog, example):
-    catalog.create_label_set("x", example.schema)
-    assert catalog.label_set("x")[1] == example.schema
+    catalog.label_sets.create("x", example.schema)
+    assert catalog.label_sets.get("x")[1] == example.schema
 
 
 @each_type
 def test_an_annotation_survives_the_catalog(catalog, tmp_path, example):
     [sample_id, _] = _samples(catalog, tmp_path, example.media)
-    label_set_id = catalog.create_label_set("x", example.schema)
+    label_set_id = catalog.label_sets.create("x", example.schema)
     catalog.annotate(sample_id, label_set_id, example.value)
     # The whole point of the catalog: what a person said outlives the tool
     # that collected it, unchanged
@@ -49,7 +49,7 @@ def test_an_annotation_survives_the_catalog(catalog, tmp_path, example):
 @each_type
 def test_an_empty_answer_is_not_the_same_as_no_answer(catalog, tmp_path, example):
     [sample_id, _] = _samples(catalog, tmp_path, example.media)
-    label_set_id = catalog.create_label_set("x", example.schema)
+    label_set_id = catalog.label_sets.create("x", example.schema)
     empty = type(example.value)()
     catalog.annotate(sample_id, label_set_id, empty)
     # A reviewer who looked and found none of the classes present has
@@ -61,7 +61,7 @@ def test_an_empty_answer_is_not_the_same_as_no_answer(catalog, tmp_path, example
 
 @each_type
 def test_a_materialised_dataset_carries_the_type(catalog, tmp_path, example):
-    label_set_id = catalog.create_label_set("x", example.schema)
+    label_set_id = catalog.label_sets.create("x", example.schema)
     for sample_id in _samples(catalog, tmp_path, example.media):
         catalog.annotate(sample_id, label_set_id, example.value)
     dataset_id = catalog.create_dataset("d", label_set_id, collections="*")
@@ -82,7 +82,7 @@ def test_an_undeclared_overlap_is_refused_where_it_would_be_stored(catalog, tmp_
     document = tmp_path / "doc.txt"
     document.write_text("Ada Lovelace worked here")
     [sample_id] = catalog.ingest([document], media="text")
-    label_set_id = catalog.create_label_set("x", SpanSchema(classes=["name", "place"]))
+    label_set_id = catalog.label_sets.create("x", SpanSchema(classes=["name", "place"]))
 
     with pytest.raises(SchemaError, match="overlap"):
         catalog.annotate(
