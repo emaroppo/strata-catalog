@@ -196,7 +196,8 @@ class SampleType:
 # ----------------------------------------------------------------------
 
 
-def _entries():
+def entries():
+    """What is installed, as entry points. The seam a test stubs to pretend otherwise."""
     return list(entry_points(group=ENTRY_POINT_GROUP))
 
 
@@ -204,14 +205,14 @@ def _builtin_names() -> set[str]:
     """Names this package itself provides, which a plugin may not take."""
     return {
         entry.name
-        for entry in _entries()
+        for entry in entries()
         if getattr(getattr(entry, "dist", None), "name", None) == "strata-catalog"
     }
 
 
 def available() -> dict[str, str]:
     """Registered type names, and what each resolves to."""
-    return plugins.available(_entries())
+    return plugins.available(entries())
 
 
 def resolve(name: str) -> type[SampleType]:
@@ -222,6 +223,6 @@ def resolve(name: str) -> type[SampleType]:
     refused rather than resolved by whichever was loaded first.
     """
     entry = plugins.find(
-        _entries(), name, what="sample type", error=SampleTypeError, reserved=_builtin_names()
+        entries(), name, what="sample type", error=SampleTypeError, reserved=_builtin_names()
     )
     return plugins.load(entry, SampleType, error=SampleTypeError)

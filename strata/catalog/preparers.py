@@ -165,13 +165,14 @@ def run(
 # ----------------------------------------------------------------------
 
 
-def _entries():
+def entries():
+    """What is installed, as entry points. The seam a test stubs to pretend otherwise."""
     return list(entry_points(group=ENTRY_POINT_GROUP))
 
 
 def available() -> dict[str, str]:
     """Registered preparer names, and what each resolves to."""
-    return plugins.available(_entries())
+    return plugins.available(entries())
 
 
 def resolve(name: str) -> type[Preparer]:
@@ -181,7 +182,7 @@ def resolve(name: str) -> type[Preparer]:
     loaded first: two conversions of the same corpus produce different bytes,
     and the one that runs would be decided by install order.
     """
-    entry = plugins.find(_entries(), name, what="preparer", error=PreparerError)
+    entry = plugins.find(entries(), name, what="preparer", error=PreparerError)
     return plugins.load(entry, Preparer, error=PreparerError)
 
 

@@ -72,7 +72,7 @@ def installed(monkeypatch):
 
     def _install(*entries):
         monkeypatch.setattr(
-            "strata.catalog.preparers._entries", lambda: list(entries)
+            "strata.catalog.preparers.entries", lambda: list(entries)
         )
 
     return _install

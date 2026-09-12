@@ -20,9 +20,7 @@ from typing import NamedTuple
 from pydantic import TypeAdapter
 from sqlalchemy import (
     and_,
-    create_engine,
     delete,
-    event,
     func,
     insert,
     inspect,
@@ -32,6 +30,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.engine import Engine
 
+from strata.common import database
 from strata.common.migrations import require_current, stamp_if_new
 from strata.labels import (
     FILES_DIR,
@@ -233,21 +232,7 @@ class Catalog:
         several machines at once, which is where SQLite stops being the
         right answer.
         """
-        engine = create_engine(url)
-        if engine.dialect.name == "sqlite":
-
-            @event.listens_for(engine, "connect")
-            def _pragmas(dbapi_connection, _record):
-                # A full fsync per commit is what makes a bulk import crawl,
-                # and this index is rebuildable from the blobs and the source
-                # it came from. WAL also lets a reader run during an import.
-                # Neither has an equivalent worth setting on Postgres.
-                cursor = dbapi_connection.cursor()
-                cursor.execute("PRAGMA journal_mode=WAL")
-                cursor.execute("PRAGMA synchronous=NORMAL")
-                cursor.close()
-
-        catalog = cls(engine, blobs)
+        catalog = cls(database.engine(url), blobs)
         catalog.create_all()
         return catalog
 
