@@ -25,21 +25,21 @@ from strata.labels import (
     ManifestSample,
 )
 
-from . import tables as t
-from .annotations import Annotations
-from .blobs import BlobBackend, LocalBackend, Location, blob_path, checksum_of
-from .datasets import Datasets
-from .features import FeatureError, FeatureSpec
-from .files import fetch_into, materialised_name, write_out
-from .label_sets import LabelSets
+from .index import tables as t
+from .index.annotations import Annotations
+from .index.datasets import Datasets
+from .index.label_sets import LabelSets
+from .index.samples import Samples
+from .index.schema_version import MIGRATIONS
 from .rows import (
     SCHEMA,
     VALUE,
     CatalogError,
 )
-from .samples import Samples
-from .schema_version import MIGRATIONS
-from .split import assign
+from .storage.blobs import BlobBackend, LocalBackend, Location, blob_path, checksum_of
+from .versions.features import FeatureError, FeatureSpec
+from .versions.files import fetch_into, materialised_name, write_out
+from .versions.split import assign
 
 
 def _canonical_source(

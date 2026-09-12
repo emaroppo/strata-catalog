@@ -244,7 +244,7 @@ def _probe(args) -> int:
 def _copy(args) -> int:
     from .catalog import Catalog
     from .config import blobs_for
-    from .copy import CopyError, copy_index
+    from .sync.copy import CopyError, copy_index
 
     source, config = _open(args)
     # Only the index moves: the copy points at exactly the same bytes
@@ -268,7 +268,7 @@ def _copy(args) -> int:
 def _merge(args) -> int:
     from .catalog import Catalog
     from .config import blobs_for
-    from .merge import MergeError, merge_annotations
+    from .sync.merge import MergeError, merge_annotations
 
     target, config = _open(args)
     # A copy is the same corpus, so it reads the same bytes this catalog does
@@ -321,9 +321,9 @@ def _merge(args) -> int:
 
 
 def _repack(args) -> int:
-    from .blobs import LocalBackend
     from .config import blobs_for
-    from .repack import RepackError, repack_blobs
+    from .storage.blobs import LocalBackend
+    from .storage.repack import RepackError, repack_blobs
 
     config = _config(args)
     if not config.s3_endpoint:

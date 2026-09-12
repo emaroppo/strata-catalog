@@ -9,7 +9,7 @@ See ``docs/adr/0001`` and ``docs/adr/0013``.
 import mimetypes
 from pathlib import Path
 
-from .catalog import Catalog
+from ..catalog import Catalog
 from .signing import SigningError, verify
 
 #: A checksum is 64 hex characters; anything else is not one, and saying so

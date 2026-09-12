@@ -11,8 +11,8 @@ import pytest
 from sqlalchemy import select
 
 from strata.catalog import Catalog, RepackError, repack_blobs
-from strata.catalog import tables as t
-from strata.catalog.s3 import S3Backend
+from strata.catalog.index import tables as t
+from strata.catalog.storage.s3 import S3Backend
 
 
 class FakeStore:

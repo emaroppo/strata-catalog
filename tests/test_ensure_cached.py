@@ -41,7 +41,7 @@ def stocked(catalog, files):
     with catalog.engine.connect() as conn:
         from sqlalchemy import select
 
-        from strata.catalog import tables as t
+        from strata.catalog.index import tables as t
 
         checksums = [r.checksum for r in conn.execute(select(t.sample.c.checksum))]
     return catalog, checksums

@@ -9,8 +9,8 @@ from pathlib import Path
 
 import pytest
 
-from strata.catalog.builtin_types import Frames, Image, Text
-from strata.catalog.sample_types import (
+from strata.catalog.types.builtin_types import Frames, Image, Text
+from strata.catalog.types.sample_types import (
     PLAIN,
     SampleType,
     SampleTypeError,

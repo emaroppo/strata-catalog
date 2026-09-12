@@ -180,7 +180,7 @@ dataset = Table(
 
 #: Membership is written down, and version N+1 inherits every side version
 #: N decided. The side is a name — ``train``, ``val`` or ``holdout`` — not a
-#: flag. See :mod:`strata.catalog.split` and docs/adr/0003.
+#: flag. See :mod:`strata.catalog.versions.split` and docs/adr/0003.
 dataset_member = Table(
     "dataset_member",
     metadata,

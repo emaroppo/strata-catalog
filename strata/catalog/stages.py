@@ -21,11 +21,11 @@ from strata.common.stages import Stage
 from strata.labels import MANIFEST_NAME, Manifest
 
 from .catalog import Catalog
-from .features import FeatureSpec
-from .files import link_or_copy
-from .materialised import ensure_materialised
 from .rows import CatalogError
-from .split import HOLDOUT, TRAIN, VAL, assign
+from .versions.features import FeatureSpec
+from .versions.files import link_or_copy
+from .versions.materialised import ensure_materialised
+from .versions.split import HOLDOUT, TRAIN, VAL, assign
 
 #: The kinds these stages link, for a chain to be checked before it runs.
 DATASET_VERSION = "dataset_version"

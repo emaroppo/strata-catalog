@@ -12,11 +12,11 @@ from pathlib import Path
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy import func, select
 
-from . import tables as t
-from .blobs import checksum_of
 from .catalog import Catalog
 from .config import CatalogConfig, CatalogMissing, Catalogs, blobs_for, open_catalog
+from .index import tables as t
 from .rows import EVERYTHING
+from .storage.blobs import checksum_of
 
 
 class Strict(BaseModel):
@@ -324,7 +324,7 @@ class TypeEntry(Strict):
 
 
 def types() -> list[TypeEntry]:
-    from .sample_types import SampleType, available, resolve
+    from .types.sample_types import SampleType, available, resolve
 
     return [
         TypeEntry(
@@ -345,7 +345,7 @@ class PreparerEntry(Strict):
 
 
 def preparers() -> list[PreparerEntry]:
-    from .preparers import available, resolve
+    from .types.preparers import available, resolve
 
     entries = []
     for name in sorted(available()):

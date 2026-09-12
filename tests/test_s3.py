@@ -11,7 +11,7 @@ import tarfile
 import pytest
 
 from strata.catalog import EVERYTHING, checksum_of
-from strata.catalog.s3 import S3Backend
+from strata.catalog.storage.s3 import S3Backend
 
 
 class FakeStore:

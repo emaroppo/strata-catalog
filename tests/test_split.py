@@ -3,7 +3,7 @@
 import pytest
 
 from strata.catalog import HOLDOUT, TRAIN, VAL, Achieved, SplitError
-from strata.catalog.split import assign, ratio
+from strata.catalog.versions.split import assign, ratio
 
 
 def ungrouped(n: int) -> dict[int, None]:

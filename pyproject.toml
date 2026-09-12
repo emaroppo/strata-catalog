@@ -30,17 +30,17 @@ test = ["pytest>=8.0"]
 # What this catalog can ingest, read from what is installed. A plugin
 # registers here too; these names are reserved so one cannot replace them.
 [project.entry-points."strata.sample_types"]
-image = "strata.catalog.builtin_types:Image"
-frames = "strata.catalog.builtin_types:Frames"
-text = "strata.catalog.builtin_types:Text"
+image = "strata.catalog.types.builtin_types:Image"
+frames = "strata.catalog.types.builtin_types:Frames"
+text = "strata.catalog.types.builtin_types:Text"
 
 [project.scripts]
 # Only importable with the serve extra; declared here so the container has a
 # command rather than a python -c.
-strata-blobs = "strata.catalog.serve:main"
+strata-blobs = "strata.catalog.storage.serve:main"
 # Alembic's commands over the migrations this package ships, so a catalog
 # can be brought up to date from an installed wheel.
-strata-catalog-migrate = "strata.catalog.schema_version:migrate"
+strata-catalog-migrate = "strata.catalog.index.schema_version:migrate"
 # Looking after a catalog: what it holds, whether it is reachable, copying,
 # merging, repacking. Standard library only, so the install stays thin.
 strata-catalog = "strata.catalog.cli:main"

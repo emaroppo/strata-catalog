@@ -8,9 +8,9 @@ over their annotations. See ``docs/adr/0003``.
 from sqlalchemy import and_, insert, select
 from sqlalchemy.engine import Engine
 
+from ..rows import CatalogError, DatasetRef, chunks
+from ..versions.split import Achieved
 from . import tables as t
-from .rows import CatalogError, DatasetRef, chunks
-from .split import Achieved
 
 
 class Datasets:

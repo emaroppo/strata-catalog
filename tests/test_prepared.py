@@ -12,8 +12,8 @@ import hashlib
 import pytest
 
 from strata.catalog import CatalogError, PreparedIndex, PreparedSample
-from strata.catalog.builtin_types import Frames, Image, Text
-from strata.catalog.sample_types import SampleTypeError
+from strata.catalog.types.builtin_types import Frames, Image, Text
+from strata.catalog.types.sample_types import SampleTypeError
 
 # ----------------------------------------------------------------------
 # Canonical form

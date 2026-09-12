@@ -13,9 +13,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from strata.catalog.prepared import PreparedIndex, PreparedSample
-from strata.catalog.preparer_conformance import PreparerContract
-from strata.catalog.preparers import (
+from strata.catalog.types.prepared import PreparedIndex, PreparedSample
+from strata.catalog.types.preparer_conformance import PreparerContract
+from strata.catalog.types.preparers import (
     Prepared,
     Preparer,
     PreparerError,
@@ -72,7 +72,7 @@ def installed(monkeypatch):
 
     def _install(*entries):
         monkeypatch.setattr(
-            "strata.catalog.preparers.entries", lambda: list(entries)
+            "strata.catalog.types.preparers.entries", lambda: list(entries)
         )
 
     return _install

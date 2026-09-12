@@ -3,7 +3,7 @@
 import pytest
 
 from strata.catalog import EVERYTHING
-from strata.catalog.features import FeatureError, FeatureSpec
+from strata.catalog.versions.features import FeatureError, FeatureSpec
 from strata.labels import Choices, ClassificationSchema
 
 

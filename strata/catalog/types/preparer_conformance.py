@@ -7,7 +7,7 @@ own converter:
 
 .. code-block:: python
 
-    from strata.catalog.preparer_conformance import PreparerContract
+    from strata.catalog.types.preparer_conformance import PreparerContract
 
     class TestMyPreparer(PreparerContract):
         @pytest.fixture

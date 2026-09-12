@@ -21,7 +21,7 @@ class ConfigError(Exception):
 
 def build():
     """The app, from the environment. Raises if anything essential is absent."""
-    from .config import CatalogConfigError, CatalogMissing, host_catalog, open_catalog
+    from ..config import CatalogConfigError, CatalogMissing, host_catalog, open_catalog
     from .server import create_app
 
     # Opened by the same code the CLI uses, from the same format of file, so

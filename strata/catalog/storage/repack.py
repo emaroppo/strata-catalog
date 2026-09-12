@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 
 from sqlalchemy import bindparam, func, select, update
 
-from . import tables as t
+from ..index import tables as t
 from .blobs import Location
 
 #: Tar offsets go into an INTEGER column, which Postgres caps at 2^31-1. A

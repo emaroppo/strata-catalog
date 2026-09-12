@@ -14,8 +14,8 @@ from sqlalchemy import and_, or_, select
 
 from strata.labels import AnySchema, AnyValue
 
-from . import tables as t
-from .blobs import Location
+from .index import tables as t
+from .storage.blobs import Location
 
 SCHEMA = TypeAdapter(AnySchema)
 VALUE = TypeAdapter(AnyValue)

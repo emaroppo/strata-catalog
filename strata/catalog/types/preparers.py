@@ -39,7 +39,7 @@ class Prepared:
     group_id: str | None = None
     #: The annotation this sample arrived with, where the corpus came
     #: labelled. A candidate for a reviewer to correct, never an answer —
-    #: see :class:`~strata.catalog.prepared.PreparedSample`.
+    #: see :class:`~strata.catalog.types.prepared.PreparedSample`.
     value: object | None = None
 
 

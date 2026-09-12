@@ -10,7 +10,7 @@ import json
 import pytest
 
 from strata.catalog import EVERYTHING, ensure_materialised
-from strata.catalog.features import FeatureSpec
+from strata.catalog.versions.features import FeatureSpec
 from strata.labels import MANIFEST_NAME, Choices
 
 

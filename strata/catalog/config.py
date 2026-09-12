@@ -24,9 +24,9 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from .blobs import BlobBackend, LocalBackend
 from .catalog import Catalog
 from .rows import CatalogError
+from .storage.blobs import BlobBackend, LocalBackend
 
 #: The name a host's single catalog goes by when the file names none.
 DEFAULT_CATALOG = "default"
@@ -238,7 +238,7 @@ def blobs_for(config: CatalogConfig, local: Path | None = None) -> BlobBackend:
     import boto3
     from botocore.config import Config
 
-    from .s3 import S3Backend
+    from .storage.s3 import S3Backend
 
     client = boto3.client(
         "s3",

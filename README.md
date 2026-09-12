@@ -145,7 +145,7 @@ reserved and a `resolve()` that refuses an ambiguity:
 A preparer writes files and a `prepared.json` index of what the conversion
 knew, metadata, grouping and any candidate annotations the corpus arrived
 with, and stops; `ingest` catalogues. `PreparerContract` in
-`strata.catalog.preparer_conformance` is the suite a preparer runs against
+`strata.catalog.types.preparer_conformance` is the suite a preparer runs against
 itself: its output is admitted by the type it claims, already canonical,
 and the same bytes on a second run. `strata-prepare-email` and
 `strata-prepare-video` are the two that ship.

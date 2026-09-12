@@ -4,7 +4,7 @@ import os
 import shutil
 from pathlib import Path
 
-from .blobs import BlobBackend, Location, blob_path
+from ..storage.blobs import BlobBackend, Location, blob_path
 
 
 def link_or_copy(source: Path, target: Path) -> None:

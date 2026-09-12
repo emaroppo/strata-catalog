@@ -250,7 +250,7 @@ def test_a_version_frozen_before_digests_existed_is_not_reused(catalog, files, l
     """
     from sqlalchemy import update
 
-    from strata.catalog import tables as t
+    from strata.catalog.index import tables as t
 
     ids = catalog.ingest(files(4), media="image")
     annotate_all(catalog, ids, label_set)

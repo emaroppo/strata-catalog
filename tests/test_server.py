@@ -10,8 +10,8 @@ import time
 import pytest
 from fastapi.testclient import TestClient
 
-from strata.catalog.server import create_app
-from strata.catalog.signing import (
+from strata.catalog.storage.server import create_app
+from strata.catalog.storage.signing import (
     DEFAULT_TTL,
     WINDOW,
     SigningError,
@@ -34,7 +34,7 @@ def stocked(catalog, files):
 def checksums(stocked):
     from sqlalchemy import select
 
-    from strata.catalog import tables as t
+    from strata.catalog.index import tables as t
 
     with stocked.engine.connect() as conn:
         return [row.checksum for row in conn.execute(select(t.sample.c.checksum))]
@@ -136,7 +136,7 @@ def test_a_document_is_served_as_text_in_a_stated_encoding():
     stores text as UTF-8 — the sample type refuses anything else — so this
     is a fact rather than a guess.
     """
-    from strata.catalog.server import _media_type
+    from strata.catalog.storage.server import _media_type
 
     assert _media_type(".txt") == "text/plain; charset=utf-8"
     # Markdown is not in the standard library's built-in table, so a
@@ -145,7 +145,7 @@ def test_a_document_is_served_as_text_in_a_stated_encoding():
 
 
 def test_anything_unrecognised_is_still_served():
-    from strata.catalog.server import _media_type
+    from strata.catalog.storage.server import _media_type
 
     assert _media_type(".unheard-of") == "application/octet-stream"
 

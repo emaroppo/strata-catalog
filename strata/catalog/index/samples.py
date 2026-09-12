@@ -11,9 +11,9 @@ from collections.abc import Iterable, Sequence
 from sqlalchemy import and_, func, insert, select, update
 from sqlalchemy.engine import Engine
 
+from ..rows import SAMPLE_COLUMNS, SampleRow, chunks, live, sample_rows, scoped
+from ..storage.blobs import Location
 from . import tables as t
-from .blobs import Location
-from .rows import SAMPLE_COLUMNS, SampleRow, chunks, live, sample_rows, scoped
 
 
 class Samples:

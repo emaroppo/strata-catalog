@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 
 from sqlalchemy import delete, func, insert, select, text
 
-from . import tables as t
+from ..index import tables as t
 
 #: Parents before children. annotation_class is derived, but copying beats
 #: recomputing: it is written through the indexing contract, and rebuilding

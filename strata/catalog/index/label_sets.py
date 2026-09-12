@@ -7,8 +7,8 @@ from sqlalchemy.engine import Engine
 
 from strata.labels import AnySchema
 
+from ..rows import SCHEMA, CatalogError
 from . import tables as t
-from .rows import SCHEMA, CatalogError
 
 
 class LabelSets:

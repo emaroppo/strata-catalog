@@ -13,9 +13,9 @@ from dataclasses import dataclass, field
 
 from sqlalchemy import and_, select
 
-from . import tables as t
-from .catalog import Catalog
-from .rows import VALUE, CatalogError
+from ..catalog import Catalog
+from ..index import tables as t
+from ..rows import VALUE, CatalogError
 
 
 class MergeError(CatalogError):

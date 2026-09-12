@@ -18,7 +18,7 @@ from pathlib import Path
 
 from alembic import context
 
-from strata.catalog.tables import metadata
+from strata.catalog.index.tables import metadata
 from strata.common.migrations import run_alembic
 
 

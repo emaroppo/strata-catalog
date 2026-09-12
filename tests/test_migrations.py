@@ -18,8 +18,8 @@ from alembic.config import Config
 from alembic.migration import MigrationContext
 from sqlalchemy import create_engine, inspect
 
-from strata.catalog import tables as t
-from strata.catalog.schema_version import MIGRATIONS
+from strata.catalog.index import tables as t
+from strata.catalog.index.schema_version import MIGRATIONS
 from strata.common.migrations import SchemaOutOfDate, script_directory, stamp_if_new
 
 
@@ -111,7 +111,7 @@ def test_a_named_catalog_can_be_migrated(tmp_path, monkeypatch):
 
 def test_the_migrate_command_needs_no_alembic_ini(tmp_path, monkeypatch):
     """What an installed wheel has: the scripts inside the package, and this."""
-    from strata.catalog.schema_version import migrate
+    from strata.catalog.index.schema_version import migrate
 
     monkeypatch.delenv("STRATA_CATALOG_URL", raising=False)
     monkeypatch.setenv("STRATA_CATALOG_ROOT", str(tmp_path))

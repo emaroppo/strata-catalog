@@ -10,7 +10,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from strata.catalog import Catalog
-from strata.catalog.serve import ConfigError, build
+from strata.catalog.storage.serve import ConfigError, build
 
 SECRET = "shared with the labeller"
 

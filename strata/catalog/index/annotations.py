@@ -16,8 +16,8 @@ from sqlalchemy.engine import Engine
 
 from strata.labels import AnySchema, AnyValue
 
+from ..rows import SCHEMA, VALUE, AnnotateReport, CatalogError, chunks, live, scoped
 from . import tables as t
-from .rows import SCHEMA, VALUE, AnnotateReport, CatalogError, chunks, live, scoped
 
 
 class Annotations:
