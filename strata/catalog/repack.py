@@ -1,32 +1,9 @@
 """Moving blobs from files into tar shards, without moving the index.
 
-The counterpart to :mod:`copy`, and the opposite shape. Copying an index
-leaves the bytes untouched because samples are addressed by content; this
-leaves the *content* untouched and rewrites where it lives, because the
-three columns describing that — ``location``, ``offset``, ``length`` — are
-the only thing a backend change touches.
-
-Two orderings decide whether this is safe, and both are counter-intuitive
-enough to be worth stating:
-
-**A shard is uploaded before the rows naming it are committed.** The reverse
-leaves the index pointing at an object that does not exist, which no re-run
-can detect and no read can survive. Rows are held back until their shard is
-known to have landed, so the failure mode is duplicated bytes in a bucket —
-recoverable, and cheap.
-
-**Samples are packed in group order.** Frames of one video end up adjacent,
-so materialising a dataset reads whole objects rather than scattering range
-requests across the corpus. Adjacent, not co-located: nothing forces a shard
-boundary at a group edge, so a group bigger than a shard still straddles
-two. That is the right trade — honouring group boundaries would mean partly
-filled shards, and a group large enough to matter is one whose reads are
-bulk anyway.
-
-The source has to be a backend with real files behind it, because packing
-reads paths. That is not a limitation in practice: the direction that needs
-doing is files into a bucket, and the reverse is what ``materialise``
-already is.
+The counterpart to :mod:`copy`: content stays, ``location``, ``offset`` and
+``length`` are rewritten. A shard is uploaded before the rows naming it are
+committed, and samples are packed in group order. The source must have real
+files behind it. See ``docs/adr/0002``.
 """
 
 import hashlib

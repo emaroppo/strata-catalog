@@ -1,19 +1,8 @@
 """Moving an index from one database to another.
 
-Only the index moves. Blobs are addressed by content, so a catalog that
-changes database keeps pointing at exactly the same bytes — which is the
-whole reason this is a copy of six tables rather than a data migration.
-
-Primary keys are preserved, and that is the point rather than an
-optimisation. A sample id is referenced by every annotation and every
-dataset member, and outside the database entirely by the Label Studio task
-map, which is keyed on it. Renumbering would silently repoint every task at
-a different image.
-
-Preserving them on Postgres means the sequences behind those keys are left
-pointing at zero, so the next insert collides with row one. Resetting them
-is the last thing this does, and forgetting it is the classic way this goes
-wrong days later.
+Only the index moves; the bytes are addressed by content. Primary keys
+and the catalog's identity are preserved, and on Postgres the sequences
+behind them are reset last. See ``docs/adr/0002`` and ``docs/adr/0008``.
 """
 
 from dataclasses import dataclass, field

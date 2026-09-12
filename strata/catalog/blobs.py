@@ -1,18 +1,9 @@
 """Where a sample's bytes live, and how to get them back.
 
-The interface is shaped for object storage even though the only
-implementation is a directory, because the reverse does not work: designing
-from the local case bakes in cheap random access and real filesystem paths,
-and a tar member in a bucket can honour neither.
-
-Three rules the local backend keeps even though nothing forces it to:
-
-1. Writes are write-once. You cannot rewrite bytes inside a tar in object
-   storage without rewriting the object.
-2. No listing. After ingest the index is authoritative; walking a directory
-   would be an answer the object store cannot give cheaply.
-3. Callers get bytes or a :class:`Location`, never a path — except through
-   :meth:`LocalBackend.path_for`, which is deliberately not on the protocol.
+The interface is shaped for immutable shards in object storage, and the
+local backend keeps its rules: write-once, no listing, bytes or a
+:class:`Location` and never a path (:meth:`LocalBackend.path_for` is
+deliberately off the protocol). See ``docs/adr/0002``.
 """
 
 import hashlib
@@ -98,13 +89,8 @@ class LocalBackend:
     """Bytes as files under a root directory.
 
     A file is a shard of one: the location is ``(relative path, 0, size)``.
-    That keeps the three columns in the index meaningful from the first
-    write, so packing into tars later is a new backend rather than a
-    migration.
-
-    Files are laid out by checksum rather than by original name, which makes
-    :meth:`put` idempotent and means two identical samples ingested under
-    different names cost one copy.
+    Laid out by checksum, so :meth:`put` is idempotent and identical bytes
+    cost one copy.
     """
 
     def __init__(self, root: Path):

@@ -1,27 +1,10 @@
 """Blobs as tar shards in S3-compatible object storage.
 
-Samples are packed rather than stored one object each: at a few hundred
-thousand samples the per-object overhead and the cost of ever listing them
-are what make per-file storage the wrong shape. Tar has no index of its own,
-so the catalog's ``(location, offset, length)`` is the index — and because a
-tar member's bytes are contiguous, one sample is one HTTP range request.
-
-Three properties this has to keep, and the reasons are not stylistic:
-
-**A shard is immutable.** There is no appending to an object in a bucket
-without rewriting it, so a shard is written once and closed. New data means
-a new shard; removal means a tombstone in the index and a compaction pass
-that nothing yet needs.
-
-**A shard is built locally and uploaded whole.** A member's offset is only
-known once it has been written, so packing has to finish before the object
-exists. That is why this backend has a :meth:`flush` and the local one does
-not, and why the index must not commit rows referencing a shard that has not
-been uploaded.
-
-**Packing follows the order it is given.** The caller ingests a group at a
-time, so a video's frames land in one shard without this needing to know
-what a group is — which keeps dense reads dense.
+The catalog's ``(location, offset, length)`` is the only index, so one
+sample is one range request. A shard is immutable, built locally and
+uploaded whole on :meth:`flush` — which the index must call before it
+commits rows naming the shard — and packed in the order it is given.
+See ``docs/adr/0002``.
 """
 
 import io
