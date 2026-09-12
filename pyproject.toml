@@ -40,6 +40,9 @@ strata-blobs = "strata.catalog.serve:main"
 # Alembic's commands over the migrations this package ships, so a catalog
 # can be brought up to date from an installed wheel.
 strata-catalog-migrate = "strata.catalog.schema_version:migrate"
+# Looking after a catalog: what it holds, whether it is reachable, copying,
+# merging, repacking. Standard library only, so the install stays thin.
+strata-catalog = "strata.catalog.cli:main"
 
 [tool.uv.sources]
 strata-labels = { workspace = true }
