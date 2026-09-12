@@ -1,34 +1,10 @@
 """What a model is told about a sample, beyond the sample itself.
 
-A target is what a model is asked for. A **feature** is something already
-known that it may be told — this plant's species, this scene's coordinates
-— and until now there was no way to say so: a model received a path and a
-target, and anything else about the sample stopped at the catalog.
-
-**Role is per job, not per annotation.** The same species annotation is the
-target of a species-identification project and a feature of a disease
-project, at the same time, over one catalog. Nothing about the stored
-answer differs; only the declaration in the project that reads it. So a
-feature names *where to read a value*, and the same place can be a target
-somewhere else.
-
-Two sources, because two things are worth reading:
-
-``label_set``
-    Another label set's answer about this sample. The primary case, and the
-    one that makes a catalog's annotations compound: what a round acquires
-    today is what a later project is told tomorrow.
-
-``metadata``
-    A key on the sample itself, for values that have no label shape —
-    coordinates, a capture time, a frame's index in its video. There is no
-    class list to declare and no reviewer who could have supplied it.
-
-**A feature must be present for every sample the project draws from.** A
-review queue scores its whole unreviewed pool to rank it, so a sample whose
-feature is missing cannot be scored and would silently never surface again
-— which is a bias nobody chose. The rule is therefore countable and
-checked, not inferred from where the value came from.
+A feature is a role a project declares, not a fact about the data: it
+names where to read a value — another label set's answer, or a metadata
+key on the sample — and the same place can be a target elsewhere. A
+feature must be present for every sample the project draws from, and that
+is checked and counted. See ``docs/adr/0011``.
 """
 
 from dataclasses import dataclass
