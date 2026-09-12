@@ -19,7 +19,8 @@ from alembic.migration import MigrationContext
 from sqlalchemy import create_engine, inspect
 
 from strata.catalog import tables as t
-from strata.catalog.schema_version import MIGRATIONS, script_directory
+from strata.catalog.schema_version import MIGRATIONS
+from strata.common.migrations import SchemaOutOfDate, script_directory, stamp_if_new
 
 
 @pytest.fixture
@@ -81,7 +82,8 @@ def test_the_catalog_to_migrate_comes_from_config_toml(tmp_path, monkeypatch):
 
     command.upgrade(_config(""), "head")
 
-    assert _head_of(tmp_path / "catalog" / "catalog.db") == script_directory().get_current_head()
+    head = script_directory(MIGRATIONS).get_current_head()
+    assert _head_of(tmp_path / "catalog" / "catalog.db") == head
 
 
 def test_a_named_catalog_can_be_migrated(tmp_path, monkeypatch):
@@ -102,7 +104,8 @@ def test_a_named_catalog_can_be_migrated(tmp_path, monkeypatch):
 
     command.upgrade(alembic_config, "head")
 
-    assert _head_of(tmp_path / "b" / "catalog.db") == script_directory().get_current_head()
+    head = script_directory(MIGRATIONS).get_current_head()
+    assert _head_of(tmp_path / "b" / "catalog.db") == head
     assert not (tmp_path / "a" / "catalog.db").exists()
 
 
@@ -116,7 +119,7 @@ def test_the_migrate_command_needs_no_alembic_ini(tmp_path, monkeypatch):
 
     migrate(["upgrade", "head"])
 
-    assert _head_of(tmp_path / "catalog.db") == script_directory().get_current_head()
+    assert _head_of(tmp_path / "catalog.db") == script_directory(MIGRATIONS).get_current_head()
 
 
 def test_a_created_catalog_is_stamped_at_head(tmp_path):
@@ -128,19 +131,17 @@ def test_a_created_catalog_is_stamped_at_head(tmp_path):
     with catalog.engine.connect() as conn:
         current = MigrationContext.configure(conn).get_current_revision()
 
-    assert current == script_directory().get_current_head()
+    assert current == script_directory(MIGRATIONS).get_current_head()
 
 
 def test_stamping_leaves_a_database_mid_history_alone(url, monkeypatch):
     """A database part-way through the chain is alembic's to move, not ours."""
-    from strata.catalog.schema_version import stamp_if_new
-
     monkeypatch.setenv("STRATA_CATALOG_URL", url)
-    base = script_directory().get_base()
+    base = script_directory(MIGRATIONS).get_base()
     command.stamp(_config(url), base)
 
     engine = create_engine(url)
-    assert stamp_if_new(engine) is None
+    assert stamp_if_new(engine, MIGRATIONS) is None
 
     with engine.connect() as conn:
         assert MigrationContext.configure(conn).get_current_revision() == base
@@ -149,7 +150,7 @@ def test_stamping_leaves_a_database_mid_history_alone(url, monkeypatch):
 def test_every_migration_has_a_down_path(tmp_path, monkeypatch):
     """A chain that cannot be walked back cannot be rehearsed."""
     _upgrade(f"sqlite:///{tmp_path / 'c.db'}", monkeypatch)
-    for script in script_directory().walk_revisions():
+    for script in script_directory(MIGRATIONS).walk_revisions():
         assert Path(script.path).exists()
         assert script.down_revision is not None or script.is_base
 
@@ -162,8 +163,6 @@ def test_an_unmigrated_catalog_is_refused_rather_than_mis_stamped(tmp_path, monk
     does not have, and leaving a later `upgrade` with nothing to do.
     """
     from strata.catalog import Catalog
-    from strata.catalog.schema_version import SchemaOutOfDate
-
     root = tmp_path / "catalog"
     Catalog.local(root)
     engine = create_engine(f"sqlite:///{root / 'catalog.db'}")
@@ -178,12 +177,10 @@ def test_an_unmigrated_catalog_is_refused_rather_than_mis_stamped(tmp_path, monk
 
 def test_a_catalog_behind_head_names_the_upgrade(tmp_path):
     from strata.catalog import Catalog
-    from strata.catalog.schema_version import SchemaOutOfDate, script_directory
-
     root = tmp_path / "catalog"
     Catalog.local(root)
     engine = create_engine(f"sqlite:///{root / 'catalog.db'}")
-    base = script_directory().get_base()
+    base = script_directory(MIGRATIONS).get_base()
     with engine.begin() as conn:
         conn.exec_driver_sql("DELETE FROM alembic_version")
         conn.exec_driver_sql(f"INSERT INTO alembic_version VALUES ('{base}')")

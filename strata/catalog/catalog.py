@@ -32,6 +32,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.engine import Engine
 
+from strata.common.migrations import require_current, stamp_if_new
 from strata.labels import (
     FILES_DIR,
     MANIFEST_FORMAT,
@@ -45,7 +46,7 @@ from strata.labels import (
 from . import tables as t
 from .blobs import BlobBackend, LocalBackend, Location, blob_path, checksum_of
 from .features import FeatureError, FeatureSpec
-from .schema_version import require_current, stamp_if_new
+from .schema_version import MIGRATIONS
 from .split import assign
 
 _SCHEMA = TypeAdapter(AnySchema)
@@ -267,9 +268,9 @@ class Catalog:
         empty = not inspect(self.engine).has_table("sample")
         t.metadata.create_all(self.engine)
         if empty:
-            stamp_if_new(self.engine)
+            stamp_if_new(self.engine, MIGRATIONS)
         else:
-            require_current(self.engine, "catalog")
+            require_current(self.engine, MIGRATIONS, "catalog")
         self._mint_identity()
 
     def _mint_identity(self) -> None:

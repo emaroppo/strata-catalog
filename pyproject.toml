@@ -5,6 +5,9 @@ description = "The labelled data catalog: samples, storage, grouping, annotation
 requires-python = ">=3.13"
 dependencies = [
     "strata-labels>=0.1,<0.2",
+    # The migration plumbing and the entry-point resolver. Its migrations
+    # extra is sqlalchemy and alembic, which this package needs anyway.
+    "strata-common[migrations]>=0.1,<0.2",
     "sqlalchemy>=2.0",
     # Schema changes are migrations, not create_all: an existing database
     # never gains a column from metadata alone. See strata-catalog-migrate.
@@ -17,7 +20,7 @@ dependencies = [
 [project.optional-dependencies]
 s3 = ["boto3>=1.34"]
 # Serving blobs over HTTP, so Label Studio can stop reading a local mount.
-serve = ["fastapi>=0.110", "uvicorn>=0.29"]
+serve = ["fastapi>=0.110", "uvicorn>=0.29", "strata-common[service]>=0.1,<0.2"]
 postgres = ["psycopg[binary]>=3.2"]
 # The preparer conformance suite is importable by plugins so they can run
 # the contract against their own converter. The only thing here needing pytest.
@@ -40,6 +43,7 @@ strata-catalog-migrate = "strata.catalog.schema_version:migrate"
 
 [tool.uv.sources]
 strata-labels = { workspace = true }
+strata-common = { workspace = true }
 
 [build-system]
 requires = ["hatchling"]

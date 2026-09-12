@@ -19,13 +19,6 @@ class ConfigError(Exception):
     """A setting the server cannot start without."""
 
 
-def _required(name: str, why: str) -> str:
-    value = os.environ.get(name)
-    if not value:
-        raise ConfigError(f"${name} is not set. {why}")
-    return value
-
-
 def build():
     """The app, from the environment. Raises if anything essential is absent."""
     from .config import CatalogConfigError, CatalogMissing, host_catalog, open_catalog
@@ -60,20 +53,6 @@ def build():
 
 def main() -> None:
     """Entry point. Serves until stopped."""
-    import sys
+    from strata.common.service import serve
 
-    import uvicorn
-
-    try:
-        app = build()
-    except ConfigError as e:
-        # stderr and a non-zero exit, so a supervisor reports a failed start
-        # rather than restarting something that will never work
-        print(f"strata-blobs: {e}", file=sys.stderr)
-        raise SystemExit(2) from None
-
-    uvicorn.run(
-        app,
-        host=os.environ.get("STRATA_SERVE_HOST", "0.0.0.0"),  # noqa: S104
-        port=int(os.environ.get("STRATA_SERVE_PORT", "8081")),
-    )
+    serve(build, prog="strata-blobs", port=8081, error=ConfigError)

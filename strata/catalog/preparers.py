@@ -32,6 +32,8 @@ from importlib.metadata import entry_points
 from pathlib import Path
 from typing import ClassVar, Iterable
 
+from strata.common import plugins
+
 from .prepared import PreparedIndex, PreparedSample, relative_key
 
 #: Where a distribution advertises the preparers it provides.
@@ -168,12 +170,8 @@ def _entries():
 
 
 def available() -> dict[str, str]:
-    """Registered preparer names, and what each resolves to.
-
-    Read from what is installed, which is the only honest answer to what
-    this checkout can convert.
-    """
-    return {entry.name: entry.value for entry in _entries()}
+    """Registered preparer names, and what each resolves to."""
+    return plugins.available(_entries())
 
 
 def resolve(name: str) -> type[Preparer]:
@@ -183,24 +181,8 @@ def resolve(name: str) -> type[Preparer]:
     loaded first: two conversions of the same corpus produce different bytes,
     and the one that runs would be decided by install order.
     """
-    matches = [entry for entry in _entries() if entry.name == name]
-    if not matches:
-        known = ", ".join(sorted(available())) or "none"
-        raise PreparerError(f"No preparer named {name!r}. Installed here: {known}.")
-    if len(matches) > 1:
-        owners = ", ".join(
-            getattr(getattr(entry, "dist", None), "name", "?") for entry in matches
-        )
-        raise PreparerError(
-            f"{name!r} is registered more than once (from: {owners})."
-        )
-
-    loaded = matches[0].load()
-    if not (isinstance(loaded, type) and issubclass(loaded, Preparer)):
-        raise PreparerError(
-            f"{name!r} resolves to {loaded!r}, which is not a Preparer."
-        )
-    return loaded
+    entry = plugins.find(_entries(), name, what="preparer", error=PreparerError)
+    return plugins.load(entry, Preparer, error=PreparerError)
 
 
 def for_source(produces: str, path: Path) -> type[Preparer]:

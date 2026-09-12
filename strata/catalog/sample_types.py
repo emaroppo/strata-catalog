@@ -42,6 +42,8 @@ from importlib.metadata import entry_points
 from pathlib import Path
 from typing import ClassVar
 
+from strata.common import plugins
+
 from .prepared import index_for
 
 #: Where a distribution advertises the sample types it provides.
@@ -208,12 +210,8 @@ def _builtin_names() -> set[str]:
 
 
 def available() -> dict[str, str]:
-    """Registered type names, and what each resolves to.
-
-    Read from what is installed rather than a list someone maintains, which
-    is the only honest answer to what this catalog can ingest.
-    """
-    return {entry.name: entry.value for entry in _entries()}
+    """Registered type names, and what each resolves to."""
+    return plugins.available(_entries())
 
 
 def resolve(name: str) -> type[SampleType]:
@@ -223,27 +221,7 @@ def resolve(name: str) -> type[SampleType]:
     how everything is ingested and nothing would report it, so the clash is
     refused rather than resolved by whichever was loaded first.
     """
-    matches = [entry for entry in _entries() if entry.name == name]
-    if not matches:
-        known = ", ".join(sorted(available())) or "none"
-        raise SampleTypeError(
-            f"No sample type named {name!r}. Installed here: {known}."
-        )
-    if len(matches) > 1:
-        builtin = _builtin_names()
-        owners = ", ".join(
-            getattr(getattr(entry, "dist", None), "name", "?") for entry in matches
-        )
-        detail = (
-            f"{name!r} is provided by this catalog and cannot be replaced"
-            if name in builtin
-            else f"{name!r} is registered more than once"
-        )
-        raise SampleTypeError(f"{detail} (from: {owners}).")
-
-    loaded = matches[0].load()
-    if not (isinstance(loaded, type) and issubclass(loaded, SampleType)):
-        raise SampleTypeError(
-            f"{name!r} resolves to {loaded!r}, which is not a SampleType."
-        )
-    return loaded
+    entry = plugins.find(
+        _entries(), name, what="sample type", error=SampleTypeError, reserved=_builtin_names()
+    )
+    return plugins.load(entry, SampleType, error=SampleTypeError)
