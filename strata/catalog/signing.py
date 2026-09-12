@@ -1,23 +1,9 @@
 """Signed URLs for blobs, so a browser can fetch one without a header.
 
-Label Studio shows a sample by its URL — an image tag, a document fetch —
-and neither of them can
-carry an Authorization header. Whatever authorises the read therefore has to
-be in the URL, which means the URL itself is the credential and has to be
-worth no more than the one sample it names.
-
-A signature covers the checksum and an expiry, and nothing else. Naming the
-checksum is what stops a leaked link from being a key to the corpus: it
-authorises one blob, and knowing it tells you nothing about any other.
-
-**Expiries are quantized, and that is load-bearing.** A signature over a
-per-request timestamp would produce a different URL for the same image every
-time it was generated, so a browser could never reuse a cached copy and a
-reviewer would re-download every image on every push. Rounding the expiry up
-to a window boundary means the same blob signs to the same URL for the whole
-window, which is what makes the cache work at all. The cost is that a link
-stays valid until the end of its window rather than for exactly the
-requested lifetime.
+The URL is the credential, worth exactly one blob: the signature covers
+the checksum and an expiry, nothing else. Expiries round up to a window so
+the same blob signs to the same URL and stays cacheable. See
+``docs/adr/0013``.
 """
 
 import hmac
