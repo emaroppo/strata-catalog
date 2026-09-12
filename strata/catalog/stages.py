@@ -88,7 +88,7 @@ def dataset(request: DatasetRequest, context: Context) -> DatasetRecord:
             f"No label set named {request.label_set!r} in the catalog. "
             f"Run 'auto-labeller ingest' first, or set [catalog] label_set."
         ) from exc
-    labelled = catalog.labelled(label_set_id, request.collections)
+    labelled = catalog.samples.labelled(label_set_id, request.collections)
     if not labelled:
         raise CatalogError(
             f"Nothing is labelled for {request.label_set!r} in "

@@ -72,7 +72,7 @@ def documents(tmp_path):
 
 def _stored(catalog, data: bytes):
     """The sample addressed by these bytes, which is what a checksum is."""
-    return catalog.by_checksum(hashlib.sha256(data).hexdigest())
+    return catalog.samples.by_checksum(hashlib.sha256(data).hexdigest())
 
 
 def test_a_document_is_stored_in_canonical_form(catalog, documents):

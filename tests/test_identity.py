@@ -103,7 +103,7 @@ def test_the_catalog_keeps_the_answer_it_had(tmp_path):
     # Disputed is not unlabelled. Everything that reads an annotation wants
     # the answer, not a set of candidates.
     assert catalog.annotations.annotation_of(sample_id, label_set_id) == Choices(values=["cat"])
-    assert catalog.labelled(label_set_id, "*")
+    assert catalog.samples.labelled(label_set_id, "*")
 
 
 def test_answering_again_settles_it(tmp_path):

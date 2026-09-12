@@ -56,7 +56,7 @@ def test_an_empty_answer_is_not_the_same_as_no_answer(catalog, tmp_path, example
     # answered. Only the annotation existing distinguishes that from a
     # sample nobody has seen.
     assert catalog.annotations.annotation_of(sample_id, label_set_id) == empty
-    assert catalog.labelled(label_set_id, "*")
+    assert catalog.samples.labelled(label_set_id, "*")
 
 
 @each_type

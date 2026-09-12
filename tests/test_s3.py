@@ -244,7 +244,7 @@ def test_an_ingest_failure_leaves_no_rows_naming_a_missing_shard(tmp_path):
     label_set_id = catalog.label_sets.create(
         "x", __import__("strata.labels", fromlist=["C"]).ClassificationSchema()
     )
-    assert catalog.unlabelled(label_set_id, EVERYTHING) == []
+    assert catalog.samples.unlabelled(label_set_id, EVERYTHING) == []
 
 
 def test_materialising_from_a_bucket_pulls_shards_not_members(store, tmp_path):
@@ -283,7 +283,7 @@ def test_materialising_from_a_bucket_pulls_shards_not_members(store, tmp_path):
     assert len(manifest.samples) == 10
     # No ranges at all: the shard was pulled whole
     assert store.ranges == []
-    by_id = {r.id: r for r in catalog.labelled(label_set_id, EVERYTHING)}
+    by_id = {r.id: r for r in catalog.samples.labelled(label_set_id, EVERYTHING)}
     for sample in manifest.samples:
         source = by_id[sample.id].metadata["source_path"]
         assert (directory / sample.path).read_bytes() == bodies[source]

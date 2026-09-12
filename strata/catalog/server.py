@@ -114,7 +114,7 @@ def create_app(
             # what keeps an unsigned request from probing the catalog.
             raise HTTPException(status_code=403, detail=str(e)) from None
 
-        sample = catalog.by_checksum(checksum)
+        sample = catalog.samples.by_checksum(checksum)
         if sample is None:
             raise HTTPException(status_code=404, detail="No such blob.")
 

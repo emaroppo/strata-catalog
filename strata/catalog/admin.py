@@ -142,10 +142,10 @@ def stats(catalog: Catalog, where: str) -> Stats:
                 name=name,
                 task=schema.task,
                 multiple=getattr(schema, "multiple", None),
-                annotated=len(catalog.labelled(label_set_id, EVERYTHING)),
-                awaiting=len(catalog.unlabelled(label_set_id, EVERYTHING)),
+                annotated=len(catalog.samples.labelled(label_set_id, EVERYTHING)),
+                awaiting=len(catalog.samples.unlabelled(label_set_id, EVERYTHING)),
                 classes={
-                    c: len(catalog.with_class(label_set_id, c, EVERYTHING))
+                    c: len(catalog.samples.with_class(label_set_id, c, EVERYTHING))
                     for c in schema.classes
                 },
             )

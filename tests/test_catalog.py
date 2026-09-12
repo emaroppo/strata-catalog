@@ -32,18 +32,18 @@ def test_identical_bytes_under_two_names_are_one_sample(catalog, tmp_path):
 
 def test_ingest_records_the_group(catalog, files, label_set):
     catalog.ingest(files(3), media="image", subtype="frames", group_id="vid1")
-    assert {s.group_id for s in catalog.unlabelled(label_set, EVERYTHING)} == {"vid1"}
+    assert {s.group_id for s in catalog.samples.unlabelled(label_set, EVERYTHING)} == {"vid1"}
 
 
 def test_a_standalone_sample_has_no_group(catalog, files, label_set):
     catalog.ingest(files(3), media="image")
-    assert {s.group_id for s in catalog.unlabelled(label_set, EVERYTHING)} == {None}
+    assert {s.group_id for s in catalog.samples.unlabelled(label_set, EVERYTHING)} == {None}
 
 
 def test_the_bytes_come_back(catalog, files):
     [sample_id] = catalog.ingest(files(1), media="image")
     label_set_id = catalog.label_sets.create("x", ClassificationSchema())
-    [row] = [s for s in catalog.unlabelled(label_set_id, EVERYTHING) if s.id == sample_id]
+    [row] = [s for s in catalog.samples.unlabelled(label_set_id, EVERYTHING) if s.id == sample_id]
     assert catalog.blobs.get(row.location) == b"contents of img0"
 
 
@@ -89,7 +89,7 @@ def test_an_empty_annotation_is_a_real_answer(catalog, files, label_set):
     [sample_id] = catalog.ingest(files(1), media="image")
     catalog.annotations.annotate(sample_id, label_set, Choices())
     assert catalog.annotations.annotation_of(sample_id, label_set) == Choices()
-    assert catalog.unlabelled(label_set, EVERYTHING) == []
+    assert catalog.samples.unlabelled(label_set, EVERYTHING) == []
 
 
 def test_a_skipped_sample_has_no_value(catalog, files, label_set):
@@ -101,14 +101,14 @@ def test_a_skipped_sample_has_no_value(catalog, files, label_set):
 def test_a_skipped_sample_leaves_the_review_queue(catalog, files, label_set):
     ids = catalog.ingest(files(3), media="image")
     catalog.annotations.skip(ids[0], label_set)
-    assert {s.id for s in catalog.unlabelled(label_set, EVERYTHING)} == set(ids[1:])
+    assert {s.id for s in catalog.samples.unlabelled(label_set, EVERYTHING)} == set(ids[1:])
 
 
 def test_a_skipped_sample_is_not_training_data(catalog, files, label_set):
     ids = catalog.ingest(files(3), media="image")
     catalog.annotations.skip(ids[0], label_set)
     catalog.annotations.annotate(ids[1], label_set, Choices(values=["cat"]))
-    assert {s.id for s in catalog.labelled(label_set, EVERYTHING)} == {ids[1]}
+    assert {s.id for s in catalog.samples.labelled(label_set, EVERYTHING)} == {ids[1]}
 
 
 # ----------------------------------------------------------------------
@@ -123,13 +123,13 @@ def test_unlabelled_is_per_label_set(catalog, files):
     other = catalog.label_sets.create("other", ClassificationSchema(classes=["cat"]))
     catalog.annotations.annotate(ids[0], presence, Choices(values=["cat"]))
 
-    assert len(catalog.unlabelled(presence, EVERYTHING)) == 2
-    assert len(catalog.unlabelled(other, EVERYTHING)) == 3
+    assert len(catalog.samples.unlabelled(presence, EVERYTHING)) == 2
+    assert len(catalog.samples.unlabelled(other, EVERYTHING)) == 3
 
 
 def test_unlabelled_honours_a_limit(catalog, files, label_set):
     catalog.ingest(files(10), media="image")
-    assert len(catalog.unlabelled(label_set, EVERYTHING, limit=4)) == 4
+    assert len(catalog.samples.unlabelled(label_set, EVERYTHING, limit=4)) == 4
 
 
 def test_with_class_finds_every_sample_asserting_it(catalog, files, label_set):
@@ -138,7 +138,10 @@ def test_with_class_finds_every_sample_asserting_it(catalog, files, label_set):
     catalog.annotations.annotate(ids[1], label_set, Choices(values=["cat", "dog"]))
     catalog.annotations.annotate(ids[2], label_set, Choices(values=["dog"]))
 
-    assert {s.id for s in catalog.with_class(label_set, "cat", EVERYTHING)} == {ids[0], ids[1]}
+    assert {s.id for s in catalog.samples.with_class(label_set, "cat", EVERYTHING)} == {
+        ids[0],
+        ids[1],
+    }
 
 
 def test_the_class_index_follows_a_correction(catalog, files, label_set):
@@ -146,15 +149,15 @@ def test_the_class_index_follows_a_correction(catalog, files, label_set):
     catalog.annotations.annotate(sample_id, label_set, Choices(values=["cat"]))
     catalog.annotations.annotate(sample_id, label_set, Choices(values=["dog"]))
 
-    assert catalog.with_class(label_set, "cat", EVERYTHING) == []
-    assert len(catalog.with_class(label_set, "dog", EVERYTHING)) == 1
+    assert catalog.samples.with_class(label_set, "cat", EVERYTHING) == []
+    assert len(catalog.samples.with_class(label_set, "dog", EVERYTHING)) == 1
 
 
 def test_skipping_clears_the_class_index(catalog, files, label_set):
     [sample_id] = catalog.ingest(files(1), media="image")
     catalog.annotations.annotate(sample_id, label_set, Choices(values=["cat"]))
     catalog.annotations.skip(sample_id, label_set)
-    assert catalog.with_class(label_set, "cat", EVERYTHING) == []
+    assert catalog.samples.with_class(label_set, "cat", EVERYTHING) == []
 
 
 # ----------------------------------------------------------------------
@@ -430,17 +433,17 @@ def test_re_ingesting_backfills_a_group(catalog, files, label_set):
     # setting and re-running has to fix it, or the mistake means a rebuild
     paths = files(3)
     catalog.ingest(paths, media="image")
-    assert {s.group_id for s in catalog.unlabelled(label_set, EVERYTHING)} == {None}
+    assert {s.group_id for s in catalog.samples.unlabelled(label_set, EVERYTHING)} == {None}
 
     catalog.ingest(paths, media="image", subtype="frames", group_id="vid1")
-    assert {s.group_id for s in catalog.unlabelled(label_set, EVERYTHING)} == {"vid1"}
+    assert {s.group_id for s in catalog.samples.unlabelled(label_set, EVERYTHING)} == {"vid1"}
 
 
 def test_re_ingesting_updates_the_subtype(catalog, files, label_set):
     paths = files(2)
     catalog.ingest(paths, media="image")
     catalog.ingest(paths, media="image", subtype="frames", group_id="vid1")
-    assert {s.subtype for s in catalog.unlabelled(label_set, EVERYTHING)} == {"frames"}
+    assert {s.subtype for s in catalog.samples.unlabelled(label_set, EVERYTHING)} == {"frames"}
 
 
 def test_re_ingesting_does_not_duplicate(catalog, files):
@@ -479,7 +482,7 @@ def test_materialising_shares_inodes_with_the_blobs(materialised, catalog):
     import os
 
     sample = _manifest(materialised).samples[0]
-    row = next(s for s in catalog.labelled(1, EVERYTHING) if s.id == sample.id)
+    row = next(s for s in catalog.samples.labelled(1, EVERYTHING) if s.id == sample.id)
     assert (materialised / sample.path).stat().st_ino == (
         catalog.blobs.path_for(row.location).stat().st_ino
     )
@@ -498,7 +501,7 @@ def test_skipped_samples_can_be_listed(catalog, files, label_set):
     catalog.annotations.annotate(ids[2], label_set, Choices(values=["cat"]))
     # They belong to neither the labelled set nor the queue, so anything
     # reconstructing the whole picture needs them named
-    assert {s.id for s in catalog.skipped(label_set, EVERYTHING)} == {ids[0], ids[1]}
+    assert {s.id for s in catalog.samples.skipped(label_set, EVERYTHING)} == {ids[0], ids[1]}
 
 
 def test_the_three_states_partition_the_catalog(catalog, files, label_set):
@@ -506,9 +509,9 @@ def test_the_three_states_partition_the_catalog(catalog, files, label_set):
     catalog.annotations.skip(ids[0], label_set)
     catalog.annotations.annotate(ids[1], label_set, Choices(values=["cat"]))
     counts = (
-        len(catalog.labelled(label_set, EVERYTHING)),
-        len(catalog.skipped(label_set, EVERYTHING)),
-        len(catalog.unlabelled(label_set, EVERYTHING)),
+        len(catalog.samples.labelled(label_set, EVERYTHING)),
+        len(catalog.samples.skipped(label_set, EVERYTHING)),
+        len(catalog.samples.unlabelled(label_set, EVERYTHING)),
     )
     assert counts == (1, 1, 4)
     assert sum(counts) == len(ids)
@@ -524,21 +527,21 @@ def test_a_query_must_say_what_it_draws_from(catalog, files, label_set):
     # Forgetting to scope is how one project's queue fills with another's
     # data, so it cannot be forgotten
     with pytest.raises(TypeError):
-        catalog.unlabelled(label_set)
+        catalog.samples.unlabelled(label_set)
 
 
 def test_an_empty_list_is_refused_rather_than_guessed(catalog, files, label_set):
     catalog.ingest(files(3), media="image", collections=["a"])
     with pytest.raises(CatalogError, match="EVERYTHING"):
-        catalog.unlabelled(label_set, [])
+        catalog.samples.unlabelled(label_set, [])
 
 
 def test_the_queue_is_scoped(catalog, files, label_set):
     catalog.ingest(files(3, prefix="a"), media="image", collections=["a"])
     catalog.ingest(files(5, prefix="b"), media="image", collections=["b"])
-    assert len(catalog.unlabelled(label_set, ["a"])) == 3
-    assert len(catalog.unlabelled(label_set, ["b"])) == 5
-    assert len(catalog.unlabelled(label_set, EVERYTHING)) == 8
+    assert len(catalog.samples.unlabelled(label_set, ["a"])) == 3
+    assert len(catalog.samples.unlabelled(label_set, ["b"])) == 5
+    assert len(catalog.samples.unlabelled(label_set, EVERYTHING)) == 8
 
 
 def test_training_data_is_scoped_too(catalog, files, label_set):
@@ -548,15 +551,15 @@ def test_training_data_is_scoped_too(catalog, files, label_set):
     # Dropping a collection declares that data out of scope, training
     # included: quietly carrying it would move the metrics as well as the
     # model, and neither would say why
-    assert len(catalog.labelled(label_set, ["a"])) == 3
-    assert len(catalog.labelled(label_set, EVERYTHING)) == 5
+    assert len(catalog.samples.labelled(label_set, ["a"])) == 3
+    assert len(catalog.samples.labelled(label_set, EVERYTHING)) == 5
 
 
 def test_selecting_a_collection_selects_what_is_under_it(catalog, files, label_set):
     catalog.ingest(files(2, prefix="x"), media="image", collections=["sat/2024"])
     catalog.ingest(files(3, prefix="y"), media="image", collections=["sat/2025"])
-    assert len(catalog.unlabelled(label_set, ["sat"])) == 5
-    assert len(catalog.unlabelled(label_set, ["sat/2024"])) == 2
+    assert len(catalog.samples.unlabelled(label_set, ["sat"])) == 5
+    assert len(catalog.samples.unlabelled(label_set, ["sat/2024"])) == 2
 
 
 def test_a_prefix_does_not_swallow_a_sibling(catalog, files, label_set):
@@ -564,7 +567,7 @@ def test_a_prefix_does_not_swallow_a_sibling(catalog, files, label_set):
     catalog.ingest(files(3, prefix="y"), media="image", collections=["sat_old"])
     # A bare LIKE 'sat%' would take both, which is the whole reason the
     # match is spelled out
-    assert len(catalog.unlabelled(label_set, ["sat"])) == 2
+    assert len(catalog.samples.unlabelled(label_set, ["sat"])) == 2
 
 
 def test_a_sample_can_belong_to_several_collections(catalog, files, label_set):
@@ -573,9 +576,9 @@ def test_a_sample_can_belong_to_several_collections(catalog, files, label_set):
     catalog.ingest(paths, media="image", collections=["second"])
     # Added rather than replaced: the same images feeding two jobs is what
     # makes a corpus worth keeping
-    assert len(catalog.unlabelled(label_set, ["first"])) == 4
-    assert len(catalog.unlabelled(label_set, ["second"])) == 4
-    assert len(catalog.unlabelled(label_set, EVERYTHING)) == 4
+    assert len(catalog.samples.unlabelled(label_set, ["first"])) == 4
+    assert len(catalog.samples.unlabelled(label_set, ["second"])) == 4
+    assert len(catalog.samples.unlabelled(label_set, EVERYTHING)) == 4
 
 
 def test_a_sample_in_several_collections_appears_once(catalog, files, label_set):
@@ -584,13 +587,13 @@ def test_a_sample_in_several_collections_appears_once(catalog, files, label_set)
     catalog.ingest(paths, media="image", collections=["b"])
     # A join would return it once per membership; nothing downstream expects
     # a queue with the same sample three times in it
-    assert len(catalog.unlabelled(label_set, ["a", "b"])) == 3
+    assert len(catalog.samples.unlabelled(label_set, ["a", "b"])) == 3
 
 
 def test_a_sample_in_no_collection_is_reachable_only_deliberately(catalog, files, label_set):
     catalog.ingest(files(3), media="image")
-    assert catalog.unlabelled(label_set, ["anything"]) == []
-    assert len(catalog.unlabelled(label_set, EVERYTHING)) == 3
+    assert catalog.samples.unlabelled(label_set, ["anything"]) == []
+    assert len(catalog.samples.unlabelled(label_set, EVERYTHING)) == 3
 
 
 def test_a_dataset_must_be_told_where_to_draw_from(catalog, files, label_set):
@@ -669,8 +672,8 @@ def test_discard_removes_one_source_and_returns_samples_to_the_queue(catalog, fi
     assert catalog.annotations.discard(label_set_id, "import") == 1
 
     # The imported one is unlabelled again, the answered one untouched
-    assert [row.id for row in catalog.unlabelled(label_set_id, EVERYTHING)] == [ids[0]]
-    assert [row.id for row in catalog.labelled(label_set_id, EVERYTHING)] == [ids[1]]
+    assert [row.id for row in catalog.samples.unlabelled(label_set_id, EVERYTHING)] == [ids[0]]
+    assert [row.id for row in catalog.samples.labelled(label_set_id, EVERYTHING)] == [ids[1]]
     assert catalog.annotations.annotation_of(ids[0], label_set_id) is None
 
 
@@ -679,10 +682,10 @@ def test_discard_clears_the_class_index_too(catalog, files):
     label_set_id = catalog.label_sets.create("x", ClassificationSchema(classes=["cat"]))
     ids = catalog.ingest(files(1), media="image")
     catalog.annotations.annotate(ids[0], label_set_id, Choices(values=["cat"]), source="import")
-    assert catalog.with_class(label_set_id, "cat", EVERYTHING)
+    assert catalog.samples.with_class(label_set_id, "cat", EVERYTHING)
 
     catalog.annotations.discard(label_set_id, "import")
-    assert catalog.with_class(label_set_id, "cat", EVERYTHING) == []
+    assert catalog.samples.with_class(label_set_id, "cat", EVERYTHING) == []
 
 
 def test_discard_names_a_source_that_is_not_there(catalog):
@@ -708,7 +711,7 @@ def test_an_import_does_not_replace_a_persons_answer(catalog, files, label_set):
     assert catalog.annotations.annotation_of(ids[0], label_set) == Choices(values=["dog"])
     assert catalog.annotations.annotation_of(ids[1], label_set) == Choices(values=["cat"])
     # The class index follows what was kept, not what was offered
-    assert [s.id for s in catalog.with_class(label_set, "cat", EVERYTHING)] == [ids[1]]
+    assert [s.id for s in catalog.samples.with_class(label_set, "cat", EVERYTHING)] == [ids[1]]
 
 
 def test_an_import_does_not_replace_a_persons_skip(catalog, files, label_set):
@@ -719,7 +722,7 @@ def test_an_import_does_not_replace_a_persons_skip(catalog, files, label_set):
     assert not catalog.annotations.annotate(
         sample, label_set, Choices(values=["cat"]), source="import"
     )
-    assert [s.id for s in catalog.skipped(label_set, EVERYTHING)] == [sample]
+    assert [s.id for s in catalog.samples.skipped(label_set, EVERYTHING)] == [sample]
 
 
 def test_a_person_replaces_an_import(catalog, files, label_set):

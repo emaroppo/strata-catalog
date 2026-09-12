@@ -176,7 +176,7 @@ def test_a_skip_is_copied_where_the_target_knows_nothing(pair):
 
     main_set, _ = main.label_sets.get("demo")
     assert report.skipped == 1
-    assert [s.id for s in main.skipped(main_set, "*")] == [ids[0]]
+    assert [s.id for s in main.samples.skipped(main_set, "*")] == [ids[0]]
 
 
 def test_an_answer_beats_a_skip(pair):
@@ -331,7 +331,7 @@ def test_an_import_does_not_beat_a_persons_skip(pair):
     report = merge_annotations(laptop, main)
 
     assert (report.outranked, report.copied) == (1, 0)
-    assert [s.id for s in main.skipped(main_set, "*")] == [ids[0]]
+    assert [s.id for s in main.samples.skipped(main_set, "*")] == [ids[0]]
 
 
 def test_two_imports_that_disagree_are_a_conflict(pair):

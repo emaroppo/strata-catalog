@@ -142,7 +142,7 @@ def merge_annotations(
 def _merge_one(
     target, target_set_id, schema, origin, checksum, state, raw, answered_by, report, dry_run
 ) -> None:
-    sample = target.by_checksum(checksum)
+    sample = target.samples.by_checksum(checksum)
     if sample is None:
         # By content, so a file that arrived under a different name on the
         # laptop still finds its sample here. If the bytes are unknown, the

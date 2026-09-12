@@ -105,7 +105,7 @@ def test_copy_moves_the_index_and_keeps_ids(stocked, config, tmp_path, capsys):
     copied = Catalog.connect(target, stocked.blobs)
     assert copied.id == stocked.id
     label_set = copied.label_sets.get("presence")[0]
-    assert len(copied.labelled(label_set, EVERYTHING)) == 4
+    assert len(copied.samples.labelled(label_set, EVERYTHING)) == 4
 
 
 def test_merge_reports_before_it_writes(stocked, config, tmp_path, capsys):
@@ -115,19 +115,19 @@ def test_merge_reports_before_it_writes(stocked, config, tmp_path, capsys):
 
     copy_index(stocked, other)
     label_set = other.label_sets.get("presence")[0]
-    pool = other.unlabelled(label_set, EVERYTHING)
+    pool = other.samples.unlabelled(label_set, EVERYTHING)
     other.annotations.annotate(pool[0].id, label_set, Choices(values=["dog"]))
 
     code, out = run(capsys, "--config", str(config), "merge", "--from", other_url)
     assert code == 0 and "Nothing was written" in out
-    assert len(stocked.labelled(stocked.label_sets.get("presence")[0], EVERYTHING)) == 4
+    assert len(stocked.samples.labelled(stocked.label_sets.get("presence")[0], EVERYTHING)) == 4
 
     code, out = run(
         capsys, "--config", str(config), "--json", "merge", "--from", other_url, "--apply"
     )
     assert code == 0
     assert json.loads(out)["copied"] == 1
-    assert len(stocked.labelled(stocked.label_sets.get("presence")[0], EVERYTHING)) == 5
+    assert len(stocked.samples.labelled(stocked.label_sets.get("presence")[0], EVERYTHING)) == 5
 
 
 def test_repack_needs_a_bucket(stocked, config, capsys):

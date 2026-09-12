@@ -112,8 +112,14 @@ def test_the_schema_creates(catalog):
     from sqlalchemy import inspect
 
     tables = set(inspect(catalog.engine).get_table_names())
-    assert {"sample", "label_set", "annotation", "annotation_class",
-            "dataset", "dataset_member"} <= tables
+    assert {
+        "sample",
+        "label_set",
+        "annotation",
+        "annotation_class",
+        "dataset",
+        "dataset_member",
+    } <= tables
 
 
 def test_ingest_and_dedup(catalog, files):
@@ -126,10 +132,11 @@ def test_ingest_and_dedup(catalog, files):
 def test_reserved_words_in_the_schema_are_quoted(catalog, files):
     # `offset` is reserved in SQL and `metadata` is an awkward name; if
     # either were unquoted this is where it would surface
-    [sample_id] = catalog.ingest(files(1), media="image",
-                                 metadata_for=lambda p: {"source_path": p.name})
+    [sample_id] = catalog.ingest(
+        files(1), media="image", metadata_for=lambda p: {"source_path": p.name}
+    )
     label_set_id = catalog.label_sets.create("x", ClassificationSchema(classes=["a"]))
-    [row] = catalog.unlabelled(label_set_id, EVERYTHING)
+    [row] = catalog.samples.unlabelled(label_set_id, EVERYTHING)
     assert row.location.offset == 0
     assert row.metadata["source_path"].endswith(".jpg")
 
@@ -142,9 +149,12 @@ def test_annotations_and_the_class_index(catalog, files):
     catalog.annotations.annotate(ids[0], label_set_id, Choices(values=["cat"]))
     catalog.annotations.annotate(ids[1], label_set_id, Choices(values=["cat", "dog"]))
 
-    assert {s.id for s in catalog.with_class(label_set_id, "cat", EVERYTHING)} == {ids[0], ids[1]}
-    assert len(catalog.labelled(label_set_id, EVERYTHING)) == 2
-    assert len(catalog.unlabelled(label_set_id, EVERYTHING)) == 2
+    assert {s.id for s in catalog.samples.with_class(label_set_id, "cat", EVERYTHING)} == {
+        ids[0],
+        ids[1],
+    }
+    assert len(catalog.samples.labelled(label_set_id, EVERYTHING)) == 2
+    assert len(catalog.samples.unlabelled(label_set_id, EVERYTHING)) == 2
 
 
 def test_the_three_states_partition(catalog, files):
@@ -153,9 +163,9 @@ def test_the_three_states_partition(catalog, files):
     catalog.annotations.annotate(ids[0], label_set_id, Choices(values=["a"]))
     catalog.annotations.skip(ids[1], label_set_id)
     assert (
-        len(catalog.labelled(label_set_id, EVERYTHING)),
-        len(catalog.skipped(label_set_id, EVERYTHING)),
-        len(catalog.unlabelled(label_set_id, EVERYTHING)),
+        len(catalog.samples.labelled(label_set_id, EVERYTHING)),
+        len(catalog.samples.skipped(label_set_id, EVERYTHING)),
+        len(catalog.samples.unlabelled(label_set_id, EVERYTHING)),
     ) == (1, 1, 3)
 
 
@@ -163,8 +173,10 @@ def test_a_grouped_split_holds(catalog, files, tmp_path):
     label_set_id = catalog.label_sets.create("x", ClassificationSchema(classes=["a"]))
     for group in range(4):
         ids = catalog.ingest(
-            files(5, prefix=f"v{group}_"), media="image",
-            subtype="frames", group_id=f"vid{group}",
+            files(5, prefix=f"v{group}_"),
+            media="image",
+            subtype="frames",
+            group_id=f"vid{group}",
         )
         catalog.annotations.annotate_many(label_set_id, [(i, Choices(values=["a"])) for i in ids])
 
@@ -204,12 +216,13 @@ def populated(tmp_path, files):
     ids = []
     for group in ("vid1", "vid2"):
         ids += source.ingest(
-            files(4, prefix=f"{group}_"), media="image", subtype="frames",
-            group_id=group, metadata_for=lambda p: {"source_path": p.name},
+            files(4, prefix=f"{group}_"),
+            media="image",
+            subtype="frames",
+            group_id=group,
+            metadata_for=lambda p: {"source_path": p.name},
         )
-    source.annotations.annotate_many(
-        label_set_id, [(i, Choices(values=["cat"])) for i in ids[:5]]
-    )
+    source.annotations.annotate_many(label_set_id, [(i, Choices(values=["cat"])) for i in ids[:5]])
     source.annotations.skip(ids[5], label_set_id)
     source.create_dataset("d", label_set_id, collections=EVERYTHING)
     return source, label_set_id, ids
@@ -233,7 +246,7 @@ def test_sample_ids_are_preserved(populated, catalog):
     copy_index(source, catalog)
     # Annotations, dataset members and the Label Studio task map are all
     # keyed on these; renumbering would repoint every task at another image
-    assert {s.id for s in catalog.labelled(label_set_id, EVERYTHING)} == set(ids[:5])
+    assert {s.id for s in catalog.samples.labelled(label_set_id, EVERYTHING)} == set(ids[:5])
 
 
 def test_annotations_and_their_index_arrive(populated, catalog):
@@ -242,8 +255,8 @@ def test_annotations_and_their_index_arrive(populated, catalog):
     source, label_set_id, ids = populated
     copy_index(source, catalog)
     assert catalog.annotations.annotation_of(ids[0], label_set_id) == Choices(values=["cat"])
-    assert len(catalog.with_class(label_set_id, "cat", EVERYTHING)) == 5
-    assert len(catalog.skipped(label_set_id, EVERYTHING)) == 1
+    assert len(catalog.samples.with_class(label_set_id, "cat", EVERYTHING)) == 5
+    assert len(catalog.samples.skipped(label_set_id, EVERYTHING)) == 1
 
 
 def test_grouping_and_metadata_survive(populated, catalog):
@@ -251,7 +264,7 @@ def test_grouping_and_metadata_survive(populated, catalog):
 
     source, label_set_id, _ = populated
     copy_index(source, catalog)
-    rows = catalog.labelled(label_set_id, EVERYTHING)
+    rows = catalog.samples.labelled(label_set_id, EVERYTHING)
     assert {r.group_id for r in rows} == {"vid1", "vid2"}
     assert all((r.metadata or {}).get("source_path") for r in rows)
 

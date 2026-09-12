@@ -14,7 +14,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from sqlalchemy import and_, func, insert, inspect, select, update
+from sqlalchemy import and_, insert, inspect, select
 from sqlalchemy.engine import Engine
 
 from strata.common import database
@@ -33,17 +33,13 @@ from .blobs import BlobBackend, LocalBackend, Location, blob_path, checksum_of
 from .features import FeatureError, FeatureSpec
 from .label_sets import LabelSets
 from .rows import (
-    SAMPLE_COLUMNS,
     SCHEMA,
     VALUE,
     CatalogError,
     DatasetRef,
-    SampleRow,
     chunks,
-    live,
-    sample_rows,
-    scoped,
 )
+from .samples import Samples
 from .schema_version import MIGRATIONS
 from .split import assign
 
@@ -120,6 +116,7 @@ class Catalog:
         self.blobs = blobs
         self.label_sets = LabelSets(engine)
         self.annotations = Annotations(engine)
+        self.samples = Samples(engine)
 
     @classmethod
     def local(cls, root: Path) -> "Catalog":
@@ -253,154 +250,33 @@ class Catalog:
                         path, canonicalise, Path(scratch), entry
                     )
                 checksum = checksum_of(source)
-                existing = conn.execute(
-                    select(t.sample.c.id).where(t.sample.c.checksum == checksum)
-                ).scalar_one_or_none()
-                if existing is not None:
-                    conn.execute(
-                        update(t.sample)
-                        .where(t.sample.c.id == existing)
-                        .values(subtype=subtype, group_id=group_id, metadata=entry)
+                known = self.samples.find(conn, checksum)
+                if known is None:
+                    location = self.blobs.put(source, checksum)
+                    known = self.samples.add(
+                        conn,
+                        checksum,
+                        location,
+                        media=media,
+                        subtype=subtype,
+                        group_id=group_id,
+                        metadata=entry,
                     )
-                    ids.append(existing)
-                    if on_sample is not None:
-                        on_sample(path)
-                    continue
-                location = self.blobs.put(source, checksum)
-                ids.append(
-                    conn.execute(
-                        insert(t.sample).values(
-                            location=location.container,
-                            offset=location.offset,
-                            length=location.length,
-                            checksum=checksum,
-                            media=media,
-                            subtype=subtype,
-                            group_id=group_id,
-                            metadata=entry,
-                        )
-                    ).inserted_primary_key[0]
-                )
+                else:
+                    self.samples.describe(
+                        conn, known, subtype=subtype, group_id=group_id, metadata=entry
+                    )
+                ids.append(known)
                 if on_sample is not None:
                     on_sample(path)
 
-            for sample_id in ids:
-                for name in collections:
-                    exists = conn.execute(
-                        select(t.sample_collection.c.sample_id).where(
-                            and_(
-                                t.sample_collection.c.sample_id == sample_id,
-                                t.sample_collection.c.collection == name,
-                            )
-                        )
-                    ).first()
-                    if not exists:
-                        conn.execute(
-                            insert(t.sample_collection).values(
-                                sample_id=sample_id, collection=name
-                            )
-                        )
+            self.samples.collect(conn, ids, collections)
 
             # Inside the transaction and before it commits: a backend that
             # packs has not made its objects exist yet, and rows naming a
             # shard that failed to upload would be worse than no rows.
             self.blobs.flush()
         return ids
-
-    # ------------------------------------------------------------------
-    # Queries
-    # ------------------------------------------------------------------
-
-    def unlabelled(
-        self, label_set_id: int, collections, limit: int | None = None
-    ) -> list[SampleRow]:
-        """Samples nobody has dealt with, drawn from ``collections``.
-
-        Per label set, not global: a sample can be classified and still be
-        waiting for boxes. Skipped samples have a row, so they are excluded
-        by the same join rather than by a second condition.
-
-        Scoped, because a catalog holding several jobs' data would otherwise
-        offer every one of them to every job. What a project draws from is
-        the project's declaration, not the catalog's.
-        """
-        stmt = (
-            select(*SAMPLE_COLUMNS)
-            .outerjoin(
-                t.annotation,
-                and_(
-                    t.annotation.c.sample_id == t.sample.c.id,
-                    t.annotation.c.label_set_id == label_set_id,
-                ),
-            )
-            .where(and_(live(), t.annotation.c.sample_id.is_(None)))
-        )
-        stmt = scoped(stmt, collections)
-        if limit is not None:
-            stmt = stmt.limit(limit)
-        with self.engine.connect() as conn:
-            return sample_rows(conn, stmt)
-
-    def labelled(self, label_set_id: int, collections) -> list[SampleRow]:
-        """Samples with a real answer — skipped ones are not training data.
-
-        Scoped like the queue. Dropping a collection from a project means
-        declaring that data out of scope, training included: quietly
-        carrying it would move the metrics as well as the model, and neither
-        would say why. Keeping what is already answered while asking for no
-        more is what skipping is for.
-        """
-        return self._joined(
-            t.annotation,
-            t.annotation.c.label_set_id == label_set_id,
-            t.annotation.c.state == t.ANNOTATED,
-            collections=collections,
-        )
-
-    def skipped(self, label_set_id: int, collections) -> list[SampleRow]:
-        """Samples reviewed with nothing applicable.
-
-        Neither training data nor queue: they belong to neither of the other
-        two, so anything reconstructing the whole picture needs them named.
-        """
-        return self._joined(
-            t.annotation,
-            t.annotation.c.label_set_id == label_set_id,
-            t.annotation.c.state == t.SKIPPED,
-            collections=collections,
-        )
-
-    def with_class(self, label_set_id: int, class_name: str, collections) -> list[SampleRow]:
-        """Every sample asserting a class — the join the index table exists for."""
-        return self._joined(
-            t.annotation_class,
-            t.annotation_class.c.label_set_id == label_set_id,
-            t.annotation_class.c.class_name == class_name,
-            collections=collections,
-        )
-
-    def _joined(self, table, *predicates, collections) -> list[SampleRow]:
-        """Live samples with a row in ``table`` meeting ``predicates``, in scope."""
-        stmt = (
-            select(*SAMPLE_COLUMNS)
-            .join(table, table.c.sample_id == t.sample.c.id)
-            .where(and_(live(), *predicates))
-        )
-        with self.engine.connect() as conn:
-            return sample_rows(conn, scoped(stmt, collections))
-
-    def by_checksum(self, checksum: str) -> SampleRow | None:
-        """The sample with these bytes, or None.
-
-        The lookup behind every reference that has to survive a move: a
-        task URL, a cache key, a manifest entry. See ``docs/adr/0001``.
-        """
-        stmt = select(*SAMPLE_COLUMNS).where(
-            and_(live(), t.sample.c.checksum == checksum)
-        )
-        with self.engine.connect() as conn:
-            rows = sample_rows(conn, stmt)
-        return rows[0] if rows else None
 
     # ------------------------------------------------------------------
     # Datasets
@@ -430,7 +306,7 @@ class Catalog:
                     "draw them from; defaulting to the whole catalog would "
                     "quietly train on another job's data."
                 )
-            sample_ids = [s.id for s in self.labelled(label_set_id, collections)]
+            sample_ids = [s.id for s in self.samples.labelled(label_set_id, collections)]
         if not sample_ids:
             raise CatalogError(f"No labelled samples for label set {label_set_id}")
 
@@ -455,21 +331,7 @@ class Catalog:
                 or 0
             ) + 1
             inherited = self._previous_split(conn, name)
-            # Chunked for the reason _chunks exists: one bound parameter per
-            # sample, against a limit that depends on the interpreter. An
-            # apt-installed Python allows 250,000 of them and a uv-managed
-            # one 32,766, so a corpus this held fine on one machine failed on
-            # another — and failed before the round did anything, which at
-            # least made it loud.
-            groups: dict[int, str | None] = {}
-            for chunk in chunks(list(sample_ids), 500):
-                groups.update(
-                    conn.execute(
-                        select(t.sample.c.id, t.sample.c.group_id).where(
-                            t.sample.c.id.in_(chunk)
-                        )
-                    ).all()
-                )
+            groups = self.samples.groups(conn, sample_ids)
             sides, achieved = assign(
                 groups, inherited, val_ratio=val_ratio, holdout_ratio=holdout_ratio, seed=seed
             )
@@ -587,26 +449,13 @@ class Catalog:
         missing: list[tuple[Location, Path]] = []
 
         with self.engine.connect() as conn:
-            for chunk in chunks(list(checksums), 500):
-                rows = conn.execute(
-                    select(
-                        t.sample.c.checksum,
-                        t.sample.c.location,
-                        t.sample.c.offset,
-                        t.sample.c.length,
-                        t.sample.c.metadata,
-                    ).where(and_(live(), t.sample.c.checksum.in_(chunk)))
-                )
-                for row in rows:
-                    suffix = Path(
-                        (row.metadata or {}).get("source_path") or ""
-                    ).suffix.lower()
-                    target = cache / blob_path(row.checksum, suffix)
-                    paths[row.checksum] = target
-                    if not target.exists():
-                        missing.append(
-                            (Location(row.location, row.offset, row.length), target)
-                        )
+            rows = self.samples.located(conn, checksums)
+        for row in rows:
+            suffix = Path((row.metadata or {}).get("source_path") or "").suffix.lower()
+            target = cache / blob_path(row.checksum, suffix)
+            paths[row.checksum] = target
+            if not target.exists():
+                missing.append((Location(row.location, row.offset, row.length), target))
 
         done, total = len(paths) - len(missing), len(paths)
         if on_progress is not None:
@@ -638,31 +487,6 @@ class Catalog:
                 if on_progress is not None:
                     on_progress(done, total)
         return paths
-
-    def composition(self, collections) -> dict[tuple[str, str], int]:
-        """What the samples in these collections are, keyed (media, subtype).
-
-        A project declares both so ``ingest`` can work before anything is
-        catalogued: media picks which files count, and subtype decides
-        whether they are grouped. Afterwards the samples are the truth, and
-        the two can disagree — a collection a project did not fill, or a
-        declaration changed after the fact.
-
-        Subtype is the one that matters quietly. Frames ingested as plain
-        images each become their own group, so near-duplicates land on both
-        sides of a train/val split and validation reads high for a model
-        that has memorised them.
-        """
-        stmt = (
-            select(t.sample.c.media, t.sample.c.subtype, func.count())
-            .where(live())
-            .group_by(t.sample.c.media, t.sample.c.subtype)
-        )
-        with self.engine.connect() as conn:
-            return {
-                (row[0], row[1]): row[2]
-                for row in conn.execute(scoped(stmt, collections))
-            }
 
     def dataset_named(self, dataset_id: int) -> DatasetRef:
         """A dataset's name, version and digest, without materialising it.
@@ -863,14 +687,10 @@ class Catalog:
 
     def _feature_from_metadata(self, conn, spec, sample_ids) -> dict[int, object]:
         found: dict[int, object] = {}
-        for chunk in chunks(list(sample_ids), 500):
-            rows = conn.execute(
-                select(t.sample.c.id, t.sample.c.metadata).where(t.sample.c.id.in_(chunk))
-            ).all()
-            for sample_id, metadata in rows:
-                value = (metadata or {}).get(spec.ref)
-                if value is not None:
-                    found[sample_id] = value
+        for sample_id, metadata in self.samples.metadata(conn, sample_ids).items():
+            value = metadata.get(spec.ref)
+            if value is not None:
+                found[sample_id] = value
         return found
 
     def _feature_from_label_set(self, conn, spec, sample_ids) -> dict[int, object]:
