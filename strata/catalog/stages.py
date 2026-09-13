@@ -194,16 +194,18 @@ class SplitRequest(Strict):
 
 
 class SplitRecord(Strict):
-    """The realisation: which sample landed where, by checksum."""
+    """Where the sides are, and how many samples landed on each.
+
+    The realisation itself — which sample landed where — is not here. It
+    is the manifest in ``directory``, and the run store records it beside
+    the run that trained on it, as what that run saw. A record names what
+    it made and never embeds it.
+    """
 
     directory: Path
     drawn: bool
     seed: int | None
-    sides: dict[Literal["train", "val", "holdout"], list[str]]
-
-    @property
-    def counts(self) -> dict[str, int]:
-        return {side: len(checksums) for side, checksums in self.sides.items()}
+    counts: dict[Literal["train", "val", "holdout"], int]
 
 
 def split(request: SplitRequest, context: Context) -> SplitRecord:
@@ -211,7 +213,7 @@ def split(request: SplitRequest, context: Context) -> SplitRecord:
     manifest = Manifest.model_validate_json((source / MANIFEST_NAME).read_text())
 
     if request.seed is None:
-        return SplitRecord(directory=source, drawn=False, seed=None, sides=_sides(manifest))
+        return SplitRecord(directory=source, drawn=False, seed=None, counts=_counts(manifest))
 
     members = {i: sample.group_id for i, sample in enumerate(manifest.samples)}
     assigned, achieved = assign(
@@ -220,25 +222,59 @@ def split(request: SplitRequest, context: Context) -> SplitRecord:
         holdout_ratio=request.holdout_ratio,
         seed=request.seed,
     )
-    samples = [
-        sample.model_copy(update={"split": assigned[i]})
-        for i, sample in enumerate(manifest.samples)
-    ]
-    drawn = manifest.model_copy(
-        update={
-            "samples": samples,
-            "val_ratio": request.val_ratio,
-            "val_ratio_achieved": achieved.val,
-            "holdout_ratio": request.holdout_ratio,
-            "holdout_ratio_achieved": achieved.holdout,
-        }
-    )
-
+    del achieved  # recomputed from the sides by apply_sides, the same way
     # Beside the version, named for the draw, so two seeds are two
     # directories and the same seed is the same one.
     tag = short_hash(
         {"seed": request.seed, "val": request.val_ratio, "holdout": request.holdout_ratio},
         length=12,
+    )
+    directory, drawn = apply_sides(
+        source,
+        manifest,
+        [assigned[i] for i in range(len(manifest.samples))],
+        val_ratio=request.val_ratio,
+        holdout_ratio=request.holdout_ratio,
+        tag=tag,
+    )
+    return SplitRecord(directory=directory, drawn=True, seed=request.seed, counts=_counts(drawn))
+
+
+def apply_sides(
+    source: Path,
+    manifest: Manifest,
+    sides: list[str],
+    *,
+    val_ratio: float | None,
+    holdout_ratio: float | None,
+    tag: str,
+) -> tuple[Path, Manifest]:
+    """A copy of ``source`` whose manifest puts each sample on the side given, by position.
+
+    Used by ``split`` for a draw it made and by the modelling host for a
+    draw a caller sent, so the same code writes the same directory either
+    way. Beside the version, named for ``tag``: the same draw is the same
+    directory and another draw is another. The version on disk is never
+    rewritten, since the catalog reuses it by name.
+    """
+    if len(sides) != len(manifest.samples):
+        raise CatalogError(
+            f"{len(sides)} side(s) for a manifest of {len(manifest.samples)} sample(s)."
+        )
+    samples = [
+        sample.model_copy(update={"split": side})
+        for sample, side in zip(manifest.samples, sides, strict=True)
+    ]
+    counts = _counts_of(samples)
+    total = len(samples) or 1
+    rewritten = manifest.model_copy(
+        update={
+            "samples": samples,
+            "val_ratio": val_ratio,
+            "val_ratio_achieved": counts[VAL] / total,
+            "holdout_ratio": holdout_ratio,
+            "holdout_ratio_achieved": counts[HOLDOUT] / total,
+        }
     )
     directory = source.parent / f"{source.name}-split-{tag}"
     if not (directory / MANIFEST_NAME).exists():
@@ -247,15 +283,19 @@ def split(request: SplitRequest, context: Context) -> SplitRecord:
             target.parent.mkdir(parents=True, exist_ok=True)
             if not target.exists():
                 link_or_copy(source / sample.path, target)
-        (directory / MANIFEST_NAME).write_text(drawn.model_dump_json(indent=2))
-    return SplitRecord(directory=directory, drawn=True, seed=request.seed, sides=_sides(drawn))
+        (directory / MANIFEST_NAME).write_text(rewritten.model_dump_json(indent=2))
+    return directory, rewritten
 
 
-def _sides(manifest: Manifest) -> dict[str, list[str]]:
-    sides: dict[str, list[str]] = {TRAIN: [], VAL: [], HOLDOUT: []}
-    for sample in manifest.samples:
-        sides[sample.split].append(sample.checksum)
-    return sides
+def _counts(manifest: Manifest) -> dict[str, int]:
+    return _counts_of(manifest.samples)
+
+
+def _counts_of(samples) -> dict[str, int]:
+    counts = {TRAIN: 0, VAL: 0, HOLDOUT: 0}
+    for sample in samples:
+        counts[sample.split] += 1
+    return counts
 
 
 STAGES = (

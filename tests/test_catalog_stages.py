@@ -117,7 +117,7 @@ def test_the_default_reads_the_sides_the_version_carries(built, context):
     assert not record.drawn and record.seed is None
     assert record.counts == {"train": 12, "val": 4, "holdout": 4}
     manifest = _manifest(built.directory)
-    assert set(record.sides["holdout"]) == {s.checksum for s in manifest.holdout}
+    assert record.counts["holdout"] == len(manifest.holdout)
 
 
 def test_a_seed_draws_its_own_sides_into_a_copy(built, context):
@@ -130,7 +130,7 @@ def test_a_seed_draws_its_own_sides_into_a_copy(built, context):
     # Group-aware: whole videos, so the counts are multiples of four
     assert record.counts == {"train": 8, "val": 8, "holdout": 4}
     drawn = _manifest(record.directory)
-    assert {s.checksum for s in drawn.val} == set(record.sides["val"])
+    assert len(drawn.val) == record.counts["val"]
     assert (drawn.val_ratio, drawn.holdout_ratio) == (0.4, 0.2)
     assert all((record.directory / s.path).exists() for s in drawn.samples)
     # The version on disk is untouched: the catalog reuses it by name
@@ -138,12 +138,31 @@ def test_a_seed_draws_its_own_sides_into_a_copy(built, context):
     assert len(_manifest(built.directory).val) == 4
 
 
+def test_sides_given_by_position_are_applied_to_a_copy(built):
+    # What the modelling host does with a split a caller sent
+    from strata.catalog.stages import apply_sides
+
+    manifest = _manifest(built.directory)
+    sides = ["holdout"] * 4 + ["train"] * (len(manifest.samples) - 4)
+    directory, rewritten = apply_sides(
+        built.directory, manifest, sides, val_ratio=0.0, holdout_ratio=0.2, tag="given"
+    )
+    assert directory == built.directory.parent / f"{built.directory.name}-split-given"
+    assert [s.split for s in _manifest(directory).samples] == sides
+    assert rewritten.holdout_ratio_achieved == 4 / len(sides)
+    assert all((directory / s.path).exists() for s in rewritten.samples)
+    # The version itself keeps its sides
+    assert [s.split for s in _manifest(built.directory).samples] != sides
+
+
 def test_the_same_seed_is_the_same_draw_and_directory(built, context):
     a = split(SplitRequest(dataset_dir=built.directory, seed=3), context)
     b = split(SplitRequest(dataset_dir=built.directory, seed=3), context)
     c = split(SplitRequest(dataset_dir=built.directory, seed=4), context)
-    assert a.directory == b.directory and a.sides == b.sides
-    assert c.directory != a.directory and c.sides != a.sides
+    assert a.directory == b.directory and a.counts == b.counts
+    assert c.directory != a.directory
+    sides = lambda record: [s.split for s in _manifest(record.directory).samples]  # noqa: E731
+    assert sides(a) == sides(b) and sides(c) != sides(a)
 
 
 def test_a_drawn_manifest_is_still_a_manifest(built, context):
