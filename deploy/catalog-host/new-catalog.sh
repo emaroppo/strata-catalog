@@ -104,5 +104,5 @@ To point everything at it: set  default = "$name"  under [catalog] in each of
 those files, restart the services —
     here:      docker compose -f $here/docker-compose.yml up -d blobs
     GPU host:  systemctl --user restart strata-modelling
-— and run  auto-labeller catalog-check  on the laptop.
+— and run  strata-labeller catalog-check  on the laptop.
 EOF

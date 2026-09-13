@@ -268,7 +268,7 @@ def open_catalog(config: CatalogConfig, *, create: bool = False) -> Catalog:
     root = Path(config.root)
     if not create and not (root / "catalog.db").exists():
         raise CatalogMissing(
-            f"No catalog at {root}. Run 'auto-labeller ingest' to make one, "
+            f"No catalog at {root}. Ingest a project into it to make one, "
             f"or point [catalog] root at an existing one."
         )
     root.mkdir(parents=True, exist_ok=True)

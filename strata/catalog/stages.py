@@ -87,7 +87,7 @@ def dataset(request: DatasetRequest, context: Context) -> DatasetRecord:
     except CatalogError as exc:
         raise CatalogError(
             f"No label set named {request.label_set!r} in the catalog. "
-            f"Run 'auto-labeller ingest' first, or set [catalog] label_set."
+            f"Run ingest first, or set [catalog] label_set."
         ) from exc
     labelled = catalog.samples.labelled(label_set_id, request.collections)
     if not labelled:
