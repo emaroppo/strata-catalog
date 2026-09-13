@@ -293,6 +293,27 @@ class Annotations:
         # catalog silently forgets what a human actually said.
         return VALUE.validate_python(row.value)
 
+    def values_of(self, label_set_id: int, sample_ids: Iterable[int]) -> dict[int, AnyValue]:
+        """The current answer of each of ``sample_ids`` that has one, by id."""
+        found: dict[int, AnyValue] = {}
+        ids = list(sample_ids)
+        with self.engine.connect() as conn:
+            for start in range(0, len(ids), 500):
+                rows = conn.execute(
+                    select(t.annotation.c.sample_id, t.annotation.c.value).where(
+                        and_(
+                            t.annotation.c.label_set_id == label_set_id,
+                            t.annotation.c.sample_id.in_(ids[start : start + 500]),
+                            t.annotation.c.state == t.ANNOTATED,
+                            current(),
+                        )
+                    )
+                ).all()
+                for sample_id, raw in rows:
+                    if raw is not None:
+                        found[sample_id] = VALUE.validate_python(raw)
+        return found
+
     def history(self, sample_id: int, label_set_id: int) -> list[Answer]:
         """Everything ever said about a sample under a label set, oldest first.
 
