@@ -100,7 +100,9 @@ def repack_blobs(
             # Group order keeps a video's frames in one shard. Nulls are
             # their own group, so where they fall does not matter; id breaks
             # the tie so a resumed run repeats the previous ordering.
-            .order_by(t.sample.c.group_id, t.sample.c.id)
+            # Ingest order: a corpus is walked directory by directory, so
+            # a video's frames arrive together and pack together
+            .order_by(t.sample.c.id)
         ).all()
 
     if dry_run:

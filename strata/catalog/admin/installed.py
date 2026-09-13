@@ -48,13 +48,10 @@ class TypeEntry(Strict):
     media: str
     subtype: str
     extensions: list[str]
-    #: Whether it overrides grouping: the difference between frames staying
-    #: together and each one being its own group.
-    groups: bool
 
 
 def types() -> list[TypeEntry]:
-    from ..types.sample_types import SampleType, available, resolve
+    from ..types.sample_types import available, resolve
 
     return [
         TypeEntry(
@@ -62,7 +59,6 @@ def types() -> list[TypeEntry]:
             media=(cls := resolve(name)).media,
             subtype=cls.subtype(),
             extensions=sorted(cls.extensions),
-            groups=cls.group_id_for is not SampleType.group_id_for,
         )
         for name in sorted(available())
     ]

@@ -42,8 +42,7 @@ class Splitter(Preparer):
             path.write_bytes(unicodedata.normalize("NFC", line).encode("utf-8"))
             yield Prepared(
                 path=path,
-                metadata={"line": index, "from": source.name},
-                group_id=source.stem,
+                metadata={"line": index, "from": source.name, "log": source.stem},
             )
 
 
@@ -162,9 +161,14 @@ def test_it_writes_the_corpus_and_the_index(log, tmp_path):
         "corpus-001.txt",
     ]
     assert index.produced_by == "splitter"
-    assert index.samples["corpus-000.txt"].metadata == {"line": 0, "from": "corpus.log"}
-    # Grouping stated as a fact about the data rather than a directory layout
-    assert index.samples["corpus-001.txt"].group_id == "corpus"
+    assert index.samples["corpus-000.txt"].metadata == {
+        "line": 0,
+        "from": "corpus.log",
+        "log": "corpus",
+    }
+    # A grouping is a fact about the data, recorded as a key a project can
+    # name, rather than a directory layout
+    assert index.samples["corpus-001.txt"].metadata["log"] == "corpus"
 
 
 def test_a_source_it_cannot_read_is_refused_not_skipped(tmp_path):
@@ -196,7 +200,7 @@ def test_a_second_run_adds_to_the_corpus(log, tmp_path):
 def test_an_index_written_by_hand_survives_a_run(log, tmp_path):
     out = tmp_path / "out"
     out.mkdir()
-    PreparedIndex(samples={"kept.txt": PreparedSample(group_id="elsewhere")}).save(out)
+    PreparedIndex(samples={"kept.txt": PreparedSample(metadata={"log": "elsewhere"})}).save(out)
     index = run(Splitter(), [log], out)
     assert "kept.txt" in index.samples
 

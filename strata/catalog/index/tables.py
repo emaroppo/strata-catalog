@@ -11,10 +11,12 @@ local backend writes ``(path relative to the blob root, 0, size)`` — a file
 is a shard of one — so that packing samples into tars later is a new backend
 rather than a migration.
 
-``group_id`` is what keeps near-duplicates on one side of a train/val split.
-Null means the sample is its own group, which is the ordinary case; frames
-of one video share a value. Because it is per-sample data rather than
-configuration, one catalog holds standalone images and video frames at once.
+A grouping — which samples belong together, so a split can keep them on
+one side — is a metadata key, not a column. Frames carry ``video``, mail
+may carry ``thread``, and a project can write any key of its own. Nothing
+groups unless a version is frozen with ``group_by`` naming a key, and one
+catalog can be split by several groupings in turn. The dataset records
+which key it respected.
 """
 
 from sqlalchemy import (
@@ -75,15 +77,14 @@ sample = Table(
     Column("checksum", String(64), nullable=False, unique=True),
     Column("media", String(32), nullable=False),
     Column("subtype", String(32), nullable=False, default="plain"),
-    Column("group_id", String(255), nullable=True),
     # Subtype-specific and deliberately unconstrained: frame index, capture
-    # time, band count, message id.
+    # time, band count, message id — and any grouping key, such as the
+    # video a frame came from.
     Column("metadata", JSON, nullable=True),
     Column("ingested_at", DateTime, server_default=func.now()),
     # Shards are immutable, so removal is a tombstone and a compaction pass
     # later rather than a delete.
     Column("deleted_at", DateTime, nullable=True),
-    Index("ix_sample_group", "group_id"),
     Index("ix_sample_subtype", "media", "subtype"),
 )
 
@@ -94,8 +95,8 @@ sample = Table(
 #: the whole reason a catalog is worth keeping.
 #:
 #: Distinct from ``media``/``subtype``, which say what a sample is made of,
-#: and from ``group_id``, which says what must not straddle a split. One
-#: collection holds many groups; the three axes are independent.
+#: and from any grouping key in its metadata. One collection holds many
+#: groups; the axes are independent.
 sample_collection = Table(
     "sample_collection",
     metadata,
@@ -173,6 +174,9 @@ dataset = Table(
     # Zero unless a study asked for one.
     Column("holdout_ratio", Float, nullable=False, default=0.0),
     Column("holdout_ratio_achieved", Float, nullable=False, default=0.0),
+    # The metadata key whose values were kept on one side when the split
+    # was drawn. Null means none: every sample was its own group.
+    Column("group_by", String(255), nullable=True),
     Column("created_at", DateTime, server_default=func.now()),
     UniqueConstraint("name", "version"),
 )

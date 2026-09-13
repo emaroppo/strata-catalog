@@ -56,6 +56,7 @@ class Datasets:
                     t.dataset.c.val_ratio_achieved,
                     t.dataset.c.holdout_ratio,
                     t.dataset.c.holdout_ratio_achieved,
+                    t.dataset.c.group_by,
                     t.label_set.c.name.label("label_set"),
                     t.label_set.c.schema,
                 )
@@ -81,7 +82,6 @@ class Datasets:
                     t.sample.c.location,
                     t.sample.c.offset,
                     t.sample.c.length,
-                    t.sample.c.group_id,
                     t.sample.c.metadata,
                     t.dataset_member.c.side,
                     t.annotation.c.state,
@@ -109,11 +109,13 @@ class Datasets:
         digest: str | None = None,
         val_ratio: float | None = None,
         holdout_ratio: float | None = None,
+        group_by: str | None = None,
     ) -> int | None:
         """The latest version of ``name``, if it froze exactly this.
 
-        Exactly this: the same members, the same answers about them, and
-        the same holdout ratio asked for. See ``docs/adr/0003``.
+        Exactly this: the same members, the same answers about them, the
+        same ratios asked for, and the same grouping respected. See
+        ``docs/adr/0003``.
         """
         latest = conn.execute(
             select(
@@ -121,6 +123,7 @@ class Datasets:
                 t.dataset.c.annotation_digest,
                 t.dataset.c.val_ratio,
                 t.dataset.c.holdout_ratio,
+                t.dataset.c.group_by,
             )
             .where(t.dataset.c.name == name)
             .order_by(t.dataset.c.version.desc())
@@ -137,6 +140,8 @@ class Datasets:
         if val_ratio is not None and latest.val_ratio != val_ratio:
             return None
         if holdout_ratio is not None and latest.holdout_ratio != holdout_ratio:
+            return None
+        if latest.group_by != group_by:
             return None
         members = {
             row[0]
@@ -189,6 +194,7 @@ class Datasets:
         holdout_ratio: float,
         achieved: Achieved,
         sides: dict[int, str],
+        group_by: str | None = None,
     ) -> int:
         """Write a version and its members. One statement per chunk of members."""
         dataset_id = conn.execute(
@@ -202,6 +208,7 @@ class Datasets:
                 val_ratio_achieved=achieved.val,
                 holdout_ratio=holdout_ratio,
                 holdout_ratio_achieved=achieved.holdout,
+                group_by=group_by,
             )
         ).inserted_primary_key[0]
         members = [

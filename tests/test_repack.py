@@ -62,7 +62,7 @@ def stocked(tmp_path):
             path.write_bytes(f"group {group} image {i}".encode() * (i + 1))
             contents[path.name] = path.read_bytes()
             paths.append(path)
-        catalog.ingest(paths, media="image", group_id=f"vid{group}")
+        catalog.ingest(paths, media="image", metadata={"video": f"vid{group}"})
     return catalog, contents
 
 
@@ -121,10 +121,12 @@ def test_a_group_is_packed_in_one_run(stocked, store):
     order = {key: i for i, key in enumerate(report.shards)}
     with catalog.engine.connect() as conn:
         rows = conn.execute(
-            select(t.sample.c.group_id, t.sample.c.location, t.sample.c.offset)
+            select(t.sample.c.metadata, t.sample.c.location, t.sample.c.offset)
         ).all()
+    # Ingest order is the packing order, and a corpus is ingested video by
+    # video, so each video's frames land together
     laid_out = [
-        row.group_id
+        row.metadata["video"]
         for row in sorted(rows, key=lambda r: (order[r.location], r.offset))
     ]
     # Each group appears as one unbroken run

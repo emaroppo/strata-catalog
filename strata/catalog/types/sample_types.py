@@ -122,7 +122,10 @@ class SampleType:
         """What to record about this sample beyond its bytes.
 
         Where it came from is added by ingest itself; this is for what only
-        the type knows — a capture time, a coordinate system, a frame index.
+        the type knows — a capture time, a coordinate system, a frame index,
+        the video a frame belongs to. A grouping is a key in here like any
+        other: nothing about it is special until a version is frozen with
+        ``group_by`` naming the key.
 
         The default hands back whatever a conversion recorded for this file.
         A type that overrides this and still wants that should call
@@ -132,17 +135,6 @@ class SampleType:
         prepared = index_for(root)
         entry = prepared.entry_for(path, root) if prepared is not None else None
         return dict(entry.metadata) if entry is not None else {}
-
-    def group_id_for(self, path: Path, root: Path) -> str | None:
-        """Which group this sample belongs to, or None for its own.
-
-        Samples sharing a group are never split across sides. The default
-        is what a conversion declared, which knows better than a directory
-        layout.
-        """
-        prepared = index_for(root)
-        entry = prepared.entry_for(path, root) if prepared is not None else None
-        return entry.group_id if entry is not None else None
 
 
 # ----------------------------------------------------------------------

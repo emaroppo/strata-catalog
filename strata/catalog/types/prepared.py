@@ -1,10 +1,10 @@
 """What a prepared corpus carries beside its files.
 
 One index at the corpus root: what a conversion knew about each file that
-a filename cannot hold — metadata, grouping, and any candidate annotation
-the corpus arrived with. ``SampleType.metadata_for`` and ``group_id_for``
-read it by default, so a type gets both without knowing a converter
-exists. See ``docs/adr/0010``.
+a filename cannot hold — metadata, including any grouping key such as the
+video a frame came from, and any candidate annotation the corpus arrived
+with. ``SampleType.metadata_for`` reads it by default, so a type gets it
+without knowing a converter exists. See ``docs/adr/0010``.
 """
 
 import json
@@ -21,11 +21,10 @@ PREPARED_NAME = "prepared.json"
 class PreparedSample(BaseModel):
     """What a conversion knew about one file it wrote."""
 
-    #: Recorded on the sample at ingest, alongside where it came from.
+    #: Recorded on the sample at ingest, alongside where it came from. A
+    #: grouping — the video frames came from, the thread a message is in —
+    #: is a key in here, respected by a version frozen with ``group_by``.
     metadata: dict = Field(default_factory=dict)
-    #: Samples sharing one are never split across train and validation.
-    #: Null means the sample is its own group.
-    group_id: str | None = None
     #: The annotation the corpus arrived with, where it arrived with one.
     #:
     #: **A candidate, never ground truth.** Corpora that come labelled come

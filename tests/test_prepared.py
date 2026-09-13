@@ -143,12 +143,11 @@ def test_without_the_hook_bytes_are_stored_as_they_are(catalog, documents):
 def test_an_index_round_trips(tmp_path):
     index = PreparedIndex(
         produced_by="eml",
-        samples={"a.txt": PreparedSample(metadata={"from": "bob"}, group_id="thread-1")},
+        samples={"a.txt": PreparedSample(metadata={"from": "bob", "thread": "thread-1"})},
     )
     index.save(tmp_path)
     back = PreparedIndex.load(tmp_path)
-    assert back.samples["a.txt"].metadata == {"from": "bob"}
-    assert back.samples["a.txt"].group_id == "thread-1"
+    assert back.samples["a.txt"].metadata == {"from": "bob", "thread": "thread-1"}
 
 
 def test_a_corpus_nobody_prepared_has_no_index(tmp_path):
@@ -156,8 +155,8 @@ def test_a_corpus_nobody_prepared_has_no_index(tmp_path):
 
 
 def test_merging_keeps_what_the_first_run_wrote(tmp_path):
-    first = PreparedIndex(samples={"a.txt": PreparedSample(group_id="one")})
-    second = PreparedIndex(samples={"b.txt": PreparedSample(group_id="two")})
+    first = PreparedIndex(samples={"a.txt": PreparedSample(metadata={"thread": "one"})})
+    second = PreparedIndex(samples={"b.txt": PreparedSample(metadata={"thread": "two"})})
     merged = first.merge(second)
     # Converting a source directory that grew adds to the corpus rather
     # than forgetting the rest of it
@@ -169,20 +168,17 @@ def test_a_type_reads_what_a_conversion_recorded(tmp_path):
     root.mkdir()
     (root / "msg.txt").write_text("hello")
     PreparedIndex(
-        samples={"msg.txt": PreparedSample(metadata={"from": "bob"}, group_id="t1")}
+        samples={"msg.txt": PreparedSample(metadata={"from": "bob", "thread": "t1"})}
     ).save(root)
 
-    text = Text()
-    # A type gets prepared metadata and prepared grouping without knowing a
-    # converter exists
-    assert text.metadata_for(root / "msg.txt", root) == {"from": "bob"}
-    assert text.group_id_for(root / "msg.txt", root) == "t1"
+    # A type gets prepared metadata — a grouping key among it — without
+    # knowing a converter exists
+    assert Text().metadata_for(root / "msg.txt", root) == {"from": "bob", "thread": "t1"}
 
 
 def test_a_type_asks_nothing_of_a_corpus_nobody_prepared(tmp_path):
     (tmp_path / "msg.txt").write_text("hello")
     assert Text().metadata_for(tmp_path / "msg.txt", tmp_path) == {}
-    assert Text().group_id_for(tmp_path / "msg.txt", tmp_path) is None
 
 
 def test_frames_prefer_what_extracted_them_to_the_directory(tmp_path):
@@ -190,12 +186,12 @@ def test_frames_prefer_what_extracted_them_to_the_directory(tmp_path):
     (root / "somewhere").mkdir(parents=True)
     frame = root / "somewhere" / "0001.jpg"
     frame.write_bytes(b"x")
-    PreparedIndex(samples={"somewhere/0001.jpg": PreparedSample(group_id="video-7")}).save(
-        root
-    )
+    PreparedIndex(
+        samples={"somewhere/0001.jpg": PreparedSample(metadata={"video": "video-7"})}
+    ).save(root)
     # What extracted the frames knows which video they came from; the
     # directory is how a corpus nobody prepared says the same thing
-    assert Frames().group_id_for(frame, root) == "video-7"
+    assert Frames().metadata_for(frame, root)["video"] == "video-7"
 
 
 def test_frames_fall_back_to_the_directory(tmp_path):
@@ -203,7 +199,7 @@ def test_frames_fall_back_to_the_directory(tmp_path):
     (root / "video-3").mkdir(parents=True)
     frame = root / "video-3" / "0001.jpg"
     frame.write_bytes(b"x")
-    assert Frames().group_id_for(frame, root) == "video-3"
+    assert Frames().metadata_for(frame, root) == {"video": "video-3"}
 
 
 def test_a_corrupt_index_does_not_stop_an_ingest(tmp_path):
@@ -220,8 +216,8 @@ def test_a_reprepared_corpus_is_not_read_from_a_stale_parse(tmp_path):
     root = tmp_path / "corpus"
     root.mkdir()
     (root / "msg.txt").write_text("hello")
-    PreparedIndex(samples={"msg.txt": PreparedSample(group_id="first")}).save(root)
-    assert Text().group_id_for(root / "msg.txt", root) == "first"
+    PreparedIndex(samples={"msg.txt": PreparedSample(metadata={"thread": "first"})}).save(root)
+    assert Text().metadata_for(root / "msg.txt", root) == {"thread": "first"}
 
-    PreparedIndex(samples={"msg.txt": PreparedSample(group_id="second")}).save(root)
-    assert Text().group_id_for(root / "msg.txt", root) == "second"
+    PreparedIndex(samples={"msg.txt": PreparedSample(metadata={"thread": "second"})}).save(root)
+    assert Text().metadata_for(root / "msg.txt", root) == {"thread": "second"}

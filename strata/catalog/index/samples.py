@@ -38,7 +38,6 @@ class Samples:
         *,
         media: str,
         subtype: str,
-        group_id: str | None,
         metadata: dict | None,
     ) -> int:
         """A new row for bytes already stored at ``location``."""
@@ -50,14 +49,11 @@ class Samples:
                 checksum=checksum,
                 media=media,
                 subtype=subtype,
-                group_id=group_id,
                 metadata=metadata,
             )
         ).inserted_primary_key[0]
 
-    def describe(
-        self, conn, sample_id: int, *, subtype: str, group_id: str | None, metadata: dict | None
-    ) -> None:
+    def describe(self, conn, sample_id: int, *, subtype: str, metadata: dict | None) -> None:
         """Bring a known sample's description up to date.
 
         Updated rather than left alone, so correcting how a corpus is
@@ -68,7 +64,7 @@ class Samples:
         conn.execute(
             update(t.sample)
             .where(t.sample.c.id == sample_id)
-            .values(subtype=subtype, group_id=group_id, metadata=metadata)
+            .values(subtype=subtype, metadata=metadata)
         )
 
     def collect(self, conn, sample_ids: Iterable[int], collections: Iterable[str]) -> None:
@@ -93,16 +89,19 @@ class Samples:
                         insert(t.sample_collection).values(sample_id=sample_id, collection=name)
                     )
 
-    def groups(self, conn, sample_ids: Sequence[int]) -> dict[int, str | None]:
-        """Each sample's group, None for its own."""
-        found: dict[int, str | None] = {}
-        for chunk in chunks(list(sample_ids)):
-            found.update(
-                conn.execute(
-                    select(t.sample.c.id, t.sample.c.group_id).where(t.sample.c.id.in_(chunk))
-                ).all()
-            )
-        return found
+    def grouping(self, conn, sample_ids: Sequence[int], key: str | None) -> dict[int, str | None]:
+        """Each sample's group under metadata ``key``, None for its own.
+
+        No key means no grouping: every sample is its own group. A sample
+        without the key, or with a null under it, is its own group too —
+        nothing groups unless the data says so.
+        """
+        if key is None:
+            return dict.fromkeys(sample_ids)
+        return {
+            sample_id: (None if (value := metadata.get(key)) is None else str(value))
+            for sample_id, metadata in self.metadata(conn, sample_ids).items()
+        }
 
     def metadata(self, conn, sample_ids: Sequence[int]) -> dict[int, dict]:
         """Each sample's recorded metadata, empty where there is none."""

@@ -23,20 +23,28 @@ class Image(SampleType):
 
 
 class Frames(Image):
-    """Video frames, one directory per video, grouped so a video never straddles a split."""
+    """Video frames, one directory per video, each recording which video under ``video``.
+
+    A project freezing its versions with ``group_by = "video"`` keeps a
+    video's frames on one side of the split; one that does not treats each
+    frame as its own sample.
+    """
 
     segment: ClassVar[str] = "frames"
 
-    def group_id_for(self, path: Path, root: Path) -> str:
+    #: The metadata key a frame's video is recorded under.
+    VIDEO: ClassVar[str] = "video"
+
+    def metadata_for(self, path: Path, root: Path) -> dict:
         # What extracted the frames knows which video they came from, and
         # says so; the directory is how a corpus nobody prepared says the
         # same thing.
-        declared = super().group_id_for(path, root)
-        if declared is not None:
-            return declared
+        known = super().metadata_for(path, root)
+        if known.get(self.VIDEO) is not None:
+            return known
         relative = Path(path).resolve().relative_to(Path(root).resolve())
         # The directory, so a video is a group however deep it sits
-        return relative.parent.as_posix()
+        return {**known, self.VIDEO: relative.parent.as_posix()}
 
 
 class Text(SampleType):

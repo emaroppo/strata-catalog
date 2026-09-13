@@ -176,11 +176,13 @@ def test_a_grouped_split_holds(catalog, files, tmp_path):
             files(5, prefix=f"v{group}_"),
             media="image",
             subtype="frames",
-            group_id=f"vid{group}",
+            metadata={"video": f"vid{group}"},
         )
         catalog.annotations.annotate_many(label_set_id, [(i, Choices(values=["a"])) for i in ids])
 
-    dataset_id = catalog.create_dataset("d", label_set_id, collections=EVERYTHING)
+    dataset_id = catalog.create_dataset(
+        "d", label_set_id, collections=EVERYTHING, group_by="video"
+    )
     from strata.labels import Manifest
 
     directory = catalog.materialise(dataset_id, tmp_path / "out")
@@ -188,7 +190,7 @@ def test_a_grouped_split_holds(catalog, files, tmp_path):
 
     sides = {}
     for sample in manifest.samples:
-        sides.setdefault(sample.group_id, set()).add(sample.split)
+        sides.setdefault(sample.metadata["video"], set()).add(sample.split)
     assert all(len(v) == 1 for v in sides.values())
 
 
@@ -219,12 +221,12 @@ def populated(tmp_path, files):
             files(4, prefix=f"{group}_"),
             media="image",
             subtype="frames",
-            group_id=group,
+            metadata={"video": group},
             metadata_for=lambda p: {"source_path": p.name},
         )
     source.annotations.annotate_many(label_set_id, [(i, Choices(values=["cat"])) for i in ids[:5]])
     source.annotations.skip(ids[5], label_set_id)
-    source.create_dataset("d", label_set_id, collections=EVERYTHING)
+    source.create_dataset("d", label_set_id, collections=EVERYTHING, group_by="video")
     return source, label_set_id, ids
 
 
@@ -265,7 +267,7 @@ def test_grouping_and_metadata_survive(populated, catalog):
     source, label_set_id, _ = populated
     copy_index(source, catalog)
     rows = catalog.samples.labelled(label_set_id, EVERYTHING)
-    assert {r.group_id for r in rows} == {"vid1", "vid2"}
+    assert {r.metadata["video"] for r in rows} == {"vid1", "vid2"}
     assert all((r.metadata or {}).get("source_path") for r in rows)
 
 

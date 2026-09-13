@@ -1,4 +1,4 @@
-"""What is in a catalog: samples, grouping, collections, and each label set."""
+"""What is in a catalog: samples, collections, and each label set."""
 
 
 from sqlalchemy import func, select
@@ -13,17 +13,6 @@ from .where import Strict
 # ----------------------------------------------------------------------
 
 
-class GroupSizes(Strict):
-    smallest: int
-    largest: int
-    median: int
-    #: The largest group's share of the catalog: a group is indivisible, so
-    #: this is the floor on how coarse a split can be.
-    largest_share: float
-    #: Groups holding one sample, for which grouping changes nothing.
-    singletons: int
-
-
 class LabelSetStats(Strict):
     name: str
     task: str
@@ -36,13 +25,10 @@ class LabelSetStats(Strict):
 
 
 class Stats(Strict):
-    """What is in a catalog: samples, grouping, collections, and each label set."""
+    """What is in a catalog: samples, collections, and each label set."""
 
     where: str
     samples: int
-    groups: int
-    ungrouped: int
-    group_sizes: GroupSizes | None
     collections: dict[str, int]
     #: Reachable only through EVERYTHING, so no project would ever see them.
     uncollected: int
@@ -58,23 +44,6 @@ def stats(catalog: Catalog, where: str) -> Stats:
     """
     with catalog.engine.connect() as conn:
         total = conn.execute(select(func.count()).select_from(t.sample)).scalar() or 0
-        groups = conn.execute(
-            select(func.count(func.distinct(t.sample.c.group_id))).where(
-                t.sample.c.group_id.is_not(None)
-            )
-        ).scalar() or 0
-        ungrouped = conn.execute(
-            select(func.count()).select_from(t.sample).where(t.sample.c.group_id.is_(None))
-        ).scalar() or 0
-        sizes = sorted(
-            row.n
-            for row in conn.execute(
-                select(func.count().label("n"))
-                .select_from(t.sample)
-                .where(t.sample.c.group_id.is_not(None))
-                .group_by(t.sample.c.group_id)
-            )
-        )
         collections = dict(
             conn.execute(
                 select(t.sample_collection.c.collection, func.count())
@@ -111,19 +80,6 @@ def stats(catalog: Catalog, where: str) -> Stats:
     return Stats(
         where=where,
         samples=total,
-        groups=groups,
-        ungrouped=ungrouped,
-        group_sizes=(
-            GroupSizes(
-                smallest=sizes[0],
-                largest=sizes[-1],
-                median=sizes[len(sizes) // 2],
-                largest_share=sizes[-1] / max(total, 1),
-                singletons=sum(1 for n in sizes if n == 1),
-            )
-            if sizes
-            else None
-        ),
         collections=collections,
         uncollected=uncollected,
         label_sets=label_sets,

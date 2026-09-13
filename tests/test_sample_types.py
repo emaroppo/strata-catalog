@@ -112,11 +112,11 @@ def test_a_subtype_inherits_what_it_admits():
 # ----------------------------------------------------------------------
 
 
-def test_a_plain_sample_is_its_own_group():
-    assert Image().group_id_for(Path("/data/a.jpg"), Path("/data")) is None
+def test_a_plain_sample_records_no_grouping():
+    assert Image().metadata_for(Path("/data/a.jpg"), Path("/data")) == {}
 
 
-def test_frames_group_by_the_directory_they_sit_in(tmp_path):
+def test_frames_record_the_directory_they_sit_in_as_their_video(tmp_path):
     (tmp_path / "vid1").mkdir()
     first = tmp_path / "vid1" / "f001.jpg"
     second = tmp_path / "vid1" / "f002.jpg"
@@ -127,10 +127,11 @@ def test_frames_group_by_the_directory_they_sit_in(tmp_path):
         path.write_bytes(b"x")
 
     frames = Frames()
-    # Consecutive frames are near-duplicates; a split that separates them
-    # scores a model on what it memorised
-    assert frames.group_id_for(first, tmp_path) == frames.group_id_for(second, tmp_path)
-    assert frames.group_id_for(third, tmp_path) != frames.group_id_for(first, tmp_path)
+    # Consecutive frames are near-duplicates; a project that freezes with
+    # group_by = "video" keeps them on one side, and this is the key it names
+    video = lambda p: frames.metadata_for(p, tmp_path)["video"]  # noqa: E731
+    assert video(first) == video(second) == "vid1"
+    assert video(third) == "vid2"
 
 
 # ----------------------------------------------------------------------

@@ -23,7 +23,9 @@ def stocked(catalog, files):
     label_set = catalog.label_sets.create("presence", ClassificationSchema(classes=["cat"]))
     ids = []
     for group in range(5):
-        ids += catalog.ingest(files(4, prefix=f"vid{group}"), media="image", group_id=f"vid{group}")
+        ids += catalog.ingest(
+            files(4, prefix=f"vid{group}"), media="image", metadata={"video": f"vid{group}"}
+        )
     catalog.annotations.annotate_many(label_set, [(i, Choices(values=["cat"])) for i in ids])
     return catalog
 
@@ -34,7 +36,13 @@ def context(stocked, tmp_path) -> Context:
 
 
 def _request(**overrides) -> DatasetRequest:
-    fields = {"name": "d", "label_set": "presence", "collections": [EVERYTHING]}
+    # Grouped by video, as a frames project would ask
+    fields = {
+        "name": "d",
+        "label_set": "presence",
+        "collections": [EVERYTHING],
+        "group_by": "video",
+    }
     return DatasetRequest(**{**fields, **overrides})
 
 
@@ -116,12 +124,27 @@ def test_the_default_reads_the_sides_the_version_carries(built, context):
     assert record.directory == built.directory
     assert not record.drawn and record.seed is None
     assert record.counts == {"train": 12, "val": 4, "holdout": 4}
+    # The key the version was frozen under, since the sides are its own
+    assert record.group_by == "video"
     manifest = _manifest(built.directory)
     assert record.counts["holdout"] == len(manifest.holdout)
 
 
+def test_a_draw_may_group_by_another_key_or_none(built, context):
+    # A directory carries every sample's metadata, so a study can split the
+    # same version by video for one trial and frame by frame for another
+    by_video = split(SplitRequest(dataset_dir=built.directory, seed=3, group_by="video"), context)
+    loose = split(SplitRequest(dataset_dir=built.directory, seed=3), context)
+    assert by_video.directory != loose.directory
+    assert (by_video.group_by, loose.group_by) == ("video", None)
+    assert all(n % 4 == 0 for n in by_video.counts.values())
+    assert _manifest(loose.directory).group_by is None
+
+
 def test_a_seed_draws_its_own_sides_into_a_copy(built, context):
-    request = SplitRequest(dataset_dir=built.directory, seed=3, val_ratio=0.4, holdout_ratio=0.2)
+    request = SplitRequest(
+        dataset_dir=built.directory, seed=3, val_ratio=0.4, holdout_ratio=0.2, group_by="video"
+    )
     record = split(request, context)
 
     assert record.drawn and record.seed == 3
@@ -156,9 +179,9 @@ def test_sides_given_by_position_are_applied_to_a_copy(built):
 
 
 def test_the_same_seed_is_the_same_draw_and_directory(built, context):
-    a = split(SplitRequest(dataset_dir=built.directory, seed=3), context)
-    b = split(SplitRequest(dataset_dir=built.directory, seed=3), context)
-    c = split(SplitRequest(dataset_dir=built.directory, seed=4), context)
+    a = split(SplitRequest(dataset_dir=built.directory, seed=3, group_by="video"), context)
+    b = split(SplitRequest(dataset_dir=built.directory, seed=3, group_by="video"), context)
+    c = split(SplitRequest(dataset_dir=built.directory, seed=4, group_by="video"), context)
     assert a.directory == b.directory and a.counts == b.counts
     assert c.directory != a.directory
     sides = lambda record: [s.split for s in _manifest(record.directory).samples]  # noqa: E731
@@ -166,7 +189,7 @@ def test_the_same_seed_is_the_same_draw_and_directory(built, context):
 
 
 def test_a_drawn_manifest_is_still_a_manifest(built, context):
-    record = split(SplitRequest(dataset_dir=built.directory, seed=1), context)
+    record = split(SplitRequest(dataset_dir=built.directory, seed=1, group_by="video"), context)
     payload = json.loads((record.directory / MANIFEST_NAME).read_text())
     assert payload["format"] == _manifest(built.directory).format
     assert {s["split"] for s in payload["samples"]} <= {"train", "val", "holdout"}

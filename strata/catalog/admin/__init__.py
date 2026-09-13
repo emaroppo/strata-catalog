@@ -8,13 +8,12 @@ own reports; this holds the ones that were only ever a command body.
 
 from .installed import CatalogEntry, PreparerEntry, TypeEntry, catalogs, preparers, types
 from .probe import BlobProbe, IndexProbe, Probe, probe
-from .stats import GroupSizes, LabelSetStats, Stats, stats
+from .stats import LabelSetStats, Stats, stats
 from .where import redacted, where_blobs, where_index
 
 __all__ = [
     "BlobProbe",
     "CatalogEntry",
-    "GroupSizes",
     "IndexProbe",
     "LabelSetStats",
     "PreparerEntry",

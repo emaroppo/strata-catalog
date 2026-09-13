@@ -27,8 +27,8 @@ from a directory into a tar in a bucket.
 built in; a plugin adds `satellite` by subclassing `Image`, or `email` by
 subclassing `Text`, and everything that accepts the parent accepts it. A
 type declares the extensions it admits, checked and reported rather than
-used to discover; what metadata to read off a file; how samples group; and
-what canonical form its bytes are stored in. Text is stored one way, UTF-8,
+used to discover; what metadata to read off a file, the video a frame came
+from included; and what canonical form its bytes are stored in. Text is stored one way, UTF-8,
 LF, NFC, no BOM, so two documents that read identically are one sample and
 a reviewer and a tokenizer see the same character offsets. Encoding is
 refused rather than guessed.
@@ -46,10 +46,12 @@ write never replaces an answer from a source that outranks it.
 **A dataset version is frozen.** It is its samples *and* a digest over
 their annotations, so correcting a label mints a new version. Every sample
 is assigned a side, `train`, `val` or `holdout`, and the next version
-inherits every side its predecessor decided. Groups never straddle sides.
+inherits every side its predecessor decided. A version frozen with
+`group_by` naming a metadata key keeps that key's values on one side, and
+records which key; without one every sample is its own group.
 Materialising writes a self-contained directory: files named by checksum
-and a manifest carrying labels, sides and grouping, so a model needs no
-database.
+and a manifest carrying labels, sides and each sample's metadata, so a
+model needs no database and a split can be drawn again under another key.
 
 **A catalog has an identity**, minted once and kept by any copy. Sample
 ids, dataset names and collections mean something only within one catalog,
@@ -143,8 +145,8 @@ reserved and a `resolve()` that refuses an ambiguity:
 | `strata.preparers` | a way to convert a corpus into what a type stores | `Preparer` |
 
 A preparer writes files and a `prepared.json` index of what the conversion
-knew, metadata, grouping and any candidate annotations the corpus arrived
-with, and stops; `ingest` catalogues. `PreparerContract` in
+knew, metadata and any candidate annotations the corpus arrived with, and
+stops; `ingest` catalogues. `PreparerContract` in
 `strata.catalog.types.preparer_conformance` is the suite a preparer runs against
 itself: its output is admitted by the type it claims, already canonical,
 and the same bytes on a second run. `strata-prepare-email` and

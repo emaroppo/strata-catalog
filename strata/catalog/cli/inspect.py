@@ -29,8 +29,7 @@ def _types(args) -> int:
     def render(entries):
         for e in entries:
             files = ", ".join(f".{x}" for x in e.extensions) or "-"
-            groups = "  (groups)" if e.groups else ""
-            yield f"{e.name:<12} {e.media:<8} {e.subtype:<8} {files}{groups}"
+            yield f"{e.name:<12} {e.media:<8} {e.subtype:<8} {files}"
         yield "Read from what is installed. A plugin registers here too; built-ins are reserved."
 
     _emit(args, types(), render)
@@ -62,19 +61,6 @@ def _stats(args) -> int:
 
     def render(s):
         yield f"{s.where}: {s.samples:,} sample(s)"
-        if s.group_sizes:
-            g = s.group_sizes
-            yield f"  {s.groups:,} group(s), {s.ungrouped:,} sample(s) in no group"
-            yield (
-                f"    {g.smallest}–{g.largest} samples per group (median {g.median}), "
-                f"largest is {g.largest_share:.1%} of the catalog"
-            )
-            if g.singletons:
-                yield f"    {g.singletons:,} group(s) hold a single sample"
-        elif s.samples:
-            # No grouping is the answer worth noticing: for video frames it
-            # means near-duplicates split individually
-            yield "  no grouping — right for standalone images, wrong for video frames"
         if s.collections:
             yield "collections"
             for name, count in s.collections.items():

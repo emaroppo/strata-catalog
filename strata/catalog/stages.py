@@ -66,6 +66,8 @@ class DatasetRequest(Strict):
     val_ratio: float = 0.2
     holdout_ratio: float = 0.0
     seed: int = 42
+    #: A metadata key whose values stay on one side. None: no grouping.
+    group_by: str | None = None
 
 
 class DatasetRecord(Strict):
@@ -102,6 +104,7 @@ def dataset(request: DatasetRequest, context: Context) -> DatasetRecord:
         val_ratio=request.val_ratio,
         holdout_ratio=request.holdout_ratio,
         seed=request.seed,
+        group_by=request.group_by,
     )
     ref = catalog.datasets.named(dataset_id)
     return DatasetRecord(
@@ -182,15 +185,19 @@ class SplitRequest(Strict):
 
     Without a seed the sides are the ones the catalog's version carries —
     the default, and what makes trials comparable. With one, the sides are
-    drawn again from nothing, group-aware, and written into a copy of the
-    directory; the version on disk is never rewritten, since the catalog
-    reuses it by name.
+    drawn again from nothing and written into a copy of the directory; the
+    version on disk is never rewritten, since the catalog reuses it by
+    name. ``group_by`` names the metadata key whose values stay on one
+    side in that draw, which need not be the key the version was frozen
+    under: a directory carries every sample's metadata, so it can be split
+    by video for one study and by actor for another.
     """
 
     dataset_dir: Path
     seed: int | None = None
     val_ratio: float = 0.2
     holdout_ratio: float = 0.0
+    group_by: str | None = None
 
 
 class SplitRecord(Strict):
@@ -205,6 +212,9 @@ class SplitRecord(Strict):
     directory: Path
     drawn: bool
     seed: int | None
+    #: The key the sides respect: the version's own when inherited, the
+    #: request's when drawn.
+    group_by: str | None
     counts: dict[Literal["train", "val", "holdout"], int]
 
 
@@ -213,9 +223,19 @@ def split(request: SplitRequest, context: Context) -> SplitRecord:
     manifest = Manifest.model_validate_json((source / MANIFEST_NAME).read_text())
 
     if request.seed is None:
-        return SplitRecord(directory=source, drawn=False, seed=None, counts=_counts(manifest))
+        return SplitRecord(
+            directory=source,
+            drawn=False,
+            seed=None,
+            group_by=manifest.group_by,
+            counts=_counts(manifest),
+        )
 
-    members = {i: sample.group_id for i, sample in enumerate(manifest.samples)}
+    key = request.group_by
+    members = {
+        i: (None if key is None or (value := sample.metadata.get(key)) is None else str(value))
+        for i, sample in enumerate(manifest.samples)
+    }
     assigned, achieved = assign(
         members,
         val_ratio=request.val_ratio,
@@ -226,7 +246,12 @@ def split(request: SplitRequest, context: Context) -> SplitRecord:
     # Beside the version, named for the draw, so two seeds are two
     # directories and the same seed is the same one.
     tag = short_hash(
-        {"seed": request.seed, "val": request.val_ratio, "holdout": request.holdout_ratio},
+        {
+            "seed": request.seed,
+            "val": request.val_ratio,
+            "holdout": request.holdout_ratio,
+            "group_by": key,
+        },
         length=12,
     )
     directory, drawn = apply_sides(
@@ -236,8 +261,11 @@ def split(request: SplitRequest, context: Context) -> SplitRecord:
         val_ratio=request.val_ratio,
         holdout_ratio=request.holdout_ratio,
         tag=tag,
+        group_by=key,
     )
-    return SplitRecord(directory=directory, drawn=True, seed=request.seed, counts=_counts(drawn))
+    return SplitRecord(
+        directory=directory, drawn=True, seed=request.seed, group_by=key, counts=_counts(drawn)
+    )
 
 
 def apply_sides(
@@ -248,6 +276,7 @@ def apply_sides(
     val_ratio: float | None,
     holdout_ratio: float | None,
     tag: str,
+    group_by: str | None = None,
 ) -> tuple[Path, Manifest]:
     """A copy of ``source`` whose manifest puts each sample on the side given, by position.
 
@@ -255,7 +284,8 @@ def apply_sides(
     draw a caller sent, so the same code writes the same directory either
     way. Beside the version, named for ``tag``: the same draw is the same
     directory and another draw is another. The version on disk is never
-    rewritten, since the catalog reuses it by name.
+    rewritten, since the catalog reuses it by name. ``group_by`` is what the
+    copy's manifest says its sides respect.
     """
     if len(sides) != len(manifest.samples):
         raise CatalogError(
@@ -274,6 +304,7 @@ def apply_sides(
             "val_ratio_achieved": counts[VAL] / total,
             "holdout_ratio": holdout_ratio,
             "holdout_ratio_achieved": counts[HOLDOUT] / total,
+            "group_by": group_by,
         }
     )
     directory = source.parent / f"{source.name}-split-{tag}"

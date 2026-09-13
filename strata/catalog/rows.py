@@ -40,7 +40,6 @@ class SampleRow:
     location: Location
     media: str
     subtype: str
-    group_id: str | None
     #: Out of comparison, and therefore out of the generated hash. A frozen
     #: dataclass hashes every field it compares, and a dict cannot be
     #: hashed — so a row carrying metadata could not be put in a set or used
@@ -148,7 +147,6 @@ SAMPLE_COLUMNS = (
     t.sample.c.length,
     t.sample.c.media,
     t.sample.c.subtype,
-    t.sample.c.group_id,
     t.sample.c.metadata,
 )
 
@@ -162,7 +160,6 @@ def sample_rows(conn, stmt) -> list[SampleRow]:
             location=Location(r.location, r.offset, r.length),
             media=r.media,
             subtype=r.subtype,
-            group_id=r.group_id,
             metadata=r.metadata,
         )
         for r in conn.execute(stmt)

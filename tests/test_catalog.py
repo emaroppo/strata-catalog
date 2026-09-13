@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from strata.catalog import EVERYTHING, CatalogError
+from strata.catalog import EVERYTHING, CatalogError, SplitError
 from strata.labels import Choices, ClassificationSchema, Manifest, SchemaError
 
 # ----------------------------------------------------------------------
@@ -30,14 +30,17 @@ def test_identical_bytes_under_two_names_are_one_sample(catalog, tmp_path):
     assert ids[0] == ids[1]
 
 
-def test_ingest_records_the_group(catalog, files, label_set):
-    catalog.ingest(files(3), media="image", subtype="frames", group_id="vid1")
-    assert {s.group_id for s in catalog.samples.unlabelled(label_set, EVERYTHING)} == {"vid1"}
+def test_ingest_records_a_grouping_as_metadata(catalog, files, label_set):
+    # A grouping is a key like any other; nothing about it is special
+    # until a version is frozen naming it
+    catalog.ingest(files(3), media="image", subtype="frames", metadata={"video": "vid1"})
+    rows = catalog.samples.unlabelled(label_set, EVERYTHING)
+    assert {s.metadata["video"] for s in rows} == {"vid1"}
 
 
-def test_a_standalone_sample_has_no_group(catalog, files, label_set):
+def test_a_standalone_sample_carries_no_grouping(catalog, files, label_set):
     catalog.ingest(files(3), media="image")
-    assert {s.group_id for s in catalog.samples.unlabelled(label_set, EVERYTHING)} == {None}
+    assert all(not s.metadata for s in catalog.samples.unlabelled(label_set, EVERYTHING))
 
 
 def test_the_bytes_come_back(catalog, files):
@@ -389,6 +392,7 @@ def test_a_manifest_is_json_anyone_can_read(materialised):
         "val_ratio_achieved",
         "holdout_ratio",
         "holdout_ratio_achieved",
+        "group_by",
         "features",
         "samples",
     }
@@ -406,13 +410,16 @@ def test_an_unsplittable_ratio_is_recorded_rather_than_hidden(catalog, files, tm
     label_set = catalog.label_sets.create("v", ClassificationSchema(classes=["cat"]))
     for video in ("vid1", "vid2"):
         ids = catalog.ingest(
-            files(5, prefix=video), media="image", subtype="frames", group_id=video
+            files(5, prefix=video), media="image", subtype="frames", metadata={"video": video}
         )
         for i in ids:
             catalog.annotations.annotate(i, label_set, Choices(values=["cat"]))
 
-    dataset_id = catalog.create_dataset("frames", label_set, collections=EVERYTHING, val_ratio=0.2)
+    dataset_id = catalog.create_dataset(
+        "frames", label_set, collections=EVERYTHING, val_ratio=0.2, group_by="video"
+    )
     manifest = _manifest(catalog.materialise(dataset_id, tmp_path / "frames"))
+    assert manifest.group_by == "video"
 
     assert manifest.val_ratio == pytest.approx(0.2)
     assert manifest.val_ratio_achieved == pytest.approx(0.5)
@@ -428,34 +435,36 @@ def test_an_unknown_dataset_is_an_error(catalog, tmp_path):
 # ----------------------------------------------------------------------
 
 
-def test_re_ingesting_backfills_a_group(catalog, files, label_set):
-    # A project that predates [data] kind ingests ungrouped; correcting the
-    # setting and re-running has to fix it, or the mistake means a rebuild
+def test_re_ingesting_backfills_a_grouping(catalog, files, label_set):
+    # A project that ingested as plain images and then corrected its type
+    # re-runs, and the metadata the type records has to follow, or the
+    # mistake means a rebuild
     paths = files(3)
     catalog.ingest(paths, media="image")
-    assert {s.group_id for s in catalog.samples.unlabelled(label_set, EVERYTHING)} == {None}
+    assert all(not s.metadata for s in catalog.samples.unlabelled(label_set, EVERYTHING))
 
-    catalog.ingest(paths, media="image", subtype="frames", group_id="vid1")
-    assert {s.group_id for s in catalog.samples.unlabelled(label_set, EVERYTHING)} == {"vid1"}
+    catalog.ingest(paths, media="image", subtype="frames", metadata={"video": "vid1"})
+    rows = catalog.samples.unlabelled(label_set, EVERYTHING)
+    assert {s.metadata["video"] for s in rows} == {"vid1"}
 
 
 def test_re_ingesting_updates_the_subtype(catalog, files, label_set):
     paths = files(2)
     catalog.ingest(paths, media="image")
-    catalog.ingest(paths, media="image", subtype="frames", group_id="vid1")
+    catalog.ingest(paths, media="image", subtype="frames", metadata={"video": "vid1"})
     assert {s.subtype for s in catalog.samples.unlabelled(label_set, EVERYTHING)} == {"frames"}
 
 
 def test_re_ingesting_does_not_duplicate(catalog, files):
     paths = files(4)
     first = catalog.ingest(paths, media="image")
-    assert catalog.ingest(paths, media="image", group_id="vid1") == first
+    assert catalog.ingest(paths, media="image", metadata={"video": "vid1"}) == first
 
 
 def test_re_ingesting_leaves_annotations_alone(catalog, files, label_set):
     [sample_id] = catalog.ingest(files(1), media="image")
     catalog.annotations.annotate(sample_id, label_set, Choices(values=["cat"]))
-    catalog.ingest(files(1), media="image", group_id="vid1")
+    catalog.ingest(files(1), media="image", metadata={"video": "vid1"})
     assert catalog.annotations.annotation_of(sample_id, label_set) == Choices(values=["cat"])
 
 
@@ -470,9 +479,42 @@ def test_regrouping_cannot_disturb_a_dataset_already_built(catalog, files, label
 
     # Membership is materialised, so a later regroup is invisible to a
     # version that already exists
-    catalog.ingest(paths, media="image", subtype="frames", group_id="vid1")
+    catalog.ingest(paths, media="image", subtype="frames", metadata={"video": "vid1"})
     after = {s.id: s.split for s in _manifest(first).samples}
     assert after == before
+
+
+def test_a_grouping_is_respected_only_when_a_version_asks(catalog, files, label_set, tmp_path):
+    # Two videos of five frames. Grouped by video, a 20% val can only be
+    # half; ungrouped, the same samples split frame by frame
+    for video in ("vid1", "vid2"):
+        ids = catalog.ingest(files(5, prefix=video), media="image", metadata={"video": video})
+        annotate_all(catalog, ids, label_set)
+
+    grouped = catalog.create_dataset("g", label_set, collections=EVERYTHING, group_by="video")
+    loose = catalog.create_dataset("u", label_set, collections=EVERYTHING)
+
+    by_video = _manifest(catalog.materialise(grouped, tmp_path / "g"))
+    assert by_video.val_ratio_achieved == pytest.approx(0.5)
+    sides = {}
+    for sample in by_video.samples:
+        sides.setdefault(sample.metadata["video"], set()).add(sample.split)
+    assert all(len(v) == 1 for v in sides.values())
+
+    frame_by_frame = _manifest(catalog.materialise(loose, tmp_path / "u"))
+    assert frame_by_frame.group_by is None
+    assert frame_by_frame.val_ratio_achieved == pytest.approx(0.2)
+
+
+def test_a_version_grouped_differently_is_another_version(catalog, files, label_set):
+    ids = catalog.ingest(files(6), media="image", metadata={"video": "one"})
+    annotate_all(catalog, ids, label_set)
+    # Same samples, same answers, another grouping: not the same freeze
+    first = catalog.create_dataset("d", label_set, collections=EVERYTHING)
+    assert catalog.create_dataset("d", label_set, collections=EVERYTHING) == first
+    with pytest.raises(SplitError):
+        # One video is one group, and a group cannot be split
+        catalog.create_dataset("d", label_set, collections=EVERYTHING, group_by="video")
 
 
 def test_materialising_shares_inodes_with_the_blobs(materialised, catalog):
@@ -619,7 +661,6 @@ def test_a_sample_row_can_be_hashed_even_carrying_metadata():
         location=Location("x", 0, 1),
         media="image",
         subtype="plain",
-        group_id=None,
         metadata={"source_path": "/raw/img.jpg"},
     )
     assert hash(row)
@@ -635,7 +676,6 @@ def test_two_rows_for_one_sample_are_the_same_sample():
         location=Location("x", 0, 1),
         media="image",
         subtype="plain",
-        group_id=None,
     )
     # What is recorded about where a sample came from does not make it a
     # different sample

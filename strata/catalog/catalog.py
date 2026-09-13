@@ -167,7 +167,6 @@ class Catalog:
         paths: Iterable[Path],
         media: str,
         subtype: str = "plain",
-        group_id: str | None = None,
         metadata: dict | None = None,
         metadata_for: Callable[[Path], dict | None] | None = None,
         collections: Iterable[str] = (),
@@ -182,13 +181,15 @@ class Catalog:
 
         ``metadata`` applies to the whole batch; ``metadata_for`` supplies it
         per file, for anything that differs sample by sample — where a file
-        came from, its frame index, its capture time.
+        came from, its frame index, its capture time, the video it belongs
+        to. A grouping is a metadata key like any other, respected only by
+        a version frozen with ``group_by`` naming it.
 
-        A known sample has its ``subtype``, ``group_id`` and ``metadata``
-        brought up to date rather than left alone, so correcting how a
-        corpus is described is one re-run rather than a rebuild. Regrouping
-        cannot disturb a dataset already built: membership is materialised
-        into ``dataset_member``, so only later versions see the change.
+        A known sample has its ``subtype`` and ``metadata`` brought up to
+        date rather than left alone, so correcting how a corpus is described
+        is one re-run rather than a rebuild. Regrouping cannot disturb a
+        dataset already built: membership is materialised into
+        ``dataset_member``, so only later versions see the change.
 
         ``collections`` says where these samples came from, as paths. They
         are added rather than replaced: a sample already in one collection
@@ -229,13 +230,10 @@ class Catalog:
                         location,
                         media=media,
                         subtype=subtype,
-                        group_id=group_id,
                         metadata=entry,
                     )
                 else:
-                    self.samples.describe(
-                        conn, known, subtype=subtype, group_id=group_id, metadata=entry
-                    )
+                    self.samples.describe(conn, known, subtype=subtype, metadata=entry)
                 ids.append(known)
                 if on_sample is not None:
                     on_sample(path)
@@ -262,12 +260,15 @@ class Catalog:
         holdout_ratio: float = 0.0,
         seed: int = 42,
         query: dict | None = None,
+        group_by: str | None = None,
     ) -> int:
         """Freeze a selection into a new version, inheriting the previous split.
 
         Every sample the previous version placed keeps its side; only what
-        is new is decided. ``holdout_ratio`` is zero unless asked for. See
-        ``docs/adr/0003``.
+        is new is decided. ``holdout_ratio`` is zero unless asked for.
+        ``group_by`` names a metadata key whose values are kept on one side
+        — ``video`` for frames — and none means every sample is its own
+        group. See ``docs/adr/0003``.
         """
         if sample_ids is None:
             if collections is None:
@@ -283,7 +284,7 @@ class Catalog:
         with self.engine.begin() as conn:
             digest = answers.digest(conn, label_set_id, sample_ids)
             existing = self.datasets.identical(
-                conn, name, set(sample_ids), digest, val_ratio, holdout_ratio
+                conn, name, set(sample_ids), digest, val_ratio, holdout_ratio, group_by
             )
             if existing is not None:
                 # A version describes a selection, not an attempt at one. A
@@ -293,7 +294,7 @@ class Catalog:
                 return existing
             version = self.datasets.next_version(conn, name)
             inherited = self.datasets.previous_split(conn, name)
-            groups = self.samples.groups(conn, sample_ids)
+            groups = self.samples.grouping(conn, sample_ids, group_by)
             sides, achieved = assign(
                 groups, inherited, val_ratio=val_ratio, holdout_ratio=holdout_ratio, seed=seed
             )
@@ -309,6 +310,7 @@ class Catalog:
                 holdout_ratio=holdout_ratio,
                 achieved=achieved,
                 sides=sides,
+                group_by=group_by,
             )
         return dataset_id
 
@@ -409,7 +411,7 @@ class Catalog:
                     id=row.id,
                     checksum=row.checksum,
                     path=relative,
-                    group_id=row.group_id,
+                    metadata=dict(row.metadata or {}),
                     split=row.side,
                     features=resolved.get(row.id, {}),
                     source=row.source,
@@ -436,6 +438,7 @@ class Catalog:
             val_ratio_achieved=info.val_ratio_achieved,
             holdout_ratio=info.holdout_ratio,
             holdout_ratio_achieved=info.holdout_ratio_achieved,
+            group_by=info.group_by,
             features=[spec.as_dict() for spec in features or ()],
             samples=samples,
         )

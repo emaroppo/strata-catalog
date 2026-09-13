@@ -32,11 +32,9 @@ class Prepared:
     #: The file written, inside the output directory.
     path: Path
     #: Recorded on the sample at ingest. What only the conversion knows —
-    #: a sender, a capture time, the frame's index in its video.
+    #: a sender, a capture time, the frame's index in its video, and the
+    #: video itself, under a key a project can name as its ``group_by``.
     metadata: dict = field(default_factory=dict)
-    #: Samples sharing one never straddle the train/val split. A video's
-    #: frames are the case this exists for.
-    group_id: str | None = None
     #: The annotation this sample arrived with, where the corpus came
     #: labelled. A candidate for a reviewer to correct, never an answer —
     #: see :class:`~strata.catalog.types.prepared.PreparedSample`.
@@ -127,7 +125,6 @@ def run(
         for prepared in preparer.prepare(source, out_dir):
             written[relative_key(prepared.path, out_dir)] = PreparedSample(
                 metadata=prepared.metadata,
-                group_id=prepared.group_id,
                 value=prepared.value,
             )
         if on_source is not None:
