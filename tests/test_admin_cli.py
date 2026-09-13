@@ -130,6 +130,38 @@ def test_probe_on_an_empty_catalog_falls_back_to_a_round_trip(tmp_path, capsys):
     assert record["blobs"]["sample"] is None and "no samples" in record["blobs"]["note"]
 
 
+def test_remove_tombstones_what_a_selection_names(stocked, config, capsys):
+    label_set = stocked.label_sets.get("presence")[0]
+    # Two of the six are bad pictures, marked as such in their metadata
+    bad = [s.id for s in stocked.samples.unlabelled(label_set, EVERYTHING)]
+    with stocked.engine.begin() as conn:
+        for sample_id in bad:
+            stocked.samples.describe(
+                conn, sample_id, subtype="plain", metadata={"quality": "bad"}
+            )
+
+    code, out = run(
+        capsys, "--config", str(config), "remove", "--where", "quality=bad", "--dry-run"
+    )
+    assert code == 0 and "2 live sample(s) match" in out and "nothing removed" in out.lower()
+    assert len(stocked.samples.unlabelled(label_set, EVERYTHING)) == 2
+
+    code, out = run(capsys, "--config", str(config), "remove", "--where", "quality=bad")
+    assert code == 0 and "2 removed" in out
+    # Gone from every reader; the answered four are untouched
+    assert stocked.samples.unlabelled(label_set, EVERYTHING) == []
+    assert len(stocked.samples.labelled(label_set, EVERYTHING)) == 4
+    # And a second run finds nothing live to match
+    code, out = run(capsys, "--config", str(config), "remove", "--where", "quality=bad")
+    assert "0 live sample(s) match" in out
+
+
+def test_remove_refuses_to_mean_the_whole_catalog(config, capsys, stocked):
+    code = main(["--config", str(config), "remove"])
+    assert code == 1
+    assert "needs a selection" in capsys.readouterr().err
+
+
 def test_copy_moves_the_index_and_keeps_ids(stocked, config, tmp_path, capsys):
     target = f"sqlite:///{tmp_path / 'copy.db'}"
     code, out = run(capsys, "--config", str(config), "copy", "--to", target)

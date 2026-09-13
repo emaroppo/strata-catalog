@@ -340,6 +340,41 @@ class Annotations:
             ).all()
         return [_answer(row) for row in rows]
 
+    def second_looks(self, label_set_id: int) -> tuple[int, int]:
+        """How a person's answers fared when a person looked again: (agreed, changed).
+
+        A sample whose current answer is a person's and whose previous one
+        was also a person's had a second look — an audit, or a correction
+        somebody came back to make. Equal values agree; anything else,
+        including a skip after an answer, changed.
+        """
+        with self.engine.connect() as conn:
+            rows = conn.execute(
+                select(
+                    t.annotation.c.sample_id,
+                    t.annotation.c.state,
+                    t.annotation.c.value,
+                    t.annotation.c.source,
+                    t.annotation.c.superseded_at,
+                )
+                .where(t.annotation.c.label_set_id == label_set_id)
+                .order_by(t.annotation.c.sample_id, t.annotation.c.created_at, t.annotation.c.id)
+            ).all()
+        by_sample: dict[int, list] = {}
+        for row in rows:
+            by_sample.setdefault(row.sample_id, []).append(row)
+        agreed = changed = 0
+        for answers in by_sample.values():
+            people = [a for a in answers if a.source == t.HUMAN]
+            if len(people) < 2 or people[-1].superseded_at is not None:
+                continue
+            first, second = people[-2], people[-1]
+            if (first.state, first.value) == (second.state, second.value):
+                agreed += 1
+            else:
+                changed += 1
+        return agreed, changed
+
     def review_counts(self, label_set_id: int) -> dict[str, ReviewCounts]:
         """How each import batch fared under review, by batch name.
 

@@ -34,6 +34,7 @@ from .index.label_sets import LabelSets
 from .index.samples import Samples
 from .index.schema_version import MIGRATIONS
 from .rows import (
+    EVERYTHING,
     SCHEMA,
     VALUE,
     CatalogError,
@@ -439,6 +440,14 @@ class Catalog:
         info = self.datasets.info(dataset_id)
         rows = self.datasets.members(dataset_id, info.label_set_id)
 
+        # A member whose feature is under dispute is left out: two people
+        # answered the label set it reads from differently, and a feature
+        # is something a model is told as a fact. Named in the manifest so
+        # the omission is visible, and back in once someone settles it.
+        disputed = self._disputed_features(features, [row.id for row in rows])
+        left_out = [row.checksum for row in rows if row.id in disputed]
+        rows = [row for row in rows if row.id not in disputed]
+
         wanted: dict[Location, Path] = {}
         relatives: dict[int, str] = {}
         for row in rows:
@@ -491,9 +500,30 @@ class Catalog:
             given_split=info.given_split,
             features=[spec.as_dict() for spec in features or ()],
             samples=samples,
+            disputed=left_out,
         )
         (dest / MANIFEST_NAME).write_text(manifest.model_dump_json(indent=2))
         return dest
+
+    def _disputed_features(
+        self, specs: "Sequence[FeatureSpec] | None", sample_ids: list[int]
+    ) -> set[int]:
+        """The samples among ``sample_ids`` with a dispute open on a feature's label set."""
+        if not specs or not sample_ids:
+            return set()
+        wanted = set(sample_ids)
+        found: set[int] = set()
+        for spec in specs:
+            if spec.source != "label_set":
+                continue
+            try:
+                label_set_id, _ = self.label_sets.get(spec.ref)
+            except CatalogError:
+                continue  # resolving the feature says what is wrong with it
+            for dispute in self.conflicts.disputed(label_set_id, EVERYTHING):
+                if dispute["sample_id"] in wanted:
+                    found.add(dispute["sample_id"])
+        return found
 
     def features_for(
         self, sample_ids: list[int], specs: "Sequence[FeatureSpec]"

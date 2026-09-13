@@ -164,6 +164,8 @@ class MaterialiseRecord(Strict):
     holdout: int
     #: Members with no answer: reviewed and nothing applicable.
     skipped: int
+    #: Members left out because a feature they carry is under dispute.
+    disputed: int = 0
 
 
 def materialise(request: MaterialiseRequest, context: Context) -> MaterialiseRecord:
@@ -192,6 +194,7 @@ def materialise(request: MaterialiseRequest, context: Context) -> MaterialiseRec
         val=len(manifest.val),
         holdout=len(manifest.holdout),
         skipped=sum(1 for s in manifest.samples if s.value is None),
+        disputed=len(manifest.disputed),
     )
 
 

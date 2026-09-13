@@ -7,6 +7,7 @@ from pathlib import Path
 from ..config import CatalogConfigError
 from ._shared import CONFIG, Refused
 from .inspect import _list, _preparers, _probe, _stats, _types
+from .remove import _remove
 from .repack import _repack
 from .sync import _copy, _merge
 
@@ -62,6 +63,19 @@ def _parser() -> argparse.ArgumentParser:
     repack.add_argument("--shard-mb", type=int, default=512, help="Shard size in MB")
     repack.add_argument("--verify", type=int, default=64, help="Members to read back afterwards")
     repack.set_defaults(run=_repack)
+
+    remove = commands.add_parser(
+        "remove", help="Tombstone samples — bad data — and their annotations with them"
+    )
+    remove.add_argument(
+        "--collection", action="append", metavar="PATH", help="Look in this collection"
+    )
+    remove.add_argument(
+        "--where", action="append", metavar="KEY=VALUE", help="Metadata that must match"
+    )
+    remove.add_argument("--checksum", action="append", metavar="SHA256", help="A sample outright")
+    remove.add_argument("--dry-run", action="store_true", help="Report what would go")
+    remove.set_defaults(run=_remove)
     return parser
 
 __all__ = ["main"]

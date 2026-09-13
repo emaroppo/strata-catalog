@@ -397,6 +397,7 @@ def test_a_manifest_is_json_anyone_can_read(materialised):
         "given_split",
         "features",
         "samples",
+        "disputed",
     }
 
 
@@ -912,6 +913,40 @@ def test_a_confirmed_import_becomes_a_persons_answer_and_keeps_its_batch(catalog
     assert (confirmed.source, confirmed.batch, confirmed.current) == ("human", "pv-1", True)
     counts = catalog.annotations.review_counts(label_set_id)
     assert (counts["pv-1"].accepted, counts["pv-1"].corrected, counts["pv-1"].pending) == (1, 1, 1)
+
+
+def test_a_second_look_is_counted_by_whether_it_agreed(catalog, files):
+    label_set_id = catalog.label_sets.create("x", ClassificationSchema(classes=["cat", "dog"]))
+    ids = catalog.ingest(files(3), media="image")
+    for i in ids:
+        catalog.annotations.annotate(i, label_set_id, Choices(values=["cat"]))
+    # Looked at again: one agreed, one changed, one never looked at again
+    catalog.annotations.annotate(ids[0], label_set_id, Choices(values=["cat"]))
+    catalog.annotations.annotate(ids[1], label_set_id, Choices(values=["dog"]))
+    assert catalog.annotations.second_looks(label_set_id) == (1, 1)
+
+
+def test_a_disputed_feature_keeps_its_sample_out_of_the_manifest(catalog, files, tmp_path):
+    from strata.catalog.versions.features import FeatureSpec
+
+    target = catalog.label_sets.create("x", ClassificationSchema(classes=["cat"]))
+    species = catalog.label_sets.create("species", ClassificationSchema(classes=["a", "b"]))
+    ids = catalog.ingest(files(4), media="image")
+    annotate_all(catalog, ids, target)
+    for i in ids:
+        catalog.annotations.annotate(i, species, Choices(values=["a"]))
+    # Two people answered the feature's label set differently for one sample
+    catalog.conflicts.record(ids[0], species, Choices(values=["a"]), Choices(values=["b"]))
+
+    dataset_id = catalog.create_dataset("d", target, collections=EVERYTHING)
+    spec = FeatureSpec(name="species", source="label_set", ref="species")
+    manifest = _manifest(catalog.materialise(dataset_id, tmp_path / "d", features=[spec]))
+
+    # Left out, and named: a feature is told to a model as a fact
+    assert {s.id for s in manifest.samples} == set(ids[1:])
+    rows = {s.id: s for s in catalog.samples.labelled(target, EVERYTHING)}
+    assert manifest.disputed == [rows[ids[0]].checksum]
+    assert all(s.features == {"species": ["a"]} for s in manifest.samples)
 
 
 def test_an_import_over_a_persons_answer_is_kept_out_of_the_history_too(catalog, files):

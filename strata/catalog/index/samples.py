@@ -163,22 +163,64 @@ class Samples:
         with self.engine.connect() as conn:
             return sample_rows(conn, stmt)
 
-    def labelled(self, label_set_id: int, collections) -> list[SampleRow]:
+    def labelled(
+        self, label_set_id: int, collections, source: str | None = None
+    ) -> list[SampleRow]:
         """Samples with a real answer — skipped ones are not training data.
 
         Scoped like the queue. Dropping a collection from a project means
         declaring that data out of scope, training included: quietly
         carrying it would move the metrics as well as the model, and neither
         would say why. Keeping what is already answered while asking for no
-        more is what skipping is for.
+        more is what skipping is for. ``source`` narrows to answers from
+        one origin — a person's, for a second look.
         """
-        return self._joined(
-            t.annotation,
+        predicates = [
             t.annotation.c.label_set_id == label_set_id,
             t.annotation.c.state == t.ANNOTATED,
             current(),
-            collections=collections,
-        )
+        ]
+        if source is not None:
+            predicates.append(t.annotation.c.source == source)
+        return self._joined(t.annotation, *predicates, collections=collections)
+
+    def tombstone(self, sample_ids: Iterable[int]) -> int:
+        """Remove samples: a tombstone, not a delete, and their answers go with them.
+
+        Every reader takes live samples only, so a removed sample leaves
+        the queue, the labelled set and any version frozen from here on;
+        its rows and its history stay, since shards are immutable and a
+        compaction pass is what reclaims them. A version already frozen
+        keeps its members: it is a record of what was trained on. Returns
+        how many were live and are not now.
+        """
+        gone = 0
+        with self.engine.begin() as conn:
+            for chunk in chunks(list(sample_ids)):
+                gone += conn.execute(
+                    update(t.sample)
+                    .where(and_(t.sample.c.id.in_(chunk), t.sample.c.deleted_at.is_(None)))
+                    .values(deleted_at=func.now())
+                ).rowcount
+        return gone
+
+    def matching(self, collections, where: dict[str, str] | None = None) -> list[SampleRow]:
+        """Live samples in ``collections`` whose metadata has every key of ``where`` at its value.
+
+        Compared as strings, since a value typed at a command line is one.
+        The metadata is filtered here rather than in SQL: JSON access
+        differs between the two dialects, and a selection is read once.
+        """
+        stmt = select(*SAMPLE_COLUMNS).where(live())
+        with self.engine.connect() as conn:
+            rows = sample_rows(conn, scoped(stmt, collections))
+        if not where:
+            return rows
+        return [
+            row
+            for row in rows
+            if all(str((row.metadata or {}).get(k)) == v for k, v in where.items())
+        ]
 
     def unreviewed(self, label_set_id: int, collections) -> list[SampleRow]:
         """Samples whose current answer arrived with the corpus and nobody has confirmed.

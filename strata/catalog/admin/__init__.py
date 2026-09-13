@@ -8,6 +8,7 @@ own reports; this holds the ones that were only ever a command body.
 
 from .installed import CatalogEntry, PreparerEntry, TypeEntry, catalogs, preparers, types
 from .probe import BlobProbe, IndexProbe, Probe, probe
+from .remove import RemoveReport, remove
 from .stats import LabelSetStats, Stats, stats
 from .where import redacted, where_blobs, where_index
 
@@ -18,12 +19,14 @@ __all__ = [
     "LabelSetStats",
     "PreparerEntry",
     "Probe",
+    "RemoveReport",
     "Stats",
     "TypeEntry",
     "catalogs",
     "preparers",
     "probe",
     "redacted",
+    "remove",
     "stats",
     "types",
     "where_blobs",
