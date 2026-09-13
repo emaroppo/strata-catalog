@@ -11,7 +11,7 @@ from collections.abc import Iterable, Sequence
 from sqlalchemy import and_, func, insert, select, update
 from sqlalchemy.engine import Engine
 
-from ..rows import SAMPLE_COLUMNS, SampleRow, chunks, live, sample_rows, scoped
+from ..rows import SAMPLE_COLUMNS, SampleRow, chunks, current, live, sample_rows, scoped
 from ..storage.blobs import Location
 from . import tables as t
 
@@ -152,6 +152,7 @@ class Samples:
                 and_(
                     t.annotation.c.sample_id == t.sample.c.id,
                     t.annotation.c.label_set_id == label_set_id,
+                    current(),
                 ),
             )
             .where(and_(live(), t.annotation.c.sample_id.is_(None)))
@@ -175,6 +176,23 @@ class Samples:
             t.annotation,
             t.annotation.c.label_set_id == label_set_id,
             t.annotation.c.state == t.ANNOTATED,
+            current(),
+            collections=collections,
+        )
+
+    def unreviewed(self, label_set_id: int, collections) -> list[SampleRow]:
+        """Samples whose current answer arrived with the corpus and nobody has confirmed.
+
+        Trusted and trained on, since an import is an answer; listed so a
+        spot review can pick among them, by wherever a model disagrees with
+        what was imported.
+        """
+        return self._joined(
+            t.annotation,
+            t.annotation.c.label_set_id == label_set_id,
+            t.annotation.c.state == t.ANNOTATED,
+            t.annotation.c.source == t.IMPORT,
+            current(),
             collections=collections,
         )
 
@@ -188,6 +206,7 @@ class Samples:
             t.annotation,
             t.annotation.c.label_set_id == label_set_id,
             t.annotation.c.state == t.SKIPPED,
+            current(),
             collections=collections,
         )
 

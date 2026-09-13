@@ -8,7 +8,7 @@ over their annotations. See ``docs/adr/0003``.
 from sqlalchemy import and_, insert, select
 from sqlalchemy.engine import Engine
 
-from ..rows import CatalogError, DatasetRef, chunks
+from ..rows import CatalogError, DatasetRef, chunks, current
 from ..versions.split import Achieved
 from . import tables as t
 
@@ -89,6 +89,7 @@ class Datasets:
                     t.annotation.c.state,
                     t.annotation.c.value,
                     t.annotation.c.source,
+                    t.annotation.c.batch,
                 )
                 .join(t.dataset_member, t.dataset_member.c.sample_id == t.sample.c.id)
                 .outerjoin(
@@ -96,6 +97,7 @@ class Datasets:
                     and_(
                         t.annotation.c.sample_id == t.sample.c.id,
                         t.annotation.c.label_set_id == label_set_id,
+                        current(),
                     ),
                 )
                 .where(t.dataset_member.c.dataset_id == dataset_id)

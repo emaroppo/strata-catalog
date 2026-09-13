@@ -8,7 +8,7 @@ from sqlalchemy import and_, select
 
 from strata.labels import AnySchema
 
-from ..rows import VALUE, chunks
+from ..rows import VALUE, chunks, current
 from . import tables as t
 
 
@@ -32,6 +32,7 @@ def digest(conn, label_set_id: int, sample_ids: Sequence[int]) -> str:
                 and_(
                     t.annotation.c.label_set_id == label_set_id,
                     t.annotation.c.sample_id.in_(chunk),
+                    current(),
                 )
             )
             .order_by(t.annotation.c.sample_id)
@@ -67,6 +68,7 @@ def asserted(
                     t.annotation.c.label_set_id == label_set_id,
                     t.annotation.c.state == t.ANNOTATED,
                     t.annotation.c.sample_id.in_(chunk),
+                    current(),
                 )
             )
         ).all()

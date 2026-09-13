@@ -860,35 +860,69 @@ def test_a_label_set_keeps_whatever_kind_of_schema_it_is(tmp_path):
         assert catalog.label_sets.get(name)[1] == schema
 
 
-def test_discard_removes_one_source_and_returns_samples_to_the_queue(catalog, files):
-    """An unreviewed import is not an answer, and should not read as one."""
-    label_set_id = catalog.label_sets.create("x", ClassificationSchema(classes=["cat"]))
-    ids = catalog.ingest(files(2), media="image")
-    catalog.annotations.annotate(ids[0], label_set_id, Choices(values=["cat"]), source="import")
-    catalog.annotations.annotate(ids[1], label_set_id, Choices(values=["cat"]), source="human")
-
-    assert catalog.annotations.discard(label_set_id, "import") == 1
-
-    # The imported one is unlabelled again, the answered one untouched
-    assert [row.id for row in catalog.samples.unlabelled(label_set_id, EVERYTHING)] == [ids[0]]
-    assert [row.id for row in catalog.samples.labelled(label_set_id, EVERYTHING)] == [ids[1]]
-    assert catalog.annotations.annotation_of(ids[0], label_set_id) is None
+# ----------------------------------------------------------------------
+# What was said before
+# ----------------------------------------------------------------------
 
 
-def test_discard_clears_the_class_index_too(catalog, files):
-    """Otherwise a discarded row still answers 'which samples have a cat'."""
-    label_set_id = catalog.label_sets.create("x", ClassificationSchema(classes=["cat"]))
-    ids = catalog.ingest(files(1), media="image")
-    catalog.annotations.annotate(ids[0], label_set_id, Choices(values=["cat"]), source="import")
-    assert catalog.samples.with_class(label_set_id, "cat", EVERYTHING)
+def test_a_correction_keeps_what_was_said_before(catalog, files):
+    label_set_id = catalog.label_sets.create("x", ClassificationSchema(classes=["cat", "dog"]))
+    [sample_id] = catalog.ingest(files(1), media="image")
+    catalog.annotations.annotate(sample_id, label_set_id, Choices(values=["cat"]))
+    catalog.annotations.annotate(sample_id, label_set_id, Choices(values=["dog"]))
 
-    catalog.annotations.discard(label_set_id, "import")
+    # The current answer is the correction; the history holds both
+    assert catalog.annotations.annotation_of(sample_id, label_set_id) == Choices(values=["dog"])
+    before, now = catalog.annotations.history(sample_id, label_set_id)
+    assert (before.value, before.current) == (Choices(values=["cat"]), False)
+    assert (now.value, now.current) == (Choices(values=["dog"]), True)
+    assert before.superseded_at is not None
+    # And every reader sees one answer, not two
+    assert len(catalog.samples.labelled(label_set_id, EVERYTHING)) == 1
+    assert len(catalog.samples.with_class(label_set_id, "dog", EVERYTHING)) == 1
     assert catalog.samples.with_class(label_set_id, "cat", EVERYTHING) == []
 
 
-def test_discard_names_a_source_that_is_not_there(catalog):
+def test_a_skip_returned_to_the_queue_stays_in_the_history(catalog, files):
     label_set_id = catalog.label_sets.create("x", ClassificationSchema(classes=["cat"]))
-    assert catalog.annotations.discard(label_set_id, "nobody") == 0
+    [sample_id] = catalog.ingest(files(1), media="image")
+    catalog.annotations.skip(sample_id, label_set_id)
+    assert catalog.annotations.unskip(label_set_id, [sample_id]) == 1
+
+    # Unlabelled is having no current row; the skip is still on record
+    assert [s.id for s in catalog.samples.unlabelled(label_set_id, EVERYTHING)] == [sample_id]
+    [skip] = catalog.annotations.history(sample_id, label_set_id)
+    assert (skip.state, skip.current) == ("skipped", False)
+
+
+def test_a_confirmed_import_becomes_a_persons_answer_and_keeps_its_batch(catalog, files):
+    label_set_id = catalog.label_sets.create("x", ClassificationSchema(classes=["cat", "dog"]))
+    ids = catalog.ingest(files(3), media="image")
+    catalog.annotations.annotate_many(
+        label_set_id, [(i, Choices(values=["cat"])) for i in ids], source="import", batch="pv-1"
+    )
+    assert {s.id for s in catalog.samples.unreviewed(label_set_id, EVERYTHING)} == set(ids)
+
+    # One confirmed unchanged, one corrected, one nobody looked at
+    catalog.annotations.annotate(ids[0], label_set_id, Choices(values=["cat"]))
+    catalog.annotations.annotate(ids[1], label_set_id, Choices(values=["dog"]))
+
+    assert {s.id for s in catalog.samples.unreviewed(label_set_id, EVERYTHING)} == {ids[2]}
+    confirmed = catalog.annotations.history(ids[0], label_set_id)[-1]
+    assert (confirmed.source, confirmed.batch, confirmed.current) == ("human", "pv-1", True)
+    counts = catalog.annotations.review_counts(label_set_id)
+    assert (counts["pv-1"].accepted, counts["pv-1"].corrected, counts["pv-1"].pending) == (1, 1, 1)
+
+
+def test_an_import_over_a_persons_answer_is_kept_out_of_the_history_too(catalog, files):
+    label_set_id = catalog.label_sets.create("x", ClassificationSchema(classes=["cat", "dog"]))
+    [sample_id] = catalog.ingest(files(1), media="image")
+    catalog.annotations.annotate(sample_id, label_set_id, Choices(values=["cat"]))
+    assert not catalog.annotations.annotate(
+        sample_id, label_set_id, Choices(values=["dog"]), source="import"
+    )
+    # Outranked: not the answer, and not a row either
+    assert len(catalog.annotations.history(sample_id, label_set_id)) == 1
 
 
 # ----------------------------------------------------------------------

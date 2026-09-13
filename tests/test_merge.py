@@ -271,8 +271,7 @@ def test_an_import_comes_home_as_an_import(pair):
     merge_annotations(laptop, main)
 
     main_set, _ = main.label_sets.get("demo")
-    # Discarding by source is the public way to ask what a row's source is
-    assert main.annotations.discard(main_set, "import") == 1
+    assert [s.id for s in main.samples.unreviewed(main_set, "*")] == [ids[0]]
 
 
 def test_a_person_there_supersedes_an_import_here(pair):
@@ -288,7 +287,7 @@ def test_a_person_there_supersedes_an_import_here(pair):
     assert (report.superseded, report.conflicted) == (1, 0)
     assert main.annotations.annotation_of(ids[0], main_set) == Choices(values=["dog"])
     assert main.conflicts.disputed(main_set, "*") == []
-    assert main.annotations.discard(main_set, "import") == 0
+    assert main.samples.unreviewed(main_set, "*") == []
 
 
 def test_an_import_there_leaves_a_person_here_alone(pair):
@@ -315,8 +314,8 @@ def test_a_person_confirming_an_import_raises_its_standing(pair):
     report = merge_annotations(laptop, main)
 
     assert (report.confirmed, report.agreed) == (1, 0)
-    # Now a person's answer, so no longer something an import discard removes
-    assert main.annotations.discard(main_set, "import") == 0
+    # Now a person's answer, no longer awaiting review
+    assert main.samples.unreviewed(main_set, "*") == []
     assert main.annotations.annotation_of(ids[0], main_set) == Choices(values=["cat"])
 
 
@@ -359,7 +358,7 @@ def test_a_dry_run_counts_what_the_ranking_would_do_and_writes_nothing(pair):
 
     assert report.superseded == 1
     assert main.annotations.annotation_of(ids[0], main_set) == Choices(values=["cat"])
-    assert main.annotations.discard(main_set, "import") == 1
+    assert [s.id for s in main.samples.unreviewed(main_set, "*")] == [ids[0]]
 
 
 def test_a_superseded_import_is_quiet_the_second_time(pair):

@@ -15,7 +15,7 @@ from sqlalchemy import and_, select
 
 from ..catalog import Catalog
 from ..index import tables as t
-from ..rows import VALUE, CatalogError
+from ..rows import VALUE, CatalogError, current
 
 
 class MergeError(CatalogError):
@@ -238,7 +238,7 @@ def _answers(
                 .select_from(
                     t.annotation.join(t.sample, t.annotation.c.sample_id == t.sample.c.id)
                 )
-                .where(t.annotation.c.label_set_id == label_set_id)
+                .where(and_(t.annotation.c.label_set_id == label_set_id, current()))
                 .order_by(t.sample.c.id)
             )
         ]
@@ -252,6 +252,7 @@ def _row_of(catalog: Catalog, sample_id: int, label_set_id: int):
                 and_(
                     t.annotation.c.sample_id == sample_id,
                     t.annotation.c.label_set_id == label_set_id,
+                    current(),
                 )
             )
         ).first()

@@ -119,19 +119,34 @@ label_set = Table(
 )
 
 
+#: Append-only. A row is written and never changed; a correction writes a
+#: new row and stamps the old one, so the catalog remembers what it used
+#: to say, by whom, and when. The current answer for a sample under a
+#: label set is the one row with ``superseded_at`` null; unlabelled is
+#: having none. See docs/adr/0009.
 annotation = Table(
     "annotation",
     metadata,
-    Column("sample_id", ForeignKey("sample.id", ondelete="CASCADE"), primary_key=True),
-    Column("label_set_id", ForeignKey("label_set.id", ondelete="CASCADE"), primary_key=True),
+    Column("id", Integer, primary_key=True),
+    Column("sample_id", ForeignKey("sample.id", ondelete="CASCADE"), nullable=False),
+    Column("label_set_id", ForeignKey("label_set.id", ondelete="CASCADE"), nullable=False),
     Column("state", String(16), nullable=False),
     # A strata.labels value, serialized. Null when skipped — there is no
     # answer — and an empty value when a human looked and found nothing,
     # which is a real answer and must not be confused with the first.
     Column("value", JSON, nullable=True),
     Column("source", String(16), nullable=False, default="human"),
-    Column("updated_at", DateTime, server_default=func.now(), onupdate=func.now()),
-    Index("ix_annotation_label_set", "label_set_id", "state"),
+    # Which import this answer arrived in. Carried onto the row that
+    # confirms or corrects it, so a batch can be read against how its
+    # labels fared under review. Null for an answer nothing imported.
+    Column("batch", String(255), nullable=True),
+    Column("created_at", DateTime, server_default=func.now()),
+    # Null while this is the current answer. Set when a later row replaced
+    # it, or when it was withdrawn — a skip returned to the queue — with
+    # no row after it.
+    Column("superseded_at", DateTime, nullable=True),
+    Index("ix_annotation_current", "sample_id", "label_set_id", "superseded_at"),
+    Index("ix_annotation_label_set", "label_set_id", "state", "superseded_at"),
 )
 
 

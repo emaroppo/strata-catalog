@@ -462,9 +462,10 @@ class Catalog:
                     split=row.side,
                     features=resolved.get(row.id, {}),
                     source=row.source,
-                    # From the source, for now: nothing yet records a person
-                    # confirming an import, so a person's answer is the only
-                    # reviewed one and an import is never reviewed.
+                    batch=row.batch,
+                    # A person's answer is a reviewed one, and a confirmed
+                    # import is written as a person's answer, so the source
+                    # says it: an import nobody has looked at stays import.
                     reviewed=None if row.source is None else row.source == t.HUMAN,
                     value=(
                         VALUE.validate_python(row.value)

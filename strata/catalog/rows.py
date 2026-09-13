@@ -120,6 +120,11 @@ def live():
     return t.sample.c.deleted_at.is_(None)
 
 
+def current():
+    """Annotation rows that are the answer now, rather than what it used to be."""
+    return t.annotation.c.superseded_at.is_(None)
+
+
 def scoped(stmt, collections):
     """Restrict a sample query to the collections a caller named.
 

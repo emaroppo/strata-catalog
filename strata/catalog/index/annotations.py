@@ -1,28 +1,66 @@
-"""Annotations: what was said about a sample, by whom, and disputes over it.
+"""Annotations: what was said about a sample, by whom, and what was said before.
 
-Writes honour :data:`tables.AUTHORITY`: a write never replaces an answer
-from a source that outranks it. Unlabelled is the absence of a row, so
-returning a sample to the queue deletes one. The class index is rebuilt on
-every write through the indexing contract in :mod:`strata.labels`. See
-``docs/adr/0009``. Disputes live in :mod:`conflicts`; the reads a version
-or a feature makes over answers live in :mod:`answers`.
+Append-only. A write never changes a row: it stamps the current one as
+superseded and adds a new one, so the catalog remembers what it used to
+say. Writes honour :data:`tables.AUTHORITY`: a write never replaces an
+answer from a source that outranks it. Unlabelled is the absence of a
+current row, so returning a sample to the queue stamps one and writes
+nothing. The class index follows the current row through the indexing
+contract in :mod:`strata.labels`. See ``docs/adr/0009``. Disputes live in
+:mod:`conflicts`; the reads a version or a feature makes over answers live
+in :mod:`answers`.
 """
 
 import json
 from collections.abc import Callable, Iterable
+from dataclasses import dataclass
+from datetime import datetime
 
-from sqlalchemy import and_, delete, insert, select, update
+from sqlalchemy import and_, func, insert, select, update
 from sqlalchemy.engine import Engine
 
 from strata.labels import AnySchema, AnyValue
 
-from ..rows import SCHEMA, VALUE, AnnotateReport, CatalogError
+from ..rows import SCHEMA, VALUE, AnnotateReport, CatalogError, current
 from . import conflicts
 from . import tables as t
 
 
+@dataclass(frozen=True)
+class Answer:
+    """One thing that was said about a sample, as the history reads back."""
+
+    state: str
+    value: AnyValue | None
+    source: str
+    batch: str | None
+    created_at: datetime | None
+    #: None while this is the current answer.
+    superseded_at: datetime | None
+
+    @property
+    def current(self) -> bool:
+        return self.superseded_at is None
+
+
+@dataclass(frozen=True)
+class ReviewCounts:
+    """How one import batch fared under review."""
+
+    #: Confirmed unchanged by a person.
+    accepted: int = 0
+    #: Replaced by a person's different answer, or skipped.
+    corrected: int = 0
+    #: Still the current answer, nobody has looked.
+    pending: int = 0
+
+    @property
+    def reviewed(self) -> int:
+        return self.accepted + self.corrected
+
+
 class Annotations:
-    """The catalog's annotations, one row per sample per label set."""
+    """The catalog's annotations: the current answer per sample per label set, and its past."""
 
     def __init__(self, engine: Engine):
         self.engine = engine
@@ -43,22 +81,27 @@ class Annotations:
         label_set_id: int,
         value: AnyValue,
         source: str = t.HUMAN,
+        batch: str | None = None,
     ) -> bool:
         """Record what a sample is, and index the classes it asserts.
 
         Returns whether it was recorded: not when a source outranking this
-        one already answered (see :data:`tables.AUTHORITY`).
+        one already answered (see :data:`tables.AUTHORITY`). ``batch``
+        names the import this arrived in; a write that names none inherits
+        the batch of the answer it replaces, so a person's confirmation or
+        correction of an import still says which import.
         """
         _, schema = self._schema(label_set_id)
         schema.validate_value(value)
         with self.engine.begin() as conn:
-            written = self._upsert_annotation(
+            written = self._write(
                 conn,
                 sample_id,
                 label_set_id,
                 state=t.ANNOTATED,
                 value=json.loads(value.model_dump_json()),
                 source=source,
+                batch=batch,
             )
             if not written:
                 return False
@@ -70,7 +113,9 @@ class Annotations:
             )
         return True
 
-    def skip(self, sample_id: int, label_set_id: int, source: str = t.HUMAN) -> bool:
+    def skip(
+        self, sample_id: int, label_set_id: int, source: str = t.HUMAN, batch: str | None = None
+    ) -> bool:
         """Mark a sample reviewed with nothing applicable.
 
         Excluded from datasets and from the review queue alike, so it does
@@ -78,8 +123,14 @@ class Annotations:
         terms as :meth:`annotate`.
         """
         with self.engine.begin() as conn:
-            if not self._upsert_annotation(
-                conn, sample_id, label_set_id, state=t.SKIPPED, value=None, source=source
+            if not self._write(
+                conn,
+                sample_id,
+                label_set_id,
+                state=t.SKIPPED,
+                value=None,
+                source=source,
+                batch=batch,
             ):
                 return False
             self._reindex_classes(conn, sample_id, label_set_id, set())
@@ -91,6 +142,7 @@ class Annotations:
         items: Iterable[tuple[int, AnyValue | None]],
         source: str = t.HUMAN,
         on_item: Callable[[int], None] | None = None,
+        batch: str | None = None,
     ) -> "AnnotateReport":
         """Record many annotations in one transaction.
 
@@ -104,8 +156,14 @@ class Annotations:
         with self.engine.begin() as conn:
             for sample_id, value in items:
                 if value is None:
-                    if self._upsert_annotation(
-                        conn, sample_id, label_set_id, state=t.SKIPPED, value=None, source=source
+                    if self._write(
+                        conn,
+                        sample_id,
+                        label_set_id,
+                        state=t.SKIPPED,
+                        value=None,
+                        source=source,
+                        batch=batch,
                     ):
                         self._reindex_classes(conn, sample_id, label_set_id, set())
                         skipped += 1
@@ -113,13 +171,14 @@ class Annotations:
                         kept += 1
                 else:
                     schema.validate_value(value)
-                    if self._upsert_annotation(
+                    if self._write(
                         conn,
                         sample_id,
                         label_set_id,
                         state=t.ANNOTATED,
                         value=json.loads(value.model_dump_json()),
                         source=source,
+                        batch=batch,
                     ):
                         self._reindex_classes(
                             conn, sample_id, label_set_id, schema.classes_asserted(value)
@@ -134,8 +193,9 @@ class Annotations:
     def unskip(self, label_set_id: int, sample_ids: Iterable[int]) -> int:
         """Return skipped samples to the queue; returns how many moved.
 
-        Deletes the row, since unlabelled is the absence of one; anything
-        annotated is left alone. See ``docs/adr/0009``.
+        Stamps the skip as superseded with nothing after it, since
+        unlabelled is the absence of a current row; the skip stays in the
+        history. Anything annotated is left alone. See ``docs/adr/0009``.
         """
         moved = 0
         with self.engine.begin() as conn:
@@ -144,43 +204,18 @@ class Annotations:
                     t.annotation.c.sample_id == sample_id,
                     t.annotation.c.label_set_id == label_set_id,
                     t.annotation.c.state == t.SKIPPED,
+                    current(),
                 )
-                if conn.execute(delete(t.annotation).where(where)).rowcount:
+                stamped = conn.execute(
+                    update(t.annotation).where(where).values(superseded_at=func.now())
+                ).rowcount
+                if stamped:
                     self._reindex_classes(conn, sample_id, label_set_id, set())
                     moved += 1
         return moved
 
-    def discard(self, label_set_id: int, source: str) -> int:
-        """Delete annotations from one source; returns how many went.
-
-        For candidates that were never answers, such as an unreviewed
-        import. The source has to be named, so a person's answer is never
-        removed by a call that meant something else. See ``docs/adr/0009``.
-        """
-        with self.engine.begin() as conn:
-            rows = conn.execute(
-                select(t.annotation.c.sample_id).where(
-                    and_(
-                        t.annotation.c.label_set_id == label_set_id,
-                        t.annotation.c.source == source,
-                    )
-                )
-            ).all()
-            for row in rows:
-                conn.execute(
-                    delete(t.annotation).where(
-                        and_(
-                            t.annotation.c.sample_id == row.sample_id,
-                            t.annotation.c.label_set_id == label_set_id,
-                            t.annotation.c.source == source,
-                        )
-                    )
-                )
-                self._reindex_classes(conn, row.sample_id, label_set_id, set())
-        return len(rows)
-
-    def _upsert_annotation(self, conn, sample_id, label_set_id, *, state, value, source) -> bool:
-        """Write one annotation, unless what is there outranks ``source``.
+    def _write(self, conn, sample_id, label_set_id, *, state, value, source, batch) -> bool:
+        """Append one answer, superseding the current one unless it outranks ``source``.
 
         Returns whether it wrote. See :data:`tables.AUTHORITY`: an import
         landing on a sample a person already answered leaves the answer
@@ -195,29 +230,36 @@ class Annotations:
         where = and_(
             t.annotation.c.sample_id == sample_id,
             t.annotation.c.label_set_id == label_set_id,
+            current(),
         )
-        existing = conn.execute(select(t.annotation.c.source).where(where)).first()
+        existing = conn.execute(
+            select(t.annotation.c.id, t.annotation.c.source, t.annotation.c.batch).where(where)
+        ).first()
         if existing is not None:
             if t.AUTHORITY.get(existing.source, 0) > t.AUTHORITY[source]:
                 return False
             conn.execute(
-                update(t.annotation).where(where).values(state=state, value=value, source=source)
+                update(t.annotation)
+                .where(t.annotation.c.id == existing.id)
+                .values(superseded_at=func.now())
             )
-        else:
-            conn.execute(
-                insert(t.annotation).values(
-                    sample_id=sample_id,
-                    label_set_id=label_set_id,
-                    state=state,
-                    value=value,
-                    source=source,
-                )
+            if batch is None:
+                batch = existing.batch
+        conn.execute(
+            insert(t.annotation).values(
+                sample_id=sample_id,
+                label_set_id=label_set_id,
+                state=state,
+                value=value,
+                source=source,
+                batch=batch,
             )
+        )
         return True
 
     def _reindex_classes(self, conn, sample_id, label_set_id, classes: set[str]) -> None:
         conn.execute(
-            delete(t.annotation_class).where(
+            t.annotation_class.delete().where(
                 and_(
                     t.annotation_class.c.sample_id == sample_id,
                     t.annotation_class.c.label_set_id == label_set_id,
@@ -231,6 +273,7 @@ class Annotations:
                 )
             )
 
+    # -- reading ----------------------------------------------------------
 
     def annotation_of(self, sample_id: int, label_set_id: int) -> AnyValue | None:
         with self.engine.connect() as conn:
@@ -239,6 +282,7 @@ class Annotations:
                     and_(
                         t.annotation.c.sample_id == sample_id,
                         t.annotation.c.label_set_id == label_set_id,
+                        current(),
                     )
                 )
             ).first()
@@ -248,3 +292,88 @@ class Annotations:
         # annotation parses without complaint into an empty Choices, and the
         # catalog silently forgets what a human actually said.
         return VALUE.validate_python(row.value)
+
+    def history(self, sample_id: int, label_set_id: int) -> list[Answer]:
+        """Everything ever said about a sample under a label set, oldest first.
+
+        The last entry is the current answer, unless it was withdrawn — a
+        skip returned to the queue — in which case nothing is.
+        """
+        with self.engine.connect() as conn:
+            rows = conn.execute(
+                select(
+                    t.annotation.c.state,
+                    t.annotation.c.value,
+                    t.annotation.c.source,
+                    t.annotation.c.batch,
+                    t.annotation.c.created_at,
+                    t.annotation.c.superseded_at,
+                )
+                .where(
+                    and_(
+                        t.annotation.c.sample_id == sample_id,
+                        t.annotation.c.label_set_id == label_set_id,
+                    )
+                )
+                .order_by(t.annotation.c.created_at, t.annotation.c.id)
+            ).all()
+        return [_answer(row) for row in rows]
+
+    def review_counts(self, label_set_id: int) -> dict[str, ReviewCounts]:
+        """How each import batch fared under review, by batch name.
+
+        Per sample: the latest imported answer, and what stands now. Still
+        the import, nobody has looked. A person's answer after it, equal in
+        value, is an acceptance; a different one, or a skip, a correction.
+        Read from the history, which is what the history is for.
+        """
+        with self.engine.connect() as conn:
+            rows = conn.execute(
+                select(
+                    t.annotation.c.sample_id,
+                    t.annotation.c.state,
+                    t.annotation.c.value,
+                    t.annotation.c.source,
+                    t.annotation.c.batch,
+                    t.annotation.c.superseded_at,
+                )
+                .where(t.annotation.c.label_set_id == label_set_id)
+                .order_by(t.annotation.c.sample_id, t.annotation.c.created_at, t.annotation.c.id)
+            ).all()
+        tallies: dict[str, dict[str, int]] = {}
+        by_sample: dict[int, list] = {}
+        for row in rows:
+            by_sample.setdefault(row.sample_id, []).append(row)
+        for answers in by_sample.values():
+            imports = [a for a in answers if a.source == t.IMPORT and a.state == t.ANNOTATED]
+            if not imports:
+                continue
+            latest = imports[-1]
+            batch = latest.batch or ""
+            tally = tallies.setdefault(batch, {"accepted": 0, "corrected": 0, "pending": 0})
+            standing = next((a for a in answers if a.superseded_at is None), None)
+            if standing is None or standing is latest:
+                tally["pending"] += 1
+            elif standing.source == t.HUMAN and standing.state == t.ANNOTATED:
+                tally["accepted" if standing.value == latest.value else "corrected"] += 1
+            elif standing.source == t.HUMAN:
+                tally["corrected"] += 1
+            else:
+                tally["pending"] += 1
+        return {batch: ReviewCounts(**tally) for batch, tally in sorted(tallies.items())}
+
+
+def _answer(row) -> Answer:
+    value = (
+        VALUE.validate_python(row.value)
+        if row.state == t.ANNOTATED and row.value is not None
+        else None
+    )
+    return Answer(
+        state=row.state,
+        value=value,
+        source=row.source,
+        batch=row.batch,
+        created_at=row.created_at,
+        superseded_at=row.superseded_at,
+    )
