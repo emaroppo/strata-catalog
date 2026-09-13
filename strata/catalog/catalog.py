@@ -25,8 +25,10 @@ from strata.labels import (
     ManifestSample,
 )
 
+from .index import answers
 from .index import tables as t
 from .index.annotations import Annotations
+from .index.conflicts import Conflicts
 from .index.datasets import Datasets
 from .index.label_sets import LabelSets
 from .index.samples import Samples
@@ -82,6 +84,7 @@ class Catalog:
         self.blobs = blobs
         self.label_sets = LabelSets(engine)
         self.annotations = Annotations(engine)
+        self.conflicts = Conflicts(engine)
         self.samples = Samples(engine)
         self.datasets = Datasets(engine)
 
@@ -278,7 +281,7 @@ class Catalog:
             raise CatalogError(f"No labelled samples for label set {label_set_id}")
 
         with self.engine.begin() as conn:
-            digest = self.annotations.digest(conn, label_set_id, sample_ids)
+            digest = answers.digest(conn, label_set_id, sample_ids)
             existing = self.datasets.identical(
                 conn, name, set(sample_ids), digest, val_ratio, holdout_ratio
             )
@@ -494,4 +497,4 @@ class Catalog:
                 f"Feature {spec.name!r} reads label set {spec.ref!r}, which this "
                 f"catalog does not have."
             ) from None
-        return self.annotations.asserted(conn, label_set_id, schema, sample_ids)
+        return answers.asserted(conn, label_set_id, schema, sample_ids)

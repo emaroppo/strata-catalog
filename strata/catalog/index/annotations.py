@@ -4,19 +4,20 @@ Writes honour :data:`tables.AUTHORITY`: a write never replaces an answer
 from a source that outranks it. Unlabelled is the absence of a row, so
 returning a sample to the queue deletes one. The class index is rebuilt on
 every write through the indexing contract in :mod:`strata.labels`. See
-``docs/adr/0009``.
+``docs/adr/0009``. Disputes live in :mod:`conflicts`; the reads a version
+or a feature makes over answers live in :mod:`answers`.
 """
 
-import hashlib
 import json
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable, Iterable
 
 from sqlalchemy import and_, delete, insert, select, update
 from sqlalchemy.engine import Engine
 
 from strata.labels import AnySchema, AnyValue
 
-from ..rows import SCHEMA, VALUE, AnnotateReport, CatalogError, chunks, live, scoped
+from ..rows import SCHEMA, VALUE, AnnotateReport, CatalogError
+from . import conflicts
 from . import tables as t
 
 
@@ -63,7 +64,7 @@ class Annotations:
                 return False
             # Someone has looked again, which is what a conflict was asking
             # for. Whichever way they went, it is settled.
-            self._clear_conflict(conn, sample_id, label_set_id)
+            conflicts.clear(conn, sample_id, label_set_id)
             self._reindex_classes(
                 conn, sample_id, label_set_id, schema.classes_asserted(value)
             )
@@ -231,98 +232,6 @@ class Annotations:
             )
 
 
-    def record_conflict(
-        self,
-        sample_id: int,
-        label_set_id: int,
-        kept: AnyValue | None,
-        other: AnyValue | None,
-        other_origin: str | None = None,
-    ) -> None:
-        """Note that two origins answered this sample differently.
-
-        Called by whatever merges one catalog into another. Not by
-        :meth:`annotate`: a reviewer changing their mind is not a conflict,
-        it is the point of being able to correct an answer. A conflict is
-        two answers that were made independently, and only a merge can see
-        that.
-
-        The catalog keeps the answer it already had. Choosing between them
-        is exactly what it cannot do — both were made by someone looking at
-        the sample — so it keeps one, remembers the other, and puts the pair
-        in front of a person.
-        """
-        payload = {
-            "kept_value": None if kept is None else json.loads(kept.model_dump_json()),
-            "other_value": None if other is None else json.loads(other.model_dump_json()),
-            "other_origin": other_origin,
-        }
-        with self.engine.begin() as conn:
-            updated = conn.execute(
-                update(t.annotation_conflict)
-                .where(
-                    and_(
-                        t.annotation_conflict.c.sample_id == sample_id,
-                        t.annotation_conflict.c.label_set_id == label_set_id,
-                    )
-                )
-                .values(**payload)
-            ).rowcount
-            if not updated:
-                conn.execute(
-                    insert(t.annotation_conflict).values(
-                        sample_id=sample_id, label_set_id=label_set_id, **payload
-                    )
-                )
-
-    def conflicts(self, label_set_id: int, collections) -> list[dict]:
-        """Samples whose answer is disputed, and what the two answers were."""
-        stmt = (
-            select(
-                t.sample.c.id,
-                t.sample.c.checksum,
-                t.annotation_conflict.c.kept_value,
-                t.annotation_conflict.c.other_value,
-                t.annotation_conflict.c.other_origin,
-            )
-            .select_from(
-                t.annotation_conflict.join(
-                    t.sample, t.sample.c.id == t.annotation_conflict.c.sample_id
-                )
-            )
-            .where(
-                and_(
-                    live(),
-                    t.annotation_conflict.c.label_set_id == label_set_id,
-                )
-            )
-        )
-        def value(raw):
-            return None if raw is None else VALUE.validate_python(raw)
-
-        with self.engine.connect() as conn:
-            return [
-                {
-                    "sample_id": row.id,
-                    "checksum": row.checksum,
-                    "kept": value(row.kept_value),
-                    "other": value(row.other_value),
-                    "origin": row.other_origin,
-                }
-                for row in conn.execute(scoped(stmt, collections))
-            ]
-
-    def _clear_conflict(self, conn, sample_id: int, label_set_id: int) -> None:
-        """A fresh answer settles it, whichever way it went."""
-        conn.execute(
-            delete(t.annotation_conflict).where(
-                and_(
-                    t.annotation_conflict.c.sample_id == sample_id,
-                    t.annotation_conflict.c.label_set_id == label_set_id,
-                )
-            )
-        )
-
     def annotation_of(self, sample_id: int, label_set_id: int) -> AnyValue | None:
         with self.engine.connect() as conn:
             row = conn.execute(
@@ -339,68 +248,3 @@ class Annotations:
         # annotation parses without complaint into an empty Choices, and the
         # catalog silently forgets what a human actually said.
         return VALUE.validate_python(row.value)
-
-
-    def digest(self, conn, label_set_id: int, sample_ids: Sequence[int]) -> str:
-        """What this label set currently says about these samples, as a digest.
-
-        Over state, source and value, ordered by sample id and serialised
-        with sorted keys, so it is a function of the answers alone. See
-        ``docs/adr/0003``.
-        """
-        digest = hashlib.sha256()
-        for chunk in chunks(list(sample_ids), 500):
-            rows = conn.execute(
-                select(
-                    t.annotation.c.sample_id,
-                    t.annotation.c.state,
-                    t.annotation.c.source,
-                    t.annotation.c.value,
-                )
-                .where(
-                    and_(
-                        t.annotation.c.label_set_id == label_set_id,
-                        t.annotation.c.sample_id.in_(chunk),
-                    )
-                )
-                .order_by(t.annotation.c.sample_id)
-            ).all()
-            for sample_id, state, source, value in rows:
-                digest.update(
-                    json.dumps(
-                        [sample_id, state, source, value],
-                        sort_keys=True,
-                        separators=(",", ":"),
-                        default=str,
-                    ).encode()
-                )
-        return digest.hexdigest()
-
-    def asserted(
-        self, conn, label_set_id: int, schema: AnySchema, sample_ids: Sequence[int]
-    ) -> dict[int, list[str]]:
-        """The classes each sample's answer asserts, through the schema's indexing contract.
-
-        Read that way rather than by reaching into a payload this does not
-        understand — the same reason a new task type becomes queryable
-        without the catalog learning about it. Samples with no answer, or
-        an answer asserting nothing, are absent.
-        """
-        found: dict[int, list[str]] = {}
-        for chunk in chunks(list(sample_ids)):
-            rows = conn.execute(
-                select(t.annotation.c.sample_id, t.annotation.c.value).where(
-                    and_(
-                        t.annotation.c.label_set_id == label_set_id,
-                        t.annotation.c.state == t.ANNOTATED,
-                        t.annotation.c.sample_id.in_(chunk),
-                    )
-                )
-            ).all()
-            for sample_id, raw in rows:
-                if raw is None:
-                    continue
-                asserted = sorted(schema.classes_asserted(VALUE.validate_python(raw)))
-                if asserted:
-                    found[sample_id] = asserted
-        return found

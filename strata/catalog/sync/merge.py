@@ -199,7 +199,7 @@ def _merge_one(
     else:
         report.conflicted += 1
         if not dry_run:
-            target.annotations.record_conflict(
+            target.conflicts.record(
                 sample.id, target_set_id, kept=theirs, other=value, other_origin=origin
             )
 

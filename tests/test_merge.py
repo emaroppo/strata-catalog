@@ -74,7 +74,7 @@ def test_the_same_answer_twice_is_not_a_conflict(pair):
     # Two people agreeing is the common case and must stay silent, or the
     # conflict queue is noise and nobody reads it
     assert (report.agreed, report.conflicted, report.copied) == (1, 0, 0)
-    assert main.annotations.conflicts(main_set, "*") == []
+    assert main.conflicts.disputed(main_set, "*") == []
 
 
 def test_disagreement_keeps_both_and_settles_neither(pair):
@@ -90,7 +90,7 @@ def test_disagreement_keeps_both_and_settles_neither(pair):
     # The target keeps what it had — a merge cannot judge between two people
     # who each looked at the sample
     assert main.annotations.annotation_of(ids[0], main_set) == Choices(values=["cat"])
-    [conflict] = main.annotations.conflicts(main_set, "*")
+    [conflict] = main.conflicts.disputed(main_set, "*")
     assert conflict["kept"] == Choices(values=["cat"])
     assert conflict["other"] == Choices(values=["dog"])
     assert conflict["origin"] == laptop.id
@@ -124,7 +124,7 @@ def test_a_dry_run_reports_without_writing(pair):
     assert (report.conflicted, report.copied) == (1, 1)
     # Nothing moved: the count is what you look at before deciding
     assert main.annotations.annotation_of(second, main_set) is None
-    assert main.annotations.conflicts(main_set, "*") == []
+    assert main.conflicts.disputed(main_set, "*") == []
 
 
 def test_an_unknown_label_set_is_reported_not_invented(pair):
@@ -234,7 +234,7 @@ def test_boxes_merge_and_disagree_like_anything_else(tmp_path):
     # catalog is not a case someone has to remember to add later
     assert (report.copied, report.conflicted) == (1, 1)
     assert main.annotations.annotation_of(second, main_set) == there
-    [conflict] = main.annotations.conflicts(main_set, "*")
+    [conflict] = main.conflicts.disputed(main_set, "*")
     assert conflict["other"] == there
 
 
@@ -287,7 +287,7 @@ def test_a_person_there_supersedes_an_import_here(pair):
     # Not a conflict: a person against a guess is not two people disagreeing
     assert (report.superseded, report.conflicted) == (1, 0)
     assert main.annotations.annotation_of(ids[0], main_set) == Choices(values=["dog"])
-    assert main.annotations.conflicts(main_set, "*") == []
+    assert main.conflicts.disputed(main_set, "*") == []
     assert main.annotations.discard(main_set, "import") == 0
 
 
@@ -302,7 +302,7 @@ def test_an_import_there_leaves_a_person_here_alone(pair):
 
     assert (report.outranked, report.conflicted) == (1, 0)
     assert main.annotations.annotation_of(ids[0], main_set) == Choices(values=["cat"])
-    assert main.annotations.conflicts(main_set, "*") == []
+    assert main.conflicts.disputed(main_set, "*") == []
 
 
 def test_a_person_confirming_an_import_raises_its_standing(pair):
