@@ -108,7 +108,12 @@ def _probe(args) -> int:
             yield f"  unreachable — {p.index.error}"
         if p.blobs is not None:
             yield f"blobs  {p.blobs.where}"
-            if p.blobs.ok:
+            if p.blobs.ok and p.blobs.sample:
+                yield (
+                    f"  sample {p.blobs.sample[:12]} reads back as recorded — "
+                    f"{p.blobs.bytes:,} bytes"
+                )
+            elif p.blobs.ok:
                 yield f"  round trip correct — {p.blobs.bytes:,} bytes"
             else:
                 yield f"  failed — {p.blobs.error}"

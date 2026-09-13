@@ -90,12 +90,44 @@ def test_stats_refuses_a_catalog_that_is_not_there(tmp_path, capsys):
     assert "No catalog at" in capsys.readouterr().err
 
 
-def test_probe_proves_the_round_trip(stocked, config, capsys):
+def test_probe_reads_a_real_sample_back(stocked, config, capsys):
+    import hashlib
+
     code, out = run(capsys, "--config", str(config), "--json", "probe")
     assert code == 0
     record = json.loads(out)
     assert record["index"]["reachable"] and record["index"]["samples"] == 6
+    # The first sample the catalog holds, through the same read every
+    # consumer makes, hashed against what the index recorded for it
+    assert record["blobs"]["ok"] and record["blobs"]["bytes"] == len(b"image 0")
+    assert record["blobs"]["sample"] == hashlib.sha256(b"image 0").hexdigest()
+    code, out = run(capsys, "--config", str(config), "probe")
+    assert "reads back as recorded" in out
+
+
+def test_probe_notices_a_store_that_does_not_hold_the_samples(stocked, config, capsys):
+    # The index is fine; the bytes under the root are not what it describes
+    files = (p for p in stocked.blobs.root.rglob("*") if p.is_file())
+    [blob] = [p for p in files if p.read_bytes() == b"image 0"]
+    blob.write_bytes(b"not image 0 at all")
+
+    code, out = run(capsys, "--config", str(config), "--json", "probe")
+    record = json.loads(out)
+    assert code == 1
+    assert record["index"]["reachable"]
+    assert not record["blobs"]["ok"] and "the index says" in record["blobs"]["error"]
+
+
+def test_probe_on_an_empty_catalog_falls_back_to_a_round_trip(tmp_path, capsys):
+    config = tmp_path / "config.toml"
+    config.write_text(f'[catalog]\nroot = "{tmp_path / "fresh"}"\n')
+
+    code, out = run(capsys, "--config", str(config), "--json", "probe")
+    record = json.loads(out)
+    assert code == 0
+    assert record["index"]["samples"] == 0
     assert record["blobs"]["ok"] and record["blobs"]["bytes"] == 16384
+    assert record["blobs"]["sample"] is None and "no samples" in record["blobs"]["note"]
 
 
 def test_copy_moves_the_index_and_keeps_ids(stocked, config, tmp_path, capsys):
