@@ -187,6 +187,10 @@ dataset = Table(
     # identity, since the draw is the whole of what it did; not of an
     # inheriting version's, where it reaches only the samples that are new.
     Column("seed", Integer, nullable=True),
+    # A split the corpus arrived with, as the freeze read it: the metadata
+    # key, and which of its values were held out or validation. Null when
+    # every side was drawn. See versions/given.py.
+    Column("given_split", JSON, nullable=True),
     Column("created_at", DateTime, server_default=func.now()),
     UniqueConstraint("name", "version"),
 )

@@ -394,6 +394,7 @@ def test_a_manifest_is_json_anyone_can_read(materialised):
         "holdout_ratio_achieved",
         "group_by",
         "sides_from_version",
+        "given_split",
         "features",
         "samples",
     }
@@ -554,6 +555,113 @@ def test_a_re_split_starts_a_lineage_of_its_own(catalog, files, label_set, tmp_p
         )
     )
     assert (v4.version, v4.sides_from_version) == (4, 3)
+
+
+# ----------------------------------------------------------------------
+# A split the corpus arrived with
+# ----------------------------------------------------------------------
+
+
+def _benchmark(catalog, files, label_set, sets):
+    """Samples carrying the set a public dataset put them in."""
+    ids = []
+    for name, count in sets:
+        batch = catalog.ingest(files(count, prefix=name), media="image", metadata={"bench": name})
+        annotate_all(catalog, batch, label_set)
+        ids.append(batch)
+    return ids
+
+
+def test_a_given_split_fixes_the_sides_it_names_and_draws_the_rest(
+    catalog, files, label_set, tmp_path
+):
+    from strata.catalog import GivenSplit
+
+    train, test = _benchmark(catalog, files, label_set, [("train", 20), ("test", 5)])
+    given = GivenSplit(key="bench", holdout=["test"])
+    dataset_id = catalog.create_dataset(
+        "d", label_set, collections=EVERYTHING, val_ratio=0.2, given=given
+    )
+    manifest = _manifest(catalog.materialise(dataset_id, tmp_path / "d"))
+
+    # The benchmark's test set is the holdout, exactly; validation is drawn
+    # from its train set since it has no dev; nothing else is held out
+    assert {s.id for s in manifest.holdout} == set(test)
+    assert {s.id for s in manifest.val} <= set(train)
+    assert len(manifest.val) == 5
+    assert manifest.given_split == {"key": "bench", "holdout": ["test"], "val": []}
+
+
+def test_a_given_dev_set_is_the_validation(catalog, files, label_set, tmp_path):
+    from strata.catalog import GivenSplit
+
+    train, dev, test = _benchmark(
+        catalog, files, label_set, [("train", 12), ("dev", 4), ("test", 4)]
+    )
+    given = GivenSplit(key="bench", holdout=["test"], val=["dev"])
+    dataset_id = catalog.create_dataset("d", label_set, collections=EVERYTHING, given=given)
+    manifest = _manifest(catalog.materialise(dataset_id, tmp_path / "d"))
+
+    assert {s.id for s in manifest.val} == set(dev)
+    assert {s.id for s in manifest.holdout} == set(test)
+    assert {s.id for s in manifest.train} == set(train)
+
+
+def test_a_given_split_that_contradicts_an_inherited_side_is_refused(catalog, files, label_set):
+    from strata.catalog import GivenSplit
+
+    _benchmark(catalog, files, label_set, [("train", 20), ("test", 5)])
+    # Frozen once without the benchmark's division: its test samples land
+    # wherever the draw put them, most of them in train
+    first = catalog.create_dataset("d", label_set, collections=EVERYTHING)
+    given = GivenSplit(key="bench", holdout=["test"])
+    with pytest.raises(CatalogError, match="inherit=False"):
+        catalog.create_dataset("d", label_set, collections=EVERYTHING, given=given)
+    # Said outright, the version re-splits and starts a lineage of its own
+    second = catalog.create_dataset(
+        "d", label_set, collections=EVERYTHING, given=given, inherit=False
+    )
+    assert second != first
+
+
+def test_a_given_split_wins_over_grouping_and_says_so(catalog, files, label_set, tmp_path):
+    from strata.catalog import GivenSplit
+    from strata.catalog.stages import Context, DatasetRequest, dataset
+
+    # Two videos of four frames, and a benchmark that put one frame of each
+    # in its test set: matching it means cutting both groups
+    for video in ("v1", "v2"):
+        for name, count in (("train", 3), ("test", 1)):
+            ids = catalog.ingest(
+                files(count, prefix=f"{video}{name}"),
+                media="image",
+                metadata={"video": video, "bench": name},
+            )
+            annotate_all(catalog, ids, label_set)
+    record = dataset(
+        DatasetRequest(
+            name="d",
+            label_set=label_set_name(catalog, label_set),
+            collections=[EVERYTHING],
+            group_by="video",
+            given=GivenSplit(key="bench", holdout=["test"]),
+        ),
+        Context(catalog, tmp_path / "datasets"),
+    )
+    assert (record.given, record.groups_cut) == (2, 2)
+    manifest = _manifest(catalog.materialise(record.dataset_id, tmp_path / "d"))
+    assert len(manifest.holdout) == 2
+
+
+def label_set_name(catalog, label_set_id: int) -> str:
+    from sqlalchemy import select
+
+    from strata.catalog.index import tables as t
+
+    with catalog.engine.connect() as conn:
+        return conn.execute(
+            select(t.label_set.c.name).where(t.label_set.c.id == label_set_id)
+        ).scalar_one()
 
 
 def test_a_version_grouped_differently_is_another_version(catalog, files, label_set):

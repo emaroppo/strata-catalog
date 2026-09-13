@@ -58,6 +58,7 @@ class Datasets:
                     t.dataset.c.holdout_ratio_achieved,
                     t.dataset.c.group_by,
                     t.dataset.c.sides_from_version,
+                    t.dataset.c.given_split,
                     t.label_set.c.name.label("label_set"),
                     t.label_set.c.schema,
                 )
@@ -113,14 +114,15 @@ class Datasets:
         group_by: str | None = None,
         inherit: bool = True,
         seed: int | None = None,
+        given_split: dict | None = None,
     ) -> int | None:
         """The latest version of ``name``, if it froze exactly this.
 
         Exactly this: the same members, the same answers about them, the
-        same ratios asked for, the same grouping respected — and, for a
-        freeze that re-splits, a latest version that re-split itself from
-        the same seed, since one that inherited, or drew otherwise, holds
-        other sides. See ``docs/adr/0003``.
+        same ratios asked for, the same grouping respected, the same split
+        given — and, for a freeze that re-splits, a latest version that
+        re-split itself from the same seed, since one that inherited, or
+        drew otherwise, holds other sides. See ``docs/adr/0003``.
         """
         latest = conn.execute(
             select(
@@ -132,6 +134,7 @@ class Datasets:
                 t.dataset.c.group_by,
                 t.dataset.c.sides_from_version,
                 t.dataset.c.seed,
+                t.dataset.c.given_split,
             )
             .where(t.dataset.c.name == name)
             .order_by(t.dataset.c.version.desc())
@@ -151,6 +154,8 @@ class Datasets:
             return None
         if latest.group_by != group_by:
             return None
+        if (latest.given_split or None) != (given_split or None):
+            return None
         if not inherit and (latest.sides_from_version != latest.version or latest.seed != seed):
             return None
         members = {
@@ -162,6 +167,22 @@ class Datasets:
             )
         }
         return latest.id if members == wanted else None
+
+    def groups_cut(self, dataset_id: int, label_set_id: int, group_by: str | None) -> int:
+        """How many of a version's groups have members on more than one side.
+
+        Zero unless a split the corpus arrived with put them there: the
+        draw keeps a group whole, and a benchmark's division is reproduced
+        rather than corrected. Reported so the number is read knowing it.
+        """
+        if group_by is None:
+            return 0
+        sides: dict[str, set[str]] = {}
+        for row in self.members(dataset_id, label_set_id):
+            group = (row.metadata or {}).get(group_by)
+            if group is not None:
+                sides.setdefault(str(group), set()).add(row.side)
+        return sum(1 for seen in sides.values() if len(seen) > 1)
 
     def previous_split(self, conn, name: str) -> tuple[dict[int, str], int | None]:
         """What N+1 inherits: each member's side in the latest version of
@@ -216,6 +237,7 @@ class Datasets:
         group_by: str | None = None,
         sides_from_version: int | None = None,
         seed: int | None = None,
+        given_split: dict | None = None,
     ) -> int:
         """Write a version and its members. One statement per chunk of members."""
         dataset_id = conn.execute(
@@ -232,6 +254,7 @@ class Datasets:
                 group_by=group_by,
                 sides_from_version=sides_from_version,
                 seed=seed,
+                given_split=given_split,
             )
         ).inserted_primary_key[0]
         members = [

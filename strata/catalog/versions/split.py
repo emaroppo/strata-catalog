@@ -31,12 +31,17 @@ def assign(
     val_ratio: float = 0.2,
     holdout_ratio: float = 0.0,
     seed: int = 42,
+    given: dict[int, str] | None = None,
 ) -> tuple[dict[int, str], Achieved]:
     """Decide a side per sample id, and report the ratios actually reached.
 
     ``members`` maps sample id to group id, where ``None`` means the sample
     is its own group. ``inherited`` carries the previous version's
-    decisions, which are never overruled.
+    decisions, which are never overruled. ``given`` carries sides the
+    corpus arrived with, fixed before anything else and outside the
+    grouping: a benchmark that cuts a group is reproduced, since matching
+    it is the point. Whether a given side may contradict an inherited one
+    is the caller's policy; here the given side wins.
 
     The achieved ratios are returned because grouping can make a target
     unreachable (the fallback below); see ``docs/adr/0003``.
@@ -45,15 +50,23 @@ def assign(
         return {}, Achieved(0.0, 0.0)
 
     inherited = inherited or {}
+    given = given or {}
+    assigned: dict[int, str] = {}
+    counts = {side: 0 for side in SIDES}
+    for sample_id, side in given.items():
+        if sample_id in members:
+            assigned[sample_id] = side
+            counts[side] += 1
+
     groups: dict[str, list[int]] = {}
     for sample_id, group_id in members.items():
+        if sample_id in assigned:
+            continue
         # A null group id is the sample's own group, and has to be namespaced
         # or two samples could collide with a real group's name
         key = f"g:{group_id}" if group_id is not None else f"s:{sample_id}"
         groups.setdefault(key, []).append(sample_id)
 
-    assigned: dict[int, str] = {}
-    counts = {side: 0 for side in SIDES}
     undecided: list[str] = []
 
     for key, ids in groups.items():
@@ -79,7 +92,9 @@ def assign(
     # Holdout first, so validation is drawn from what holdout left. Forced
     # only when three groups exist: with two, a forced holdout leaves one
     # group for train and val together, which the refusal below would catch
-    # — better to report an empty holdout than to refuse the round.
+    # — better to report an empty holdout than to refuse the round. A side
+    # the corpus gave counts towards the target, so a benchmark's test set
+    # is the holdout and nothing more is drawn for it.
     undecided = _fill(
         HOLDOUT,
         round(total * holdout_ratio),
@@ -97,7 +112,7 @@ def assign(
             assigned[i] = TRAIN
         counts[TRAIN] += len(groups[key])
 
-    _refuse_a_one_sided_split(assigned, len(groups))
+    _refuse_a_one_sided_split(assigned, len(groups) + len(given))
     return assigned, Achieved(counts[VAL] / total, counts[HOLDOUT] / total)
 
 

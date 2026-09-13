@@ -24,6 +24,7 @@ from .catalog import Catalog
 from .rows import CatalogError
 from .versions.features import FeatureSpec
 from .versions.files import link_or_copy
+from .versions.given import GivenSplit
 from .versions.materialised import ensure_materialised
 from .versions.split import HOLDOUT, TRAIN, VAL, assign
 
@@ -71,6 +72,10 @@ class DatasetRequest(Strict):
     #: False re-splits from nothing rather than keeping the previous
     #: version's sides; the version records it, and a warm start stops there.
     inherit: bool = True
+    #: A split the corpus arrived with: the metadata key naming each
+    #: sample's set, and which names are holdout and which val. The samples
+    #: it names are fixed; the rest are drawn.
+    given: GivenSplit | None = None
 
 
 class DatasetRecord(Strict):
@@ -83,6 +88,11 @@ class DatasetRecord(Strict):
     catalog_id: str
     label_set_id: int
     samples: int
+    #: How many samples' sides the corpus gave rather than the draw.
+    given: int = 0
+    #: How many groups the given sides cut across. Reproduced rather than
+    #: corrected, and counted so the number is read knowing it.
+    groups_cut: int = 0
 
 
 def dataset(request: DatasetRequest, context: Context) -> DatasetRecord:
@@ -109,8 +119,12 @@ def dataset(request: DatasetRequest, context: Context) -> DatasetRecord:
         seed=request.seed,
         group_by=request.group_by,
         inherit=request.inherit,
+        given=request.given,
     )
     ref = catalog.datasets.named(dataset_id)
+    given = 0
+    if request.given is not None:
+        given = len(request.given.sides_for({s.id: s.metadata for s in labelled}))
     return DatasetRecord(
         dataset_id=dataset_id,
         name=ref.name,
@@ -119,6 +133,8 @@ def dataset(request: DatasetRequest, context: Context) -> DatasetRecord:
         catalog_id=catalog.id,
         label_set_id=label_set_id,
         samples=len(labelled),
+        given=given,
+        groups_cut=catalog.datasets.groups_cut(dataset_id, label_set_id, request.group_by),
     )
 
 

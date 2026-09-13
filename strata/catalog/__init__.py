@@ -35,6 +35,7 @@ from .sync.copy import CopyError, CopyReport, copy_index
 from .sync.merge import MergeError, MergeReport, merge_annotations
 from .types.prepared import PREPARED_NAME, PreparedIndex, PreparedSample
 from .types.preparers import Prepared, Preparer, PreparerError
+from .versions.given import GivenSplit
 from .versions.materialised import Materialised, ensure_materialised
 from .versions.split import HOLDOUT, TRAIN, VAL, Achieved, SplitError, assign
 
@@ -63,6 +64,7 @@ __all__ = [
     "TRAIN",
     "VAL",
     "Achieved",
+    "GivenSplit",
     "SplitError",
     "assign",
     "blob_path",

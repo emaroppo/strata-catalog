@@ -41,6 +41,7 @@ from .rows import (
 from .storage.blobs import BlobBackend, LocalBackend, Location, blob_path, checksum_of
 from .versions.features import FeatureError, FeatureSpec
 from .versions.files import fetch_into, materialised_name, write_out
+from .versions.given import GivenSplit
 from .versions.split import assign
 
 
@@ -262,6 +263,7 @@ class Catalog:
         query: dict | None = None,
         group_by: str | None = None,
         inherit: bool = True,
+        given: GivenSplit | None = None,
     ) -> int:
         """Freeze a selection into a new version, inheriting the previous split.
 
@@ -271,11 +273,17 @@ class Catalog:
         — ``video`` for frames — and none means every sample is its own
         group.
 
+        ``given`` is a split the corpus arrived with, read off a metadata
+        key: the samples it names are fixed on their side before anything
+        is drawn, and the rest are drawn by ratio. A given side that
+        contradicts an inherited one is refused, since a model warm-started
+        under this name may have trained on what would now be held out;
+        ``inherit=False`` is how to say that is intended.
+
         ``inherit=False`` re-splits: every side is drawn afresh, under this
         call's grouping and seed, and the version records that its sides
-        start here. A warm start never reaches back past such a version,
-        since a model trained before it may have seen what it now holds
-        out. See ``docs/adr/0003``.
+        start here. A warm start never reaches back past such a version.
+        See ``docs/adr/0003``.
         """
         if sample_ids is None:
             if collections is None:
@@ -300,6 +308,7 @@ class Catalog:
                 group_by,
                 inherit,
                 seed,
+                given.model_dump() if given is not None else None,
             )
             if existing is not None:
                 # A version describes a selection, not an attempt at one. A
@@ -312,9 +321,26 @@ class Catalog:
             if not inherit or origin is None:
                 # Sides start here: drawn from nothing, or the first version
                 inherited, origin = {}, version
+            fixed = (
+                given.sides_for(self.samples.metadata(conn, sample_ids)) if given else {}
+            )
+            moved = [i for i, side in fixed.items() if inherited.get(i, side) != side]
+            if moved:
+                raise CatalogError(
+                    f"The split given under {given.key!r} puts {len(moved)} sample(s) on "
+                    f"another side than the previous version of {name!r} did. A model "
+                    f"warm-started under this name may have trained on what would now "
+                    f"be held out. Freeze with inherit=False to draw every side afresh; "
+                    f"the round after it starts cold."
+                )
             groups = self.samples.grouping(conn, sample_ids, group_by)
             sides, achieved = assign(
-                groups, inherited, val_ratio=val_ratio, holdout_ratio=holdout_ratio, seed=seed
+                groups,
+                inherited,
+                val_ratio=val_ratio,
+                holdout_ratio=holdout_ratio,
+                seed=seed,
+                given=fixed,
             )
 
             dataset_id = self.datasets.freeze(
@@ -331,6 +357,7 @@ class Catalog:
                 group_by=group_by,
                 sides_from_version=origin,
                 seed=seed,
+                given_split=given.model_dump() if given is not None else None,
             )
         return dataset_id
 
@@ -460,6 +487,7 @@ class Catalog:
             holdout_ratio_achieved=info.holdout_ratio_achieved,
             group_by=info.group_by,
             sides_from_version=info.sides_from_version,
+            given_split=info.given_split,
             features=[spec.as_dict() for spec in features or ()],
             samples=samples,
         )
