@@ -177,6 +177,16 @@ dataset = Table(
     # The metadata key whose values were kept on one side when the split
     # was drawn. Null means none: every sample was its own group.
     Column("group_by", String(255), nullable=True),
+    # The version whose side assignment this one continues. A version
+    # inherits its predecessor's sides and carries this forward; one that
+    # re-split from nothing names itself. A warm start never reaches back
+    # past it: a model trained before a re-split may have seen what is now
+    # held out. Null for a version frozen before this was recorded.
+    Column("sides_from_version", Integer, nullable=True),
+    # What drew the sides this version decided. Part of a re-split's
+    # identity, since the draw is the whole of what it did; not of an
+    # inheriting version's, where it reaches only the samples that are new.
+    Column("seed", Integer, nullable=True),
     Column("created_at", DateTime, server_default=func.now()),
     UniqueConstraint("name", "version"),
 )

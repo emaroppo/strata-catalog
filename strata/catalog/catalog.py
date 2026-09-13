@@ -261,6 +261,7 @@ class Catalog:
         seed: int = 42,
         query: dict | None = None,
         group_by: str | None = None,
+        inherit: bool = True,
     ) -> int:
         """Freeze a selection into a new version, inheriting the previous split.
 
@@ -268,7 +269,13 @@ class Catalog:
         is new is decided. ``holdout_ratio`` is zero unless asked for.
         ``group_by`` names a metadata key whose values are kept on one side
         — ``video`` for frames — and none means every sample is its own
-        group. See ``docs/adr/0003``.
+        group.
+
+        ``inherit=False`` re-splits: every side is drawn afresh, under this
+        call's grouping and seed, and the version records that its sides
+        start here. A warm start never reaches back past such a version,
+        since a model trained before it may have seen what it now holds
+        out. See ``docs/adr/0003``.
         """
         if sample_ids is None:
             if collections is None:
@@ -284,7 +291,15 @@ class Catalog:
         with self.engine.begin() as conn:
             digest = answers.digest(conn, label_set_id, sample_ids)
             existing = self.datasets.identical(
-                conn, name, set(sample_ids), digest, val_ratio, holdout_ratio, group_by
+                conn,
+                name,
+                set(sample_ids),
+                digest,
+                val_ratio,
+                holdout_ratio,
+                group_by,
+                inherit,
+                seed,
             )
             if existing is not None:
                 # A version describes a selection, not an attempt at one. A
@@ -293,7 +308,10 @@ class Catalog:
                 # second one that says exactly the same thing.
                 return existing
             version = self.datasets.next_version(conn, name)
-            inherited = self.datasets.previous_split(conn, name)
+            inherited, origin = self.datasets.previous_split(conn, name)
+            if not inherit or origin is None:
+                # Sides start here: drawn from nothing, or the first version
+                inherited, origin = {}, version
             groups = self.samples.grouping(conn, sample_ids, group_by)
             sides, achieved = assign(
                 groups, inherited, val_ratio=val_ratio, holdout_ratio=holdout_ratio, seed=seed
@@ -311,6 +329,8 @@ class Catalog:
                 achieved=achieved,
                 sides=sides,
                 group_by=group_by,
+                sides_from_version=origin,
+                seed=seed,
             )
         return dataset_id
 
@@ -439,6 +459,7 @@ class Catalog:
             holdout_ratio=info.holdout_ratio,
             holdout_ratio_achieved=info.holdout_ratio_achieved,
             group_by=info.group_by,
+            sides_from_version=info.sides_from_version,
             features=[spec.as_dict() for spec in features or ()],
             samples=samples,
         )

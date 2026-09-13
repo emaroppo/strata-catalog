@@ -393,6 +393,7 @@ def test_a_manifest_is_json_anyone_can_read(materialised):
         "holdout_ratio",
         "holdout_ratio_achieved",
         "group_by",
+        "sides_from_version",
         "features",
         "samples",
     }
@@ -504,6 +505,55 @@ def test_a_grouping_is_respected_only_when_a_version_asks(catalog, files, label_
     frame_by_frame = _manifest(catalog.materialise(loose, tmp_path / "u"))
     assert frame_by_frame.group_by is None
     assert frame_by_frame.val_ratio_achieved == pytest.approx(0.2)
+
+
+def test_a_version_says_which_version_its_sides_began_at(catalog, files, label_set, tmp_path):
+    ids = catalog.ingest(files(10), media="image")
+    annotate_all(catalog, ids, label_set)
+    first = catalog.create_dataset("d", label_set, collections=EVERYTHING)
+    more = catalog.ingest(files(5, prefix="more"), media="image")
+    annotate_all(catalog, more, label_set)
+    second = catalog.create_dataset("d", label_set, collections=EVERYTHING)
+
+    # Inherited sides descend from the first version, and say so
+    v1 = _manifest(catalog.materialise(first, tmp_path / "v1"))
+    v2 = _manifest(catalog.materialise(second, tmp_path / "v2"))
+    assert (v1.version, v1.sides_from_version) == (1, 1)
+    assert (v2.version, v2.sides_from_version) == (2, 1)
+    kept = {s.id: s.split for s in v1.samples}
+    assert all(s.split == kept[s.id] for s in v2.samples if s.id in kept)
+
+
+def test_a_re_split_starts_a_lineage_of_its_own(catalog, files, label_set, tmp_path):
+    ids = catalog.ingest(files(20), media="image")
+    annotate_all(catalog, ids, label_set)
+    first = catalog.create_dataset("d", label_set, collections=EVERYTHING)
+    v1 = _manifest(catalog.materialise(first, tmp_path / "v1"))
+
+    # Drawn from nothing under another seed: the sides need not agree with
+    # the version before, and the version names itself as where they began
+    third = catalog.create_dataset("d", label_set, collections=EVERYTHING, seed=7, inherit=False)
+    v2 = _manifest(catalog.materialise(third, tmp_path / "v2"))
+    assert (v2.version, v2.sides_from_version) == (2, 2)
+    before = {s.id: s.split for s in v1.samples}
+    assert any(s.split != before[s.id] for s in v2.samples)
+
+    # Asked again unchanged, the re-split is the version already there;
+    # under another seed it is another draw, so another version
+    again = catalog.create_dataset("d", label_set, collections=EVERYTHING, seed=7, inherit=False)
+    assert again == third
+    other = catalog.create_dataset("d", label_set, collections=EVERYTHING, seed=8, inherit=False)
+    assert other != third
+
+    # What comes after inherits from the re-split, not from before it
+    more = catalog.ingest(files(5, prefix="more"), media="image")
+    annotate_all(catalog, more, label_set)
+    v4 = _manifest(
+        catalog.materialise(
+            catalog.create_dataset("d", label_set, collections=EVERYTHING), tmp_path / "v4"
+        )
+    )
+    assert (v4.version, v4.sides_from_version) == (4, 3)
 
 
 def test_a_version_grouped_differently_is_another_version(catalog, files, label_set):

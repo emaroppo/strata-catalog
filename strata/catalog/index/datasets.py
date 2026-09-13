@@ -57,6 +57,7 @@ class Datasets:
                     t.dataset.c.holdout_ratio,
                     t.dataset.c.holdout_ratio_achieved,
                     t.dataset.c.group_by,
+                    t.dataset.c.sides_from_version,
                     t.label_set.c.name.label("label_set"),
                     t.label_set.c.schema,
                 )
@@ -110,20 +111,27 @@ class Datasets:
         val_ratio: float | None = None,
         holdout_ratio: float | None = None,
         group_by: str | None = None,
+        inherit: bool = True,
+        seed: int | None = None,
     ) -> int | None:
         """The latest version of ``name``, if it froze exactly this.
 
         Exactly this: the same members, the same answers about them, the
-        same ratios asked for, and the same grouping respected. See
-        ``docs/adr/0003``.
+        same ratios asked for, the same grouping respected — and, for a
+        freeze that re-splits, a latest version that re-split itself from
+        the same seed, since one that inherited, or drew otherwise, holds
+        other sides. See ``docs/adr/0003``.
         """
         latest = conn.execute(
             select(
                 t.dataset.c.id,
+                t.dataset.c.version,
                 t.dataset.c.annotation_digest,
                 t.dataset.c.val_ratio,
                 t.dataset.c.holdout_ratio,
                 t.dataset.c.group_by,
+                t.dataset.c.sides_from_version,
+                t.dataset.c.seed,
             )
             .where(t.dataset.c.name == name)
             .order_by(t.dataset.c.version.desc())
@@ -143,6 +151,8 @@ class Datasets:
             return None
         if latest.group_by != group_by:
             return None
+        if not inherit and (latest.sides_from_version != latest.version or latest.seed != seed):
+            return None
         members = {
             row[0]
             for row in conn.execute(
@@ -153,23 +163,32 @@ class Datasets:
         }
         return latest.id if members == wanted else None
 
-    def previous_split(self, conn, name: str) -> dict[int, str]:
-        """Each member's side in the latest version of ``name``: what N+1 inherits."""
+    def previous_split(self, conn, name: str) -> tuple[dict[int, str], int | None]:
+        """What N+1 inherits: each member's side in the latest version of
+        ``name``, and the version those sides descend from.
+
+        The second is the latest version's own ``sides_from_version``, or
+        its number where it recorded none: a version frozen before this
+        was recorded started, as far as anyone can tell, a lineage of its
+        own.
+        """
         previous = conn.execute(
-            select(t.dataset.c.id)
+            select(t.dataset.c.id, t.dataset.c.version, t.dataset.c.sides_from_version)
             .where(t.dataset.c.name == name)
             .order_by(t.dataset.c.version.desc())
             .limit(1)
-        ).scalar_one_or_none()
+        ).first()
         if previous is None:
-            return {}
-        return dict(
+            return {}, None
+        sides = dict(
             conn.execute(
                 select(t.dataset_member.c.sample_id, t.dataset_member.c.side).where(
-                    t.dataset_member.c.dataset_id == previous
+                    t.dataset_member.c.dataset_id == previous.id
                 )
             ).all()
         )
+        origin = previous.sides_from_version
+        return sides, (previous.version if origin is None else origin)
 
     def next_version(self, conn, name: str) -> int:
         """One past the latest version of ``name``, or 1."""
@@ -195,6 +214,8 @@ class Datasets:
         achieved: Achieved,
         sides: dict[int, str],
         group_by: str | None = None,
+        sides_from_version: int | None = None,
+        seed: int | None = None,
     ) -> int:
         """Write a version and its members. One statement per chunk of members."""
         dataset_id = conn.execute(
@@ -209,6 +230,8 @@ class Datasets:
                 holdout_ratio=holdout_ratio,
                 holdout_ratio_achieved=achieved.holdout,
                 group_by=group_by,
+                sides_from_version=sides_from_version,
+                seed=seed,
             )
         ).inserted_primary_key[0]
         members = [

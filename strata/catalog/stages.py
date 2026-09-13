@@ -68,6 +68,9 @@ class DatasetRequest(Strict):
     seed: int = 42
     #: A metadata key whose values stay on one side. None: no grouping.
     group_by: str | None = None
+    #: False re-splits from nothing rather than keeping the previous
+    #: version's sides; the version records it, and a warm start stops there.
+    inherit: bool = True
 
 
 class DatasetRecord(Strict):
@@ -105,6 +108,7 @@ def dataset(request: DatasetRequest, context: Context) -> DatasetRecord:
         holdout_ratio=request.holdout_ratio,
         seed=request.seed,
         group_by=request.group_by,
+        inherit=request.inherit,
     )
     ref = catalog.datasets.named(dataset_id)
     return DatasetRecord(
