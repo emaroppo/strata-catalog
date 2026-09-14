@@ -180,9 +180,7 @@ def test_a_grouped_split_holds(catalog, files, tmp_path):
         )
         catalog.annotations.annotate_many(label_set_id, [(i, Choices(values=["a"])) for i in ids])
 
-    dataset_id = catalog.create_dataset(
-        "d", label_set_id, collections=EVERYTHING, group_by="video"
-    )
+    dataset_id = catalog.create_dataset("d", label_set_id, collections=EVERYTHING, group_by="video")
     from strata.labels import Manifest
 
     directory = catalog.materialise(dataset_id, tmp_path / "out")

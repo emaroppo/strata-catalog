@@ -89,13 +89,16 @@ def repack_blobs(
 
     with catalog.engine.connect() as conn:
         report.already_packed = conn.execute(
-            select(func.count())
-            .select_from(t.sample)
-            .where(~_pending(prefix))
+            select(func.count()).select_from(t.sample).where(~_pending(prefix))
         ).scalar()
         rows = conn.execute(
-            select(t.sample.c.id, t.sample.c.checksum, t.sample.c.location,
-                   t.sample.c.offset, t.sample.c.length)
+            select(
+                t.sample.c.id,
+                t.sample.c.checksum,
+                t.sample.c.location,
+                t.sample.c.offset,
+                t.sample.c.length,
+            )
             .where(_pending(prefix))
             # Group order keeps a video's frames in one shard. Nulls are
             # their own group, so where they fall does not matter; id breaks
@@ -205,8 +208,9 @@ def _verify(catalog, target, packed, verify: int, seed: int, report: RepackRepor
 
     with catalog.engine.connect() as conn:
         rows = conn.execute(
-            select(t.sample.c.checksum, t.sample.c.location, t.sample.c.offset,
-                   t.sample.c.length).where(t.sample.c.checksum.in_(chosen))
+            select(
+                t.sample.c.checksum, t.sample.c.location, t.sample.c.offset, t.sample.c.length
+            ).where(t.sample.c.checksum.in_(chosen))
         ).all()
 
     for row in rows:

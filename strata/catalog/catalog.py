@@ -163,8 +163,7 @@ class Catalog:
                 return
             conn.execute(
                 insert(t.catalog_identity).values(
-                    id=f"{datetime.now(UTC).strftime('%Y%m%dT%H%M%S')}"
-                    f"-{uuid.uuid4().hex[:8]}"
+                    id=f"{datetime.now(UTC).strftime('%Y%m%dT%H%M%S')}-{uuid.uuid4().hex[:8]}"
                 )
             )
 
@@ -224,18 +223,14 @@ class Catalog:
         a caller reports progress without breaking that up.
         """
         ids: list[int] = []
-        with TemporaryDirectory(prefix="strata-canonical-") as scratch, (
-            self.engine.begin()
-        ) as conn:
+        with TemporaryDirectory(prefix="strata-canonical-") as scratch, self.engine.begin() as conn:
             for path in paths:
                 path = Path(path)
                 extra = metadata_for(path) if metadata_for is not None else None
                 entry = {**(metadata or {}), **(extra or {})} or None
                 source = path
                 if canonicalise is not None:
-                    source, entry = _canonical_source(
-                        path, canonicalise, Path(scratch), entry
-                    )
+                    source, entry = _canonical_source(path, canonicalise, Path(scratch), entry)
                 checksum = checksum_of(source)
                 known = self.samples.find(conn, checksum)
                 if known is None:
@@ -336,9 +331,7 @@ class Catalog:
             if not inherit or origin is None:
                 # Sides start here: drawn from nothing, or the first version
                 inherited, origin = {}, version
-            fixed = (
-                given.sides_for(self.samples.metadata(conn, sample_ids)) if given else {}
-            )
+            fixed = given.sides_for(self.samples.metadata(conn, sample_ids)) if given else {}
             moved = [i for i, side in fixed.items() if inherited.get(i, side) != side]
             if moved:
                 assert given is not None  # nothing is fixed without a given split

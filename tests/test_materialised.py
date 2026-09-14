@@ -79,9 +79,7 @@ def test_a_change_of_features_is_rebuilt(catalog, version, tmp_path, fetches):
     assert result.manifest.features == [where.as_dict()]
 
 
-def test_another_catalogs_version_of_the_same_name_is_rebuilt(
-    catalog, version, tmp_path, fetches
-):
+def test_another_catalogs_version_of_the_same_name_is_rebuilt(catalog, version, tmp_path, fetches):
     """After a switch to a rebuilt catalog, whose numbering starts again."""
     first = ensure_materialised(catalog, version, tmp_path)
     _rewrite(first.directory, lambda m: m.update(catalog_id="20250101T000000-deadbeef"))

@@ -1,6 +1,5 @@
 """Commands that look: what is configured and installed, what a catalog holds, if it answers."""
 
-
 from ._shared import _catalogs, _config, _emit, _open
 
 # ----------------------------------------------------------------------

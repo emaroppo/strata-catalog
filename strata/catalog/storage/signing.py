@@ -67,8 +67,9 @@ def sign(checksum: str, secret: str, expires: int) -> str:
     return digest[:_SIGNATURE_CHARS]
 
 
-def verify(checksum: str, secret: str, expires: int, signature: str,
-           now: float | None = None) -> None:
+def verify(
+    checksum: str, secret: str, expires: int, signature: str, now: float | None = None
+) -> None:
     """Raise unless ``signature`` authorises ``checksum`` and is still live.
 
     Order matters: the signature is checked before the expiry, so an

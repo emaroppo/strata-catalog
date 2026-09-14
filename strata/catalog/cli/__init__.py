@@ -78,4 +78,5 @@ def _parser() -> argparse.ArgumentParser:
     remove.set_defaults(run=_remove)
     return parser
 
+
 __all__ = ["main"]

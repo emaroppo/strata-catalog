@@ -1,7 +1,5 @@
 """What a host is configured for, and what is installed on it: catalogs, sample types, preparers."""
 
-
-
 from ..config import CatalogMissing, Catalogs, open_catalog
 from .where import Strict, where_blobs, where_index
 

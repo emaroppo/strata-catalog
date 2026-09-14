@@ -39,9 +39,7 @@ class GivenSplit(BaseModel):
             raise ValueError("A given split needs the metadata key that names each sample's set.")
         both = sorted(set(self.holdout) & set(self.val))
         if both:
-            raise ValueError(
-                f"A name cannot be both held out and validation: {', '.join(both)}."
-            )
+            raise ValueError(f"A name cannot be both held out and validation: {', '.join(both)}.")
         if not self.holdout and not self.val:
             raise ValueError(
                 f"A given split over {self.key!r} names no value as holdout or val, so it "

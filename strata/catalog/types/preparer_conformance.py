@@ -122,9 +122,7 @@ class PreparerContract:
         for name in _tree(out):
             assert sample_type.allows(out / name), f"{name} is not a {type(sample_type).__name__}"
 
-    def test_the_output_is_already_canonical(
-        self, preparer, source, sample_type, tmp_path
-    ):
+    def test_the_output_is_already_canonical(self, preparer, source, sample_type, tmp_path):
         """Canonical by construction, not by ingest rewriting it.
 
         Ingest would canonicalise it anyway, and then the file on disk and

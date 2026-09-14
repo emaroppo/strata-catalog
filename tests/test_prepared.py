@@ -78,9 +78,7 @@ def _stored(catalog, data: bytes):
 
 def test_a_document_is_stored_in_canonical_form(catalog, documents):
     text = Text()
-    catalog.ingest(
-        [documents / "crlf.txt"], media="text", canonicalise=text.canonicalise
-    )
+    catalog.ingest([documents / "crlf.txt"], media="text", canonicalise=text.canonicalise)
     # Addressed by the canonical bytes, not by the file's
     sample = _stored(catalog, b"Dear Bob,\n\nRegards\n")
     assert sample is not None
@@ -89,12 +87,8 @@ def test_a_document_is_stored_in_canonical_form(catalog, documents):
 
 def test_two_documents_that_read_alike_are_one_sample(catalog, documents):
     text = Text()
-    crlf = catalog.ingest(
-        [documents / "crlf.txt"], media="text", canonicalise=text.canonicalise
-    )
-    clean = catalog.ingest(
-        [documents / "clean.txt"], media="text", canonicalise=text.canonicalise
-    )
+    crlf = catalog.ingest([documents / "crlf.txt"], media="text", canonicalise=text.canonicalise)
+    clean = catalog.ingest([documents / "clean.txt"], media="text", canonicalise=text.canonicalise)
     # The whole point of an honest checksum: the line endings were never a
     # difference between these two documents
     assert crlf == clean
@@ -102,9 +96,7 @@ def test_two_documents_that_read_alike_are_one_sample(catalog, documents):
 
 def test_a_rewritten_sample_says_where_it_came_from(catalog, documents):
     text = Text()
-    catalog.ingest(
-        [documents / "crlf.txt"], media="text", canonicalise=text.canonicalise
-    )
+    catalog.ingest([documents / "crlf.txt"], media="text", canonicalise=text.canonicalise)
     metadata = _stored(catalog, b"Dear Bob,\n\nRegards\n").metadata
     assert metadata["canonicalised"] is True
     # Traceable back to the file on disk, whose bytes are not the ones stored
@@ -113,9 +105,7 @@ def test_a_rewritten_sample_says_where_it_came_from(catalog, documents):
 
 def test_a_document_already_canonical_is_not_marked(catalog, documents):
     text = Text()
-    catalog.ingest(
-        [documents / "clean.txt"], media="text", canonicalise=text.canonicalise
-    )
+    catalog.ingest([documents / "clean.txt"], media="text", canonicalise=text.canonicalise)
     stored = _stored(catalog, b"Dear Bob,\n\nRegards\n")
     assert "canonicalised" not in (stored.metadata or {})
 

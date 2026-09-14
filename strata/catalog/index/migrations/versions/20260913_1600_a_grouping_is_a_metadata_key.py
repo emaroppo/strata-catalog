@@ -62,9 +62,7 @@ def upgrade() -> None:
     ).all()
     for sample_id, subtype, group_id, metadata in rows:
         moved = {**_as_dict(metadata), _key_for(subtype or ""): group_id}
-        bind.execute(
-            sa.update(_SAMPLE).where(_SAMPLE.c.id == sample_id).values(metadata=moved)
-        )
+        bind.execute(sa.update(_SAMPLE).where(_SAMPLE.c.id == sample_id).values(metadata=moved))
     with op.batch_alter_table("sample", schema=None) as batch_op:
         batch_op.drop_index("ix_sample_group")
         batch_op.drop_column("group_id")

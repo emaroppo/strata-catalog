@@ -34,9 +34,7 @@ TEXT_CHARSET = "charset=utf-8"
 def _media_type(suffix: str) -> str:
     """What to serve a blob as, from the filename's extension."""
     suffix = suffix.lower()
-    kind = EXTRA_TYPES.get(suffix) or mimetypes.types_map.get(
-        suffix, "application/octet-stream"
-    )
+    kind = EXTRA_TYPES.get(suffix) or mimetypes.types_map.get(suffix, "application/octet-stream")
     return f"{kind}; {TEXT_CHARSET}" if kind.startswith("text/") else kind
 
 
@@ -129,8 +127,7 @@ def create_app(
             raise HTTPException(
                 status_code=502,
                 detail=(
-                    f"Storage did not return {sample.location.container} — "
-                    f"{type(e).__name__}: {e}"
+                    f"Storage did not return {sample.location.container} — {type(e).__name__}: {e}"
                 ),
             ) from None
         return Response(

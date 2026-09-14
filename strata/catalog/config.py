@@ -136,7 +136,7 @@ class Catalogs:
                 raise CatalogConfigError(
                     f"This host has several catalogs "
                     f"({', '.join(sorted(self.by_name))}) and nothing says "
-                    f"which is the default. Add [catalog] default = \"<name>\", "
+                    f'which is the default. Add [catalog] default = "<name>", '
                     f"name one in a project's [catalog] name, or pass --catalog."
                 )
             return self.default
@@ -144,8 +144,7 @@ class Catalogs:
             return self.by_name[name]
         except KeyError:
             raise CatalogConfigError(
-                f"No catalog named {name!r} on this host. "
-                f"Configured: {', '.join(self.names())}."
+                f"No catalog named {name!r} on this host. Configured: {', '.join(self.names())}."
             ) from None
 
 

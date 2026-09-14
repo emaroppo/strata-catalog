@@ -277,9 +277,7 @@ class Samples:
         The lookup behind every reference that has to survive a move: a
         task URL, a cache key, a manifest entry. See ``docs/adr/0001``.
         """
-        stmt = select(*SAMPLE_COLUMNS).where(
-            and_(live(), t.sample.c.checksum == checksum)
-        )
+        stmt = select(*SAMPLE_COLUMNS).where(and_(live(), t.sample.c.checksum == checksum))
         with self.engine.connect() as conn:
             rows = sample_rows(conn, stmt)
         return rows[0] if rows else None
@@ -304,7 +302,4 @@ class Samples:
             .group_by(t.sample.c.media, t.sample.c.subtype)
         )
         with self.engine.connect() as conn:
-            return {
-                (row[0], row[1]): row[2]
-                for row in conn.execute(scoped(stmt, collections))
-            }
+            return {(row[0], row[1]): row[2] for row in conn.execute(scoped(stmt, collections))}

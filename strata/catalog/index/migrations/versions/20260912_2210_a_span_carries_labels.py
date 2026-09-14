@@ -84,9 +84,8 @@ _CONFLICT = sa.table(
 
 def _keyed(table):
     """Both tables are keyed on the sample and the label set."""
-    return (
-        (table.c.sample_id == sa.bindparam("b_sample"))
-        & (table.c.label_set_id == sa.bindparam("b_set"))
+    return (table.c.sample_id == sa.bindparam("b_sample")) & (
+        table.c.label_set_id == sa.bindparam("b_set")
     )
 
 

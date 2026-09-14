@@ -49,7 +49,6 @@ def digest(conn, label_set_id: int, sample_ids: Sequence[int]) -> str:
     return digest.hexdigest()
 
 
-
 def asserted(
     conn, label_set_id: int, schema: AnySchema, sample_ids: Sequence[int]
 ) -> dict[int, list[str]]:

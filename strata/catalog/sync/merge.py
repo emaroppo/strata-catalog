@@ -84,9 +84,7 @@ class MergeReport:
         if self.unknown_samples:
             out.append(f"{len(self.unknown_samples)} for samples not in the target")
         if self.unknown_label_sets:
-            out.append(
-                "label sets not in the target: " + ", ".join(self.unknown_label_sets)
-            )
+            out.append("label sets not in the target: " + ", ".join(self.unknown_label_sets))
         return out
 
 
@@ -131,8 +129,16 @@ def merge_annotations(
         rows = _answers(source, source_set_id)
         for done, (checksum, state, value, answered_by) in enumerate(rows, start=1):
             _merge_one(
-                target, target_set_id, schema, source.id, checksum, state, value,
-                answered_by, report, dry_run,
+                target,
+                target_set_id,
+                schema,
+                source.id,
+                checksum,
+                state,
+                value,
+                answered_by,
+                report,
+                dry_run,
             )
             if on_progress is not None:
                 on_progress(done, len(rows))
@@ -208,14 +214,11 @@ def _merge_one(
 def _label_sets(catalog: Catalog) -> list[tuple[str, int]]:
     with catalog.engine.connect() as conn:
         return [
-            (row.name, row.id)
-            for row in conn.execute(select(t.label_set.c.id, t.label_set.c.name))
+            (row.name, row.id) for row in conn.execute(select(t.label_set.c.id, t.label_set.c.name))
         ]
 
 
-def _answers(
-    catalog: Catalog, label_set_id: int
-) -> list[tuple[str, str, dict | None, str]]:
+def _answers(catalog: Catalog, label_set_id: int) -> list[tuple[str, str, dict | None, str]]:
     """Every answer in a label set, keyed by content rather than by id.
 
     Ids agree across a copy, but content addressing is what actually
@@ -236,9 +239,7 @@ def _answers(
                     t.annotation.c.value,
                     t.annotation.c.source,
                 )
-                .select_from(
-                    t.annotation.join(t.sample, t.annotation.c.sample_id == t.sample.c.id)
-                )
+                .select_from(t.annotation.join(t.sample, t.annotation.c.sample_id == t.sample.c.id))
                 .where(and_(t.annotation.c.label_set_id == label_set_id, current()))
                 .order_by(t.sample.c.id)
             )

@@ -78,7 +78,6 @@ class Conflicts:
                     )
                 )
 
-
     def disputed(self, label_set_id: int, collections) -> list[dict]:
         """Samples whose answer is disputed, and what the two answers were."""
         stmt = (
@@ -101,6 +100,7 @@ class Conflicts:
                 )
             )
         )
+
         def value(raw):
             return None if raw is None else VALUE.validate_python(raw)
 

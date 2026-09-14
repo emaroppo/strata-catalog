@@ -70,9 +70,7 @@ def installed(monkeypatch):
     """Pretend a set of preparers is installed."""
 
     def _install(*entries):
-        monkeypatch.setattr(
-            "strata.catalog.types.preparers.entries", lambda: list(entries)
-        )
+        monkeypatch.setattr("strata.catalog.types.preparers.entries", lambda: list(entries))
 
     return _install
 
@@ -101,9 +99,7 @@ def test_an_unknown_name_says_what_is_installed(installed):
 
 
 def test_a_name_registered_twice_is_refused(installed):
-    installed(
-        _entry("splitter", Splitter, dist="one"), _entry("splitter", Rival, dist="two")
-    )
+    installed(_entry("splitter", Splitter, dist="one"), _entry("splitter", Rival, dist="two"))
     # Two conversions of one corpus produce different bytes, and install
     # order is not how that gets decided
     with pytest.raises(PreparerError, match="more than once"):

@@ -1,6 +1,5 @@
 """What is in a catalog: samples, collections, and each label set."""
 
-
 from sqlalchemy import func, select
 
 from ..catalog import Catalog
@@ -54,12 +53,15 @@ def stats(catalog: Catalog, where: str) -> Stats:
                 .order_by(t.sample_collection.c.collection)
             )
         }
-        uncollected = conn.execute(
-            select(func.count())
-            .select_from(t.sample)
-            .outerjoin(t.sample_collection, t.sample_collection.c.sample_id == t.sample.c.id)
-            .where(t.sample_collection.c.sample_id.is_(None))
-        ).scalar() or 0
+        uncollected = (
+            conn.execute(
+                select(func.count())
+                .select_from(t.sample)
+                .outerjoin(t.sample_collection, t.sample_collection.c.sample_id == t.sample.c.id)
+                .where(t.sample_collection.c.sample_id.is_(None))
+            ).scalar()
+            or 0
+        )
         names = [row.name for row in conn.execute(select(t.label_set.c.name))]
 
     label_sets = []

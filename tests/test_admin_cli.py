@@ -136,9 +136,7 @@ def test_remove_tombstones_what_a_selection_names(stocked, config, capsys):
     bad = [s.id for s in stocked.samples.unlabelled(label_set, EVERYTHING)]
     with stocked.engine.begin() as conn:
         for sample_id in bad:
-            stocked.samples.describe(
-                conn, sample_id, subtype="plain", metadata={"quality": "bad"}
-            )
+            stocked.samples.describe(conn, sample_id, subtype="plain", metadata={"quality": "bad"})
 
     code, out = run(
         capsys, "--config", str(config), "remove", "--where", "quality=bad", "--dry-run"

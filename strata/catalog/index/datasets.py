@@ -35,9 +35,9 @@ class Datasets:
         """
         with self.engine.connect() as conn:
             row = conn.execute(
-                select(
-                    t.dataset.c.name, t.dataset.c.version, t.dataset.c.annotation_digest
-                ).where(t.dataset.c.id == dataset_id)
+                select(t.dataset.c.name, t.dataset.c.version, t.dataset.c.annotation_digest).where(
+                    t.dataset.c.id == dataset_id
+                )
             ).first()
         if row is None:
             raise CatalogError(f"No dataset with id {dataset_id}")

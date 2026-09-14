@@ -108,9 +108,7 @@ class Annotations:
             # Someone has looked again, which is what a conflict was asking
             # for. Whichever way they went, it is settled.
             conflicts.clear(conn, sample_id, label_set_id)
-            self._reindex_classes(
-                conn, sample_id, label_set_id, schema.classes_asserted(value)
-            )
+            self._reindex_classes(conn, sample_id, label_set_id, schema.classes_asserted(value))
         return True
 
     def skip(

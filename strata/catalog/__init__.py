@@ -43,14 +43,16 @@ from .versions.split import HOLDOUT, TRAIN, VAL, Achieved, SplitError, assign
 #: Modules another package may import by path, a promise made knowingly
 #: (``docs/adr/0015``). Anything not exported here and not listed is the
 #: package's own, and the dependency graph test refuses it.
-PUBLIC_MODULES = frozenset({
-    "config",
-    "stages",
-    "types.prepared",
-    "types.preparers",
-    "types.sample_types",
-    "versions.features",
-})
+PUBLIC_MODULES = frozenset(
+    {
+        "config",
+        "stages",
+        "types.prepared",
+        "types.preparers",
+        "types.sample_types",
+        "versions.features",
+    }
+)
 
 __all__ = [
     "EVERYTHING",

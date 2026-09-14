@@ -164,6 +164,7 @@ def test_an_unmigrated_catalog_is_refused_rather_than_mis_stamped(tmp_path, monk
     `upgrade` with nothing to do.
     """
     from strata.catalog import Catalog
+
     root = tmp_path / "catalog"
     Catalog.local(root)
     engine = create_engine(f"sqlite:///{root / 'catalog.db'}")
@@ -178,6 +179,7 @@ def test_an_unmigrated_catalog_is_refused_rather_than_mis_stamped(tmp_path, monk
 
 def test_a_catalog_behind_head_names_the_upgrade(tmp_path):
     from strata.catalog import Catalog
+
     root = tmp_path / "catalog"
     Catalog.local(root)
     engine = create_engine(f"sqlite:///{root / 'catalog.db'}")

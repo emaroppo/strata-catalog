@@ -269,7 +269,10 @@ def test_materialising_from_a_bucket_pulls_shards_not_members(store, tmp_path):
             bodies[path.name] = body
             paths.append(path)
         ids = catalog.ingest(
-            paths, media="image", subtype="frames", metadata={"video": group},
+            paths,
+            media="image",
+            subtype="frames",
+            metadata={"video": group},
             metadata_for=lambda p: {"source_path": p.name},
         )
         catalog.annotations.annotate_many(label_set_id, [(i, Choices(values=["a"])) for i in ids])
@@ -299,7 +302,8 @@ def test_a_materialised_file_is_not_re_fetched(store, tmp_path):
     for group in ("a", "b"):
         ids = catalog.ingest(
             [a_file(tmp_path, f"{group}{i}.jpg", f"{group}{i}".encode() * 40) for i in range(3)],
-            media="image", metadata={"video": group},
+            media="image",
+            metadata={"video": group},
         )
         catalog.annotations.annotate_many(label_set_id, [(i, Choices(values=["a"])) for i in ids])
 

@@ -69,8 +69,7 @@ def stocked(tmp_path):
 def locations(catalog):
     with catalog.engine.connect() as conn:
         return conn.execute(
-            select(t.sample.c.checksum, t.sample.c.location, t.sample.c.offset,
-                   t.sample.c.length)
+            select(t.sample.c.checksum, t.sample.c.location, t.sample.c.offset, t.sample.c.length)
         ).all()
 
 
@@ -126,8 +125,7 @@ def test_a_group_is_packed_in_one_run(stocked, store):
     # Ingest order is the packing order, and a corpus is ingested video by
     # video, so each video's frames land together
     laid_out = [
-        row.metadata["video"]
-        for row in sorted(rows, key=lambda r: (order[r.location], r.offset))
+        row.metadata["video"] for row in sorted(rows, key=lambda r: (order[r.location], r.offset))
     ]
     # Each group appears as one unbroken run
     runs = [g for i, g in enumerate(laid_out) if i == 0 or g != laid_out[i - 1]]

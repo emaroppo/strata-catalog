@@ -68,9 +68,7 @@ class PreparedIndex(BaseModel):
         # Sorted and indented: this is read by people debugging a corpus,
         # and a stable order keeps a re-run's diff to what actually changed.
         path.write_text(
-            json.dumps(
-                self.model_dump(mode="json"), indent=2, sort_keys=True, ensure_ascii=False
-            )
+            json.dumps(self.model_dump(mode="json"), indent=2, sort_keys=True, ensure_ascii=False)
             + "\n",
             encoding="utf-8",
         )

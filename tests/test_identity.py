@@ -65,9 +65,7 @@ def _stocked(tmp_path):
     path = root / "a.jpg"
     path.write_bytes(b"bytes")
     [sample_id] = catalog.ingest([path], media="image")
-    label_set_id = catalog.label_sets.create(
-        "x", ClassificationSchema(classes=["cat", "dog"])
-    )
+    label_set_id = catalog.label_sets.create("x", ClassificationSchema(classes=["cat", "dog"]))
     return catalog, sample_id, label_set_id
 
 
@@ -77,7 +75,8 @@ def test_a_conflict_keeps_both_answers(tmp_path):
     catalog, sample_id, label_set_id = _stocked(tmp_path)
     catalog.annotations.annotate(sample_id, label_set_id, Choices(values=["cat"]))
     catalog.conflicts.record(
-        sample_id, label_set_id,
+        sample_id,
+        label_set_id,
         kept=Choices(values=["cat"]),
         other=Choices(values=["dog"]),
         other_origin="20260101T000000-abcdef12",
@@ -130,9 +129,7 @@ def test_a_third_disagreement_replaces_the_second(tmp_path):
     catalog.conflicts.record(
         sample_id, label_set_id, Choices(values=["cat"]), Choices(values=["dog"])
     )
-    catalog.conflicts.record(
-        sample_id, label_set_id, Choices(values=["cat"]), Choices(values=[])
-    )
+    catalog.conflicts.record(sample_id, label_set_id, Choices(values=["cat"]), Choices(values=[]))
 
     # The pair being shown matters more than the history of who disagreed
     [conflict] = catalog.conflicts.disputed(label_set_id, "*")

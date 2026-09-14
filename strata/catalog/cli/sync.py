@@ -1,6 +1,5 @@
 """Commands for work away from the index: copy it out, merge answers back."""
 
-
 from ._shared import Refused, _emit, _open, _ticker
 
 

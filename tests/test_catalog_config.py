@@ -70,13 +70,17 @@ def test_no_file_at_all(tmp_path):
 
 
 def test_named_catalogs_are_addressable(tmp_path):
-    catalogs = load_catalogs(_write(tmp_path, """
+    path = _write(
+        tmp_path,
+        """
 [catalog.images]
 root = "images"
 
 [catalog.text]
 root = "text"
-"""))
+""",
+    )
+    catalogs = load_catalogs(path)
     assert catalogs.names() == ["images", "text"]
     assert catalogs.named("images").root == "images"
     assert catalogs.named("text").root == "text"
@@ -88,7 +92,9 @@ def test_shared_settings_are_stated_once(tmp_path):
     Two catalogs on one endpoint is the ordinary case, and repeating the
     endpoint in every table is how one of them ends up subtly different.
     """
-    catalogs = load_catalogs(_write(tmp_path, """
+    path = _write(
+        tmp_path,
+        """
 [catalog]
 s3_endpoint = "http://garage:3900"
 s3_bucket = "shared"
@@ -99,7 +105,9 @@ root = "images"
 [catalog.text]
 root = "text"
 s3_bucket = "text-only"
-"""))
+""",
+    )
+    catalogs = load_catalogs(path)
     assert catalogs.named("images").s3_endpoint == "http://garage:3900"
     assert catalogs.named("text").s3_endpoint == "http://garage:3900"
     # and a table overrides what it names
@@ -114,7 +122,9 @@ def test_a_single_named_catalog_needs_no_default(tmp_path):
 
 
 def test_an_explicit_default_is_honoured(tmp_path):
-    catalogs = load_catalogs(_write(tmp_path, """
+    path = _write(
+        tmp_path,
+        """
 [catalog]
 default = "text"
 
@@ -123,7 +133,9 @@ root = "images"
 
 [catalog.text]
 root = "text"
-"""))
+""",
+    )
+    catalogs = load_catalogs(path)
     assert catalogs.named().root == "text"
 
 
@@ -133,13 +145,17 @@ root = "text"
 
 
 def test_an_unknown_name_lists_the_ones_that_exist(tmp_path):
-    catalogs = load_catalogs(_write(tmp_path, """
+    path = _write(
+        tmp_path,
+        """
 [catalog.images]
 root = "images"
 
 [catalog.text]
 root = "text"
-"""))
+""",
+    )
+    catalogs = load_catalogs(path)
     with pytest.raises(CatalogConfigError, match="images, text"):
         catalogs.named("satellite")
 
@@ -152,13 +168,17 @@ def test_an_unknown_name_does_not_fall_back(tmp_path):
 
 
 def test_several_catalogs_and_no_default_is_ambiguous(tmp_path):
-    catalogs = load_catalogs(_write(tmp_path, """
+    path = _write(
+        tmp_path,
+        """
 [catalog.images]
 root = "images"
 
 [catalog.text]
 root = "text"
-"""))
+""",
+    )
+    catalogs = load_catalogs(path)
     # Not at load time — a project or --catalog naming one settles it, and
     # only asking for "the default" is genuinely ambiguous
     with pytest.raises(CatalogConfigError, match="several catalogs"):
@@ -168,13 +188,17 @@ root = "text"
 
 def test_a_default_naming_nothing_is_refused(tmp_path):
     with pytest.raises(CatalogConfigError, match="names no catalog"):
-        load_catalogs(_write(tmp_path, """
+        path = _write(
+            tmp_path,
+            """
 [catalog]
 default = "missing"
 
 [catalog.images]
 root = "images"
-"""))
+""",
+        )
+        load_catalogs(path)
 
 
 def test_an_unknown_key_says_where_it_is(tmp_path):
@@ -190,14 +214,18 @@ def test_a_credential_in_the_file_is_refused(tmp_path):
 
 def test_each_catalog_names_its_own_blob_mount(tmp_path):
     """Two catalogs read off mounts are two mounts in Label Studio, with two names."""
-    catalogs = load_catalogs(_write(tmp_path, """
+    path = _write(
+        tmp_path,
+        """
 [catalog.main]
 root = "main"
 
 [catalog.emails]
 root = "emails"
 blobs_prefix = "blobs-emails"
-"""))
+""",
+    )
+    catalogs = load_catalogs(path)
     assert catalogs.named("main").blobs_prefix == "blobs"
     assert catalogs.named("emails").blobs_prefix == "blobs-emails"
 
@@ -210,13 +238,17 @@ blobs_prefix = "blobs-emails"
 def test_credentials_reach_every_catalog(tmp_path, monkeypatch):
     monkeypatch.setenv("STRATA_S3_ACCESS_KEY", "key")
     monkeypatch.setenv("STRATA_BLOB_SECRET", "secret")
-    catalogs = load_catalogs(_write(tmp_path, """
+    path = _write(
+        tmp_path,
+        """
 [catalog.images]
 root = "images"
 
 [catalog.text]
 root = "text"
-"""))
+""",
+    )
+    catalogs = load_catalogs(path)
     for name in ("images", "text"):
         assert catalogs.named(name).s3_access_key == "key"
         assert catalogs.named(name).blob_secret == "secret"
@@ -231,12 +263,16 @@ def test_the_environment_cannot_move_a_host_to_another_catalog(tmp_path, monkeyp
     monkeypatch.setenv("STRATA_CATALOG_URL", "postgresql://elsewhere/db")
     monkeypatch.setenv("STRATA_S3_ENDPOINT", "http://elsewhere:3900")
     monkeypatch.setenv("STRATA_S3_BUCKET", "elsewhere")
-    config = load_catalogs(_write(tmp_path, """
+    path = _write(
+        tmp_path,
+        """
 [catalog]
 url = "postgresql://here/db"
 s3_endpoint = "http://here:3900"
 s3_bucket = "here"
-""")).named()
+""",
+    )
+    config = load_catalogs(path).named()
     assert (config.url, config.s3_endpoint, config.s3_bucket) == (
         "postgresql://here/db",
         "http://here:3900",
@@ -247,7 +283,9 @@ s3_bucket = "here"
 def test_a_bucket_stays_with_its_catalog(tmp_path, monkeypatch):
     """An exported bucket used to land on every catalog, and put them all in one."""
     monkeypatch.setenv("STRATA_S3_BUCKET", "strata")
-    catalogs = load_catalogs(_write(tmp_path, """
+    path = _write(
+        tmp_path,
+        """
 [catalog]
 s3_endpoint = "http://garage:3900"
 s3_bucket = "strata"
@@ -256,7 +294,9 @@ s3_bucket = "strata"
 
 [catalog.text]
 s3_bucket = "text"
-"""))
+""",
+    )
+    catalogs = load_catalogs(path)
     assert catalogs.named("text").s3_bucket == "text"
 
 
