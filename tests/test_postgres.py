@@ -132,7 +132,7 @@ def test_ingest_and_dedup(catalog, files):
 def test_reserved_words_in_the_schema_are_quoted(catalog, files):
     # `offset` is reserved in SQL and `metadata` is an awkward name; if
     # either were unquoted this is where it would surface
-    [sample_id] = catalog.ingest(
+    [_sample_id] = catalog.ingest(
         files(1), media="image", metadata_for=lambda p: {"source_path": p.name}
     )
     label_set_id = catalog.label_sets.create("x", ClassificationSchema(classes=["a"]))
@@ -274,7 +274,7 @@ def test_grouping_and_metadata_survive(populated, catalog):
 def test_the_next_insert_does_not_collide(populated, catalog, tmp_path):
     from strata.catalog import copy_index
 
-    source, label_set_id, _ = populated
+    source, _label_set_id, _ = populated
     copy_index(source, catalog)
 
     # Ids came in explicitly, which leaves a Postgres sequence at zero — the

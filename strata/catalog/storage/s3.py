@@ -70,8 +70,9 @@ class S3Backend:
     def _open(self) -> tuple[tarfile.TarFile, tempfile.SpooledTemporaryFile, str]:
         """The open shard, its buffer and its key, opening one if none is."""
         if self._shard is None or self._buffer is None or self._key is None:
-            self._buffer = tempfile.SpooledTemporaryFile(max_size=self.shard_bytes)
-            self._shard = tarfile.open(fileobj=self._buffer, mode="w")
+            # Held open across puts and closed by flush, which is the point of a shard
+            self._buffer = tempfile.SpooledTemporaryFile(max_size=self.shard_bytes)  # noqa: SIM115
+            self._shard = tarfile.open(fileobj=self._buffer, mode="w")  # noqa: SIM115
             self._key = f"{self.prefix}/{uuid.uuid4().hex}.tar"
         return self._shard, self._buffer, self._key
 

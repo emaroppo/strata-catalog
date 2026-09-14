@@ -44,13 +44,15 @@ def stats(catalog: Catalog, where: str) -> Stats:
     """
     with catalog.engine.connect() as conn:
         total = conn.execute(select(func.count()).select_from(t.sample)).scalar() or 0
-        collections: dict[str, int] = {
+        # A comprehension, not dict(rows): a result has keys(), so dict()
+        # would read it as a mapping and fail
+        collections: dict[str, int] = {  # noqa: C416
             name: count
             for name, count in conn.execute(
                 select(t.sample_collection.c.collection, func.count())
                 .group_by(t.sample_collection.c.collection)
                 .order_by(t.sample_collection.c.collection)
-            ).all()
+            )
         }
         uncollected = conn.execute(
             select(func.count())

@@ -9,6 +9,8 @@ rather than guessed, and the environment cannot move a host to another
 catalog behind the file's back.
 """
 
+import re
+
 import pytest
 
 from strata.catalog import LocalBackend
@@ -176,7 +178,7 @@ root = "images"
 
 
 def test_an_unknown_key_says_where_it_is(tmp_path):
-    with pytest.raises(CatalogConfigError, match="catalog.images"):
+    with pytest.raises(CatalogConfigError, match=re.escape("catalog.images")):
         load_catalogs(_write(tmp_path, '[catalog.images]\nrooot = "typo"\n'))
 
 

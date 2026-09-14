@@ -7,7 +7,7 @@ from strata.catalog.versions.split import assign, ratio
 
 
 def ungrouped(n: int) -> dict[int, None]:
-    return {i: None for i in range(n)}
+    return dict.fromkeys(range(n))
 
 
 def count(assigned: dict[int, str], side: str) -> int:
@@ -112,7 +112,7 @@ def test_the_fallback_picks_the_group_closest_to_the_target():
 
 
 def test_an_inherited_side_is_never_overruled():
-    inherited = {i: VAL for i in range(10)}
+    inherited = dict.fromkeys(range(10), VAL)
     assigned, _ = assign(ungrouped(50), inherited=inherited, val_ratio=0.2)
     assert all(assigned[i] == VAL for i in range(10))
 
@@ -127,7 +127,7 @@ def test_new_samples_fill_the_deficit_only():
 def test_a_drifted_ratio_is_corrected_by_the_next_version():
     # Over target already: the new samples all go to train rather than
     # compounding it
-    inherited = {i: VAL for i in range(30)}
+    inherited = dict.fromkeys(range(30), VAL)
     assigned, _ = assign(ungrouped(100), inherited=inherited, val_ratio=0.2)
     assert count(assigned, VAL) == 30
     assert all(assigned[i] == TRAIN for i in range(30, 100))
@@ -187,7 +187,7 @@ def test_a_holdout_keeps_groups_whole():
 def test_an_inherited_holdout_stays_held_out():
     # A sample measured on once is never trained on later, whatever the new
     # version asks for
-    inherited = {i: HOLDOUT for i in range(10)}
+    inherited = dict.fromkeys(range(10), HOLDOUT)
     assigned, achieved = assign(ungrouped(100), inherited=inherited, holdout_ratio=0.0)
     assert all(assigned[i] == HOLDOUT for i in range(10))
     assert achieved.holdout == pytest.approx(0.1)
@@ -218,12 +218,12 @@ def test_a_holdout_too_small_for_its_groups_is_still_drawn_given_three():
 
 def test_a_single_group_cannot_be_split():
     with pytest.raises(SplitError, match="1 group"):
-        assign({i: "one-video" for i in range(20)})
+        assign(dict.fromkeys(range(20), "one-video"))
 
 
 def test_the_error_explains_why_rather_than_what():
     with pytest.raises(SplitError, match="indivisible"):
-        assign({i: "one-video" for i in range(20)})
+        assign(dict.fromkeys(range(20), "one-video"))
 
 
 def test_two_samples_still_produce_both_sides():

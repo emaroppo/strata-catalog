@@ -47,7 +47,7 @@ def test_list_names_each_catalog_and_its_identity(stocked, config, capsys):
 
 
 def test_list_as_json_is_the_record(stocked, config, capsys):
-    code, out = run(capsys, "--config", str(config), "--json", "list")
+    _code, out = run(capsys, "--config", str(config), "--json", "list")
     [entry] = json.loads(out)
     assert entry["name"] == "default" and entry["identity"] == stocked.id
 

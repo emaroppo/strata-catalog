@@ -8,10 +8,11 @@ admitted by the type it claims, already canonical, and the same bytes on a
 second run. See ``docs/adr/0010``.
 """
 
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from importlib.metadata import entry_points
 from pathlib import Path
-from typing import ClassVar, Iterable
+from typing import ClassVar
 
 from strata.common import plugins
 from strata.labels import AnyValue

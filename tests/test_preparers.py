@@ -80,7 +80,7 @@ def installed(monkeypatch):
 @pytest.fixture
 def log(tmp_path) -> Path:
     path = tmp_path / "corpus.log"
-    path.write_bytes("first line\r\nsecond line\n\n".encode())
+    path.write_bytes(b"first line\r\nsecond line\n\n")
     return path
 
 
@@ -220,5 +220,5 @@ class TestSplitterConforms(PreparerContract):
     @pytest.fixture
     def source(self, tmp_path):
         path = tmp_path / "corpus.log"
-        path.write_bytes("first line\r\nsecond line\n".encode())
+        path.write_bytes(b"first line\r\nsecond line\n")
         return path

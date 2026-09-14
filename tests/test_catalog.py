@@ -829,13 +829,13 @@ def test_a_sample_row_can_be_hashed_even_carrying_metadata():
 def test_two_rows_for_one_sample_are_the_same_sample():
     from strata.catalog import Location, SampleRow
 
-    common = dict(
-        id=1,
-        checksum="a" * 64,
-        location=Location("x", 0, 1),
-        media="image",
-        subtype="plain",
-    )
+    common = {
+        "id": 1,
+        "checksum": "a" * 64,
+        "location": Location("x", 0, 1),
+        "media": "image",
+        "subtype": "plain",
+    }
     # What is recorded about where a sample came from does not make it a
     # different sample
     assert SampleRow(**common, metadata={"a": 1}) == SampleRow(**common, metadata=None)

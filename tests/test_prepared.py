@@ -8,6 +8,7 @@ offsets that come back address characters that are not there.
 """
 
 import hashlib
+import re
 
 import pytest
 
@@ -122,7 +123,7 @@ def test_a_document_already_canonical_is_not_marked(catalog, documents):
 def test_ingest_names_the_file_it_could_not_store(catalog, tmp_path):
     bad = tmp_path / "latin.txt"
     bad.write_bytes("café".encode("latin-1"))
-    with pytest.raises(CatalogError, match="latin.txt"):
+    with pytest.raises(CatalogError, match=re.escape("latin.txt")):
         catalog.ingest([bad], media="text", canonicalise=Text().canonicalise)
 
 

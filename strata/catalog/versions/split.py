@@ -52,7 +52,7 @@ def assign(
     inherited = inherited or {}
     given = given or {}
     assigned: dict[int, str] = {}
-    counts = {side: 0 for side in SIDES}
+    counts: dict[str, int] = dict.fromkeys(SIDES, 0)
     for sample_id, side in given.items():
         if sample_id in members:
             assigned[sample_id] = side
