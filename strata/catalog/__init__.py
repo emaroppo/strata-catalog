@@ -22,9 +22,6 @@ tars in object storage; the index is SQLite or Postgres against one schema.
 The local pair needs no infrastructure, which is what keeps the repository
 runnable by someone who just cloned it.
 
-Phase 2 built the local half: SQLite index, a directory of blobs, ingest and
-``materialise``. The S3 backend and Postgres are later phases behind the same
-interface.
 """
 
 from .catalog import Catalog

@@ -68,8 +68,8 @@ def repack_blobs(
 
     ``source`` defaults to the catalog's own backend and must expose
     ``path_for`` — packing reads files. Nothing is deleted: the source keeps
-    its copy, which is both the rollback and, until a sample-serving API
-    exists, what Label Studio reads to show an image.
+    its copy, which is the rollback, and what Label Studio reads when it
+    serves off the mount rather than the blob server.
     """
     source = source or catalog.blobs
     if not hasattr(source, "path_for"):
@@ -100,11 +100,9 @@ def repack_blobs(
                 t.sample.c.length,
             )
             .where(_pending(prefix))
-            # Group order keeps a video's frames in one shard. Nulls are
-            # their own group, so where they fall does not matter; id breaks
-            # the tie so a resumed run repeats the previous ordering.
-            # Ingest order: a corpus is walked directory by directory, so
-            # a video's frames arrive together and pack together
+            # Ingest order: a corpus is walked directory by directory, so a
+            # video's frames arrive together and pack together, and a
+            # resumed run repeats the previous ordering
             .order_by(t.sample.c.id)
         ).all()
 

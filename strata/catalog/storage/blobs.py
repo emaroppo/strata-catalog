@@ -142,8 +142,8 @@ class LocalBackend:
         """The file behind a location.
 
         Not on :class:`BlobBackend`, and cannot be: a tar member in a bucket
-        has no path. It exists so Label Studio can keep serving images off
-        the local mount while the catalog is being built, and it goes away
-        when the sample-serving API arrives.
+        has no path. It exists for the Label Studio mount and for the repack,
+        which reads files; the blob server (``docs/adr/0013``) is what makes
+        the mount optional.
         """
         return self.root / location.container
