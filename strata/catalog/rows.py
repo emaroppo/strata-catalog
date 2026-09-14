@@ -31,6 +31,10 @@ class CatalogError(Exception):
     """A request the catalog cannot honour."""
 
 
+class CatalogMissing(CatalogError):
+    """An index with no catalog in it: nothing to open, and nothing is made."""
+
+
 @dataclass(frozen=True)
 class SampleRow:
     """A sample as callers see it — never a raw database row."""

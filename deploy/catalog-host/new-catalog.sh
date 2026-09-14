@@ -42,8 +42,8 @@ host=${STRATA_CATALOG_HOST:-$(hostname)}
 compose="docker compose -f $here/docker-compose.yml"
 
 # -- the index ------------------------------------------------------------
-# Empty. Whatever first opens it — a laptop's ingest, most likely — creates
-# the tables and stamps it at the current migration.
+# Empty. The first ingest into it — from a laptop, most likely — creates
+# the tables and stamps it at the current migration. Opening it does not.
 if $compose exec -T catalog-db psql -U "$db_user" -lqt | cut -d'|' -f1 | grep -qw "$name"; then
     echo "Database $name already exists."
 else

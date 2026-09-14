@@ -28,7 +28,7 @@ interface.
 """
 
 from .catalog import Catalog
-from .rows import EVERYTHING, AnnotateReport, CatalogError, DatasetRef, SampleRow
+from .rows import EVERYTHING, AnnotateReport, CatalogError, CatalogMissing, DatasetRef, SampleRow
 from .storage.blobs import BlobBackend, LocalBackend, Location, blob_path, checksum_of
 from .storage.repack import RepackError, RepackReport, repack_blobs
 from .storage.signing import SignedUrls, SigningError, suffix_of
@@ -59,6 +59,7 @@ __all__ = [
     "BlobBackend",
     "Catalog",
     "CatalogError",
+    "CatalogMissing",
     "CopyError",
     "CopyReport",
     "DatasetRef",

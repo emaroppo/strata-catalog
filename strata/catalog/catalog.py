@@ -38,6 +38,7 @@ from .rows import (
     SCHEMA,
     VALUE,
     CatalogError,
+    CatalogMissing,
 )
 from .storage.blobs import BlobBackend, LocalBackend, Location, blob_path, checksum_of
 from .versions.features import FeatureError, FeatureSpec
@@ -99,42 +100,55 @@ class Catalog:
         """
         root = Path(root)
         root.mkdir(parents=True, exist_ok=True)
-        return cls.connect(f"sqlite:///{root / 'catalog.db'}", LocalBackend(root / "blobs"))
+        return cls.create(f"sqlite:///{root / 'catalog.db'}", LocalBackend(root / "blobs"))
 
     @classmethod
     def connect(cls, url: str, blobs: BlobBackend) -> "Catalog":
-        """A catalog on any index the same schema runs against.
+        """Open a catalog that exists. Nothing is created, and nothing is written.
 
         One schema, two dialects: SQLite for a checkout with nothing
         installed, Postgres once the corpus is millions of rows read from
-        several machines at once, which is where SQLite stops being the
-        right answer.
+        several machines at once. An index with no catalog in it is
+        :class:`CatalogMissing`; one behind the code is refused with the
+        command that brings it up to date. Creating is :meth:`create`.
         """
         catalog = cls(database.engine(url), blobs)
-        catalog.create_all()
+        catalog._verify()
         return catalog
 
-    def create_all(self) -> None:
-        """Build the schema, and mark it current.
+    @classmethod
+    def create(cls, url: str, blobs: BlobBackend) -> "Catalog":
+        """A catalog on ``url``, built if the index holds none, opened if it does.
 
         Stamped rather than migrated: this creates everything in one step,
         which is what keeps a checkout runnable and the suite fast, and a
         database built that way is at head by construction. Without the
         stamp the first ``alembic upgrade`` would replay the baseline
-        against tables that already exist.
+        against tables that already exist. Only a database this call found
+        empty is stamped; one that already held tables is opened, and the
+        migration guard decides whether it is current.
         """
-        # Whether this call is creating the database or opening one decides
-        # everything. A database that was empty is at head by construction
-        # and can be stamped. One that already held tables and carries no
-        # revision predates migrations — it is at the *baseline*, and
-        # stamping it head would have it claim columns it does not have.
-        empty = not inspect(self.engine).has_table("sample")
-        t.metadata.create_all(self.engine)
-        if empty:
-            stamp_if_new(self.engine, MIGRATIONS)
-        else:
-            require_current(self.engine, MIGRATIONS, "catalog")
-        self._mint_identity()
+        catalog = cls(database.engine(url), blobs)
+        if catalog._exists():
+            catalog._verify()
+            return catalog
+        t.metadata.create_all(catalog.engine)
+        stamp_if_new(catalog.engine, MIGRATIONS)
+        catalog._mint_identity()
+        return catalog
+
+    def _exists(self) -> bool:
+        inspector = inspect(self.engine)
+        return inspector.has_table("sample") or inspector.has_table("alembic_version")
+
+    def _verify(self) -> None:
+        """Refuse an index with no catalog in it, or one the code would misread."""
+        if not self._exists():
+            raise CatalogMissing(
+                f"No catalog at {self.engine.url.render_as_string(hide_password=True)}. "
+                "Ingest into it to make one, or point [catalog] at an existing one."
+            )
+        require_current(self.engine, MIGRATIONS, "catalog")
 
     def _mint_identity(self) -> None:
         """Give a catalog its name when it comes into existence.

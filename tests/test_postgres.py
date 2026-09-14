@@ -72,8 +72,8 @@ def catalog(tmp_path):
 
     Per-test schemas rather than a shared one: these tests assert on counts,
     and a row left by another test is a failure that looks like a bug in the
-    code under test. The schema has to exist before anything connects into
-    it, since connecting runs create_all.
+    code under test. The schema has to exist before the catalog is created
+    in it.
     """
     from sqlalchemy import create_engine, text
 
@@ -82,7 +82,7 @@ def catalog(tmp_path):
     with admin.begin() as conn:
         conn.execute(text(f'CREATE SCHEMA "{name}"'))
 
-    catalog = Catalog.connect(
+    catalog = Catalog.create(
         f"{URL}?options=-csearch_path%3D{name}", LocalBackend(tmp_path / "blobs")
     )
     yield catalog

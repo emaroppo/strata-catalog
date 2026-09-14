@@ -174,7 +174,7 @@ def test_copy_moves_the_index_and_keeps_ids(stocked, config, tmp_path, capsys):
 
 def test_merge_reports_before_it_writes(stocked, config, tmp_path, capsys):
     other_url = f"sqlite:///{tmp_path / 'other.db'}"
-    other = Catalog.connect(other_url, stocked.blobs)
+    other = Catalog.create(other_url, stocked.blobs)
     from strata.catalog import copy_index
 
     copy_index(stocked, other)

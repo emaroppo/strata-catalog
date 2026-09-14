@@ -11,7 +11,7 @@ def _copy(args) -> int:
 
     source, config = _open(args)
     # Only the index moves: the copy points at exactly the same bytes
-    target = Catalog.connect(args.to, blobs_for(config))
+    target = Catalog.create(args.to, blobs_for(config))
     show = _ticker("copying")
     try:
         report = copy_index(source, target, on_progress=lambda table, n: show(f"{table} ({n:,})"))

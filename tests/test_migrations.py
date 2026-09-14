@@ -158,9 +158,10 @@ def test_every_migration_has_a_down_path(tmp_path, monkeypatch):
 def test_an_unmigrated_catalog_is_refused_rather_than_mis_stamped(tmp_path, monkeypatch):
     """The dangerous case: tables but no revision.
 
-    `connect` calls `create_all` on every open, so a database that predates
-    migrations would otherwise be stamped at head — claiming columns it
-    does not have, and leaving a later `upgrade` with nothing to do.
+    `create` builds and stamps only a database it found empty. One that
+    holds tables and no revision predates migrations, and stamping it at
+    head would have it claim columns it does not have, leaving a later
+    `upgrade` with nothing to do.
     """
     from strata.catalog import Catalog
     root = tmp_path / "catalog"

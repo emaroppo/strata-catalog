@@ -25,7 +25,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from .catalog import Catalog
-from .rows import CatalogError
+from .rows import CatalogError, CatalogMissing
 from .storage.blobs import BlobBackend, LocalBackend
 
 #: The name a host's single catalog goes by when the file names none.
@@ -50,10 +50,6 @@ _MOVED = {
 
 class CatalogConfigError(CatalogError):
     """A catalog description that cannot be acted on."""
-
-
-class CatalogMissing(CatalogError):
-    """A local catalog that has not been created yet."""
 
 
 @dataclass
@@ -266,25 +262,28 @@ def blobs_for(config: CatalogConfig, local: Path | None = None) -> BlobBackend:
 
 
 def open_catalog(config: CatalogConfig, *, create: bool = False) -> Catalog:
-    """The catalog a config describes.
+    """The catalog a config describes: opened, or with ``create`` made if absent.
 
-    A configured index is opened as it is: nothing local to check for, and
-    creating its tables is harmless if they exist. A local one that does not
-    exist yet is :class:`CatalogMissing` unless ``create`` — refusing to make
-    one would leave no way to make the first, and making one by accident
-    hides a catalog configured somewhere else.
+    Opening never creates. An index with no catalog in it is
+    :class:`CatalogMissing`, and a command that consults a catalog must not
+    leave one behind by accident, where it would hide the catalog configured
+    somewhere else. The commands that put data in pass ``create``: refusing
+    to make one would leave no way to make the first.
     """
     blobs = blobs_for(config)
     if config.url:
-        return Catalog.connect(config.url, blobs)
-    root = Path(config.root)
-    if not create and not (root / "catalog.db").exists():
-        raise CatalogMissing(
-            f"No catalog at {root}. Ingest a project into it to make one, "
-            f"or point [catalog] root at an existing one."
-        )
-    root.mkdir(parents=True, exist_ok=True)
-    return Catalog.connect(f"sqlite:///{root / 'catalog.db'}", blobs)
+        url = config.url
+    else:
+        root = Path(config.root)
+        if not create and not (root / "catalog.db").exists():
+            raise CatalogMissing(
+                f"No catalog at {root}. Ingest a project into it to make one, "
+                f"or point [catalog] root at an existing one."
+            )
+        if create:
+            root.mkdir(parents=True, exist_ok=True)
+        url = f"sqlite:///{root / 'catalog.db'}"
+    return Catalog.create(url, blobs) if create else Catalog.connect(url, blobs)
 
 
 def _config(values: dict, where: str, environ: Mapping[str, str]) -> CatalogConfig:

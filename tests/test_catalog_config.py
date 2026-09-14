@@ -277,13 +277,16 @@ def test_a_configured_index_wins_over_a_local_file(tmp_path):
     of the configured index. After the index moved to Postgres they carried
     on reporting counts from a file nobody was writing to any more.
     """
+    from strata.catalog import Catalog, LocalBackend
+
     root = tmp_path / "catalog"
-    root.mkdir()
-    (root / "catalog.db").write_bytes(b"")
+    stale = Catalog.local(root)
     elsewhere = tmp_path / "elsewhere.db"
+    configured = Catalog.create(f"sqlite:///{elsewhere}", LocalBackend(root / "blobs"))
 
     catalog = open_catalog(CatalogConfig(root=str(root), url=f"sqlite:///{elsewhere}"))
     assert str(elsewhere) in str(catalog.engine.url)
+    assert catalog.id == configured.id and catalog.id != stale.id
 
 
 def test_a_local_catalog_is_made_only_when_asked(tmp_path):

@@ -257,7 +257,7 @@ def test_materialising_from_a_bucket_pulls_shards_not_members(store, tmp_path):
     from strata.labels import Choices, ClassificationSchema, Manifest
 
     backend = S3Backend(store, bucket="test", shard_bytes=1 << 20)
-    catalog = Catalog.connect(f"sqlite:///{tmp_path / 'index.db'}", backend)
+    catalog = Catalog.create(f"sqlite:///{tmp_path / 'index.db'}", backend)
 
     label_set_id = catalog.label_sets.create("x", ClassificationSchema(classes=["a"]))
     bodies = {}
@@ -294,7 +294,7 @@ def test_a_materialised_file_is_not_re_fetched(store, tmp_path):
     from strata.labels import Choices, ClassificationSchema
 
     backend = S3Backend(store, bucket="test", shard_bytes=1 << 20)
-    catalog = Catalog.connect(f"sqlite:///{tmp_path / 'index.db'}", backend)
+    catalog = Catalog.create(f"sqlite:///{tmp_path / 'index.db'}", backend)
     label_set_id = catalog.label_sets.create("x", ClassificationSchema(classes=["a"]))
     for group in ("a", "b"):
         ids = catalog.ingest(

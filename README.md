@@ -112,9 +112,10 @@ catalog name that matches nothing is refused rather than falling back.
 Every command takes `--json` and `--catalog NAME`; `copy`, `merge` and
 `repack` report what they would do and write nothing until `--apply`.
 
-**Schema changes are migrations.** A catalog this creates is stamped
-current; an existing one is refused on open until it has been brought
-forward:
+**Schema changes are migrations.** A catalog `ingest` creates is stamped
+current. Opening one creates nothing: an index with no catalog in it is
+refused as missing, and one behind the code is refused until it has been
+brought forward:
 
 ```bash
 strata-catalog-migrate upgrade head          # the default catalog
