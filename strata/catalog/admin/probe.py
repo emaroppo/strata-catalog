@@ -130,6 +130,9 @@ def _round_trip(config: CatalogConfig) -> BlobProbe:
     try:
         blobs = blobs_for(config)
         if endpoint:
+            from ..storage.s3 import S3Backend
+
+            assert isinstance(blobs, S3Backend)  # an endpoint is what selects it
             # A prefix of its own, so a probe never lands among real shards
             blobs.prefix = "probe"
         location = blobs.put(marker, checksum_of(marker))
@@ -162,6 +165,9 @@ def _round_trip(config: CatalogConfig) -> BlobProbe:
     finally:
         marker.unlink(missing_ok=True)
         if endpoint and uploaded is not None and blobs is not None:
+            from ..storage.s3 import S3Backend
+
+            assert isinstance(blobs, S3Backend)
             try:
                 blobs.client.delete_object(Bucket=config.s3_bucket, Key=uploaded.container)
             except Exception:

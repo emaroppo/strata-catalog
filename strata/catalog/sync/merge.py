@@ -177,6 +177,7 @@ def _merge_one(
             target.annotations.annotate(sample.id, target_set_id, value, source=answered_by)
         return
 
+    assert here is not None and standing is not None  # the absent case returned above
     theirs = VALUE.validate_python(here.value)
     if theirs == value:
         if rank > standing:

@@ -11,6 +11,7 @@ from typing import NamedTuple
 
 from pydantic import TypeAdapter
 from sqlalchemy import and_, or_, select
+from sqlalchemy.sql import ColumnElement
 
 from strata.labels import AnySchema, AnyValue
 
@@ -86,7 +87,7 @@ def chunks(items: list, size: int = 500):
         yield items[start : start + size]
 
 
-def within(collections) -> object | None:
+def within(collections) -> ColumnElement[bool] | None:
     """A condition matching samples in any of ``collections``.
 
     ``None`` when the answer is everything, so a caller can drop the join

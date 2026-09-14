@@ -20,8 +20,10 @@ class LabelSets:
     def create(self, name: str, schema: AnySchema) -> int:
         with self.engine.begin() as conn:
             return conn.execute(
-                insert(t.label_set).values(name=name, schema=json.loads(schema.model_dump_json()))
-            ).inserted_primary_key[0]
+                insert(t.label_set)
+                .values(name=name, schema=json.loads(schema.model_dump_json()))
+                .returning(t.label_set.c.id)
+            ).scalar_one()
 
     def get(self, name: str) -> tuple[int, AnySchema]:
         """A label set by name, as whatever kind of schema it is.

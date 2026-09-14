@@ -23,6 +23,7 @@ s3 = ["boto3>=1.34"]
 # Serving blobs over HTTP, so Label Studio can stop reading a local mount.
 serve = ["fastapi>=0.110", "uvicorn>=0.29", "strata-common[service]>=0.1,<0.2"]
 postgres = ["psycopg[binary]>=3.2"]
+all = ["strata-catalog[s3,serve,postgres]"]
 # The preparer conformance suite is importable by plugins so they can run
 # the contract against their own converter. The only thing here needing pytest.
 test = ["pytest>=8.0"]

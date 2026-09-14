@@ -141,7 +141,9 @@ class PreparerContract:
         index = run(preparer, [source], out)
         assert set(index.samples) == set(_tree(out))
         # And it survives the round trip to disk, which is what ingest reads
-        assert PreparedIndex.load(out).samples.keys() == index.samples.keys()
+        loaded = PreparedIndex.load(out)
+        assert loaded is not None
+        assert loaded.samples.keys() == index.samples.keys()
 
     # -- determinism ----------------------------------------------------
 

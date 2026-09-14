@@ -21,7 +21,11 @@ def _repack(args) -> int:
     catalog, _ = _open(args)
     # This catalog's bucket, not the host default's: with --catalog naming
     # another, the default's would pack one corpus into someone else's.
+    from ..storage.s3 import S3Backend
+
     target = blobs_for(config)
+    if not isinstance(target, S3Backend):
+        raise Refused("Repacking needs [catalog] s3_endpoint: shards go to a bucket.")
     target.shard_bytes = args.shard_mb * 1024 * 1024
     # Explicitly the local one: blobs_for answers with the bucket once an
     # endpoint is set, and that is the destination, not the source.

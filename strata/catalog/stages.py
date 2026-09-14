@@ -10,6 +10,7 @@ The CLI calls these and renders what comes back; the orchestrator calls
 them from a config. Neither has a second implementation.
 """
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
@@ -33,6 +34,10 @@ DATASET_VERSION = "dataset_version"
 DATASET_DIR = "dataset_dir"
 
 
+#: Which side of a split a sample is on.
+Side = Literal["train", "val", "holdout"]
+
+
 class Strict(BaseModel):
     """Unknown keys are an error; a misspelled one would silently do nothing."""
 
@@ -50,7 +55,7 @@ class Context:
     #: Blobs already on this host, consulted before the backend.
     cache: Path | None = None
     #: ``on_progress(done, total)`` as blobs land.
-    on_progress: object = None
+    on_progress: Callable[[int, int], None] | None = None
 
 
 # ----------------------------------------------------------------------
@@ -124,7 +129,7 @@ def dataset(request: DatasetRequest, context: Context) -> DatasetRecord:
     ref = catalog.datasets.named(dataset_id)
     given = 0
     if request.given is not None:
-        given = len(request.given.sides_for({s.id: s.metadata for s in labelled}))
+        given = len(request.given.sides_for({s.id: s.metadata or {} for s in labelled}))
     return DatasetRecord(
         dataset_id=dataset_id,
         name=ref.name,
@@ -238,7 +243,7 @@ class SplitRecord(Strict):
     #: The key the sides respect: the version's own when inherited, the
     #: request's when drawn.
     group_by: str | None
-    counts: dict[Literal["train", "val", "holdout"], int]
+    counts: dict[Side, int]
 
 
 def split(request: SplitRequest, context: Context) -> SplitRecord:
@@ -341,12 +346,12 @@ def apply_sides(
     return directory, rewritten
 
 
-def _counts(manifest: Manifest) -> dict[str, int]:
+def _counts(manifest: Manifest) -> dict[Side, int]:
     return _counts_of(manifest.samples)
 
 
-def _counts_of(samples) -> dict[str, int]:
-    counts = {TRAIN: 0, VAL: 0, HOLDOUT: 0}
+def _counts_of(samples) -> dict[Side, int]:
+    counts: dict[Side, int] = {TRAIN: 0, VAL: 0, HOLDOUT: 0}
     for sample in samples:
         counts[sample.split] += 1
     return counts

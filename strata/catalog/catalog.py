@@ -172,7 +172,7 @@ class Catalog:
     def id(self) -> str:
         """Which catalog this is. Sortable by time, unique without coordination."""
         with self.engine.connect() as conn:
-            return conn.execute(select(t.catalog_identity.c.id)).scalar()
+            return conn.execute(select(t.catalog_identity.c.id)).scalar_one()
 
     # ------------------------------------------------------------------
     # Ingest
@@ -341,6 +341,7 @@ class Catalog:
             )
             moved = [i for i, side in fixed.items() if inherited.get(i, side) != side]
             if moved:
+                assert given is not None  # nothing is fixed without a given split
                 raise CatalogError(
                     f"The split given under {given.key!r} puts {len(moved)} sample(s) on "
                     f"another side than the previous version of {name!r} did. A model "
@@ -585,7 +586,7 @@ class Catalog:
                 found[sample_id] = value
         return found
 
-    def _feature_from_label_set(self, conn, spec, sample_ids) -> dict[int, object]:
+    def _feature_from_label_set(self, conn, spec, sample_ids) -> dict[int, list[str]]:
         """Another label set's answer, as the classes it asserts."""
         try:
             label_set_id, schema = self.label_sets.get(spec.ref)

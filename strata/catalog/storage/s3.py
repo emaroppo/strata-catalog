@@ -42,6 +42,8 @@ class ObjectStore(Protocol):
 
     def get_object(self, Bucket: str, Key: str, Range: str = "") -> dict: ...
 
+    def delete_object(self, Bucket: str, Key: str) -> object: ...
+
 
 class S3Backend:
     """Bytes as tar members in object storage."""
@@ -65,10 +67,13 @@ class S3Backend:
     # Writing
     # ------------------------------------------------------------------
 
-    def _open_shard(self) -> None:
-        self._buffer = tempfile.SpooledTemporaryFile(max_size=self.shard_bytes)
-        self._shard = tarfile.open(fileobj=self._buffer, mode="w")
-        self._key = f"{self.prefix}/{uuid.uuid4().hex}.tar"
+    def _open(self) -> tuple[tarfile.TarFile, tempfile.SpooledTemporaryFile, str]:
+        """The open shard, its buffer and its key, opening one if none is."""
+        if self._shard is None or self._buffer is None or self._key is None:
+            self._buffer = tempfile.SpooledTemporaryFile(max_size=self.shard_bytes)
+            self._shard = tarfile.open(fileobj=self._buffer, mode="w")
+            self._key = f"{self.prefix}/{uuid.uuid4().hex}.tar"
+        return self._shard, self._buffer, self._key
 
     def put(self, source: Path, checksum: str) -> Location:
         """Append a file to the open shard, returning where it landed.
@@ -78,24 +83,23 @@ class S3Backend:
         rows has to flush before it commits them.
         """
         source = Path(source)
-        if self._shard is None:
-            self._open_shard()
+        shard, buffer, key = self._open()
 
         name = f"{checksum[:2]}/{checksum[2:4]}/{checksum}{source.suffix.lower()}"
         info = tarfile.TarInfo(name=name)
         info.size = source.stat().st_size
         with open(source, "rb") as f:
-            self._shard.addfile(info, f)
+            shard.addfile(info, f)
 
         # Worked backwards from where the shard now stands, rather than read
         # off the TarInfo: addfile copies it, so the caller's object keeps
         # whatever offset_data it was born with — zero. Backwards is also
         # right when a long name costs extra header blocks, which counting
         # forwards from a fixed 512 would not be.
-        start = self._shard.offset - _padded(info.size)
-        location = Location(container=self._key, offset=start, length=info.size)
+        start = shard.offset - _padded(info.size)
+        location = Location(container=key, offset=start, length=info.size)
 
-        if self._buffer.tell() >= self.shard_bytes:
+        if buffer.tell() >= self.shard_bytes:
             self.flush()
         return location
 
@@ -103,11 +107,11 @@ class S3Backend:
         """Close the open shard and upload it. Returns the key, or None."""
         if self._shard is None:
             return None
-        self._shard.close()
-        self._buffer.seek(0)
-        key = self._key
-        self.client.put_object(Bucket=self.bucket, Key=key, Body=self._buffer.read())
-        self._buffer.close()
+        shard, buffer, key = self._open()
+        shard.close()
+        buffer.seek(0)
+        self.client.put_object(Bucket=self.bucket, Key=key, Body=buffer.read())
+        buffer.close()
         self._shard = self._buffer = self._key = None
         return key
 

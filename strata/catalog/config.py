@@ -23,6 +23,7 @@ import tomllib
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import cast
 
 from .catalog import Catalog
 from .rows import CatalogError, CatalogMissing
@@ -246,7 +247,7 @@ def blobs_for(config: CatalogConfig, local: Path | None = None) -> BlobBackend:
     import boto3
     from botocore.config import Config
 
-    from .storage.s3 import S3Backend
+    from .storage.s3 import ObjectStore, S3Backend
 
     client = boto3.client(
         "s3",
@@ -258,7 +259,8 @@ def blobs_for(config: CatalogConfig, local: Path | None = None) -> BlobBackend:
         # subdomain, and the default guesses the other way
         config=Config(s3={"addressing_style": "path"}),
     )
-    return S3Backend(client, bucket=config.s3_bucket)
+    # boto3's client is untyped; the protocol is the slice this package uses
+    return S3Backend(cast(ObjectStore, client), bucket=config.s3_bucket)
 
 
 def open_catalog(config: CatalogConfig, *, create: bool = False) -> Catalog:

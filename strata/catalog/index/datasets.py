@@ -5,8 +5,11 @@ side its predecessor decided. Its identity is its members and a digest
 over their annotations. See ``docs/adr/0003``.
 """
 
+from collections.abc import Sequence
+from typing import Any
+
 from sqlalchemy import and_, insert, select
-from sqlalchemy.engine import Engine
+from sqlalchemy.engine import Engine, Row
 
 from ..rows import CatalogError, DatasetRef, chunks, current
 from ..versions.split import Achieved
@@ -69,7 +72,7 @@ class Datasets:
             raise CatalogError(f"No dataset with id {dataset_id}")
         return info
 
-    def members(self, dataset_id: int, label_set_id: int) -> list:
+    def members(self, dataset_id: int, label_set_id: int) -> Sequence[Row[Any]]:
         """Every member with its side and its annotation against ``label_set_id``.
 
         The label set is bound rather than joined: an ON clause cannot

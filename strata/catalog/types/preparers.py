@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import ClassVar, Iterable
 
 from strata.common import plugins
+from strata.labels import AnyValue
 
 from .prepared import PreparedIndex, PreparedSample, relative_key
 
@@ -38,7 +39,7 @@ class Prepared:
     #: The annotation this sample arrived with, where the corpus came
     #: labelled. A candidate for a reviewer to correct, never an answer —
     #: see :class:`~strata.catalog.types.prepared.PreparedSample`.
-    value: object | None = None
+    value: AnyValue | None = None
 
 
 class Preparer:
