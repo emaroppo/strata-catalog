@@ -10,6 +10,8 @@ import time
 import pytest
 from fastapi.testclient import TestClient
 
+from strata.catalog import SignedUrls
+from strata.catalog.config import CatalogConfig
 from strata.catalog.storage.server import create_app
 from strata.catalog.storage.signing import (
     DEFAULT_TTL,
@@ -229,3 +231,35 @@ def test_origins_can_be_narrowed(stocked, checksums):
     # The bytes still arrive — an origin policy is a browser rule, not a
     # guard on the endpoint — but the browser will not hand them over
     assert "access-control-allow-origin" not in other.headers
+
+
+# ----------------------------------------------------------------------
+# The URL the catalog hands out
+# ----------------------------------------------------------------------
+
+
+def test_a_url_the_catalog_issues_is_one_its_server_serves(client, stocked, checksums):
+    sample = stocked.samples.by_checksum(checksums[0])
+    url = SignedUrls("http://testserver", SECRET).url_for(sample)
+    response = client.get(url)
+    assert response.status_code == 200
+    assert response.headers["ETag"] == f'"{checksums[0]}"'
+
+
+def test_a_url_reads_back_to_its_checksum(stocked, checksums):
+    sample = stocked.samples.by_checksum(checksums[0])
+    url = SignedUrls("http://minipc:8081", SECRET).url_for(sample)
+    assert SignedUrls.checksum_from(url) == checksums[0]
+    assert SignedUrls.checksum_from("http://minipc:8081/healthz") is None
+    assert SignedUrls.checksum_from("http://minipc:8081/blob/not-a-digest.jpg") is None
+
+
+def test_serving_without_a_secret_is_refused_where_the_url_is_made():
+    with pytest.raises(SigningError, match="STRATA_BLOB_SECRET"):
+        SignedUrls("http://minipc:8081", "")
+
+
+def test_the_config_is_the_only_source_of_signed_urls():
+    assert CatalogConfig().signed_urls() is None
+    urls = CatalogConfig(serve_url="http://minipc:8081", blob_secret=SECRET).signed_urls()
+    assert urls.base_url == "http://minipc:8081"

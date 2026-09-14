@@ -91,6 +91,18 @@ class CatalogConfig:
     #: with. An image tag cannot carry a header, so the URL is the credential.
     blob_secret: str = field(default="", repr=False)
 
+    def signed_urls(self):
+        """How this catalog's server addresses a sample, or None without a server.
+
+        The one way to get a signed URL: the secret is read here and goes
+        nowhere else.
+        """
+        if not self.serve_url:
+            return None
+        from .storage.signing import SignedUrls
+
+        return SignedUrls(base_url=self.serve_url, secret=self.blob_secret)
+
 
 @dataclass
 class Catalogs:

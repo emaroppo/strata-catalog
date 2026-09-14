@@ -31,6 +31,7 @@ from .catalog import Catalog
 from .rows import EVERYTHING, AnnotateReport, CatalogError, DatasetRef, SampleRow
 from .storage.blobs import BlobBackend, LocalBackend, Location, blob_path, checksum_of
 from .storage.repack import RepackError, RepackReport, repack_blobs
+from .storage.signing import SignedUrls, SigningError, suffix_of
 from .sync.copy import CopyError, CopyReport, copy_index
 from .sync.merge import MergeError, MergeReport, merge_annotations
 from .types.prepared import PREPARED_NAME, PreparedIndex, PreparedSample
@@ -45,8 +46,6 @@ from .versions.split import HOLDOUT, TRAIN, VAL, Achieved, SplitError, assign
 PUBLIC_MODULES = frozenset({
     "config",
     "stages",
-    # Until the catalog hands out signed URLs itself; then withdrawn.
-    "storage.signing",
     "types.prepared",
     "types.preparers",
     "types.sample_types",
@@ -89,4 +88,7 @@ __all__ = [
     "MergeError",
     "MergeReport",
     "repack_blobs",
+    "SignedUrls",
+    "SigningError",
+    "suffix_of",
 ]
