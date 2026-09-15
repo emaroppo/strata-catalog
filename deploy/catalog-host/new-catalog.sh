@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Make a new catalog on this host: its database and its bucket.
 #
-#   ./deploy/minipc/new-catalog.sh demo
+#   ./deploy/catalog-host/new-catalog.sh demo
 #
 # A catalog is an index and a bucket; here both are named after it. This
 # makes both, gives the read-only keys the blob server and the modelling host

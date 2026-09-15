@@ -35,8 +35,9 @@ services:
     # thing anyway, by having the image loaded from elsewhere.
     image: strata-blobs:latest
     build:
+      # The strata-catalog repository's root.
       context: ../..
-      dockerfile: deploy/minipc/Dockerfile
+      dockerfile: deploy/catalog-host/Dockerfile
     restart: unless-stopped
     ports:
       - "${STRATA_SERVE_PORT:-8081}:8081"

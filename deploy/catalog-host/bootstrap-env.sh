@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Generate this host's secrets and write deploy/minipc/.env.
+# Generate this host's secrets and write deploy/catalog-host/.env.
 #
-#   ./deploy/minipc/bootstrap-env.sh
+#   ./deploy/catalog-host/bootstrap-env.sh
 #
 # Two of the four values are born here and exist nowhere else: the database
 # password (a fresh container, so nothing to match) and the signing secret.
@@ -21,7 +21,7 @@
 # edit there and a restart. The file is written from the example if there is
 # none yet.
 #
-#   GARAGE="docker exec -i garage /garage" ./deploy/minipc/bootstrap-env.sh
+#   GARAGE="docker exec -i garage /garage" ./deploy/catalog-host/bootstrap-env.sh
 #
 set -euo pipefail
 

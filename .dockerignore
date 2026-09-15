@@ -1,0 +1,10 @@
+# The image is built from this repository's root (see deploy/catalog-host).
+.git
+.venv
+.siblings
+dist
+**/__pycache__
+**/.pytest_cache
+**/.ruff_cache
+deploy/*/.env
+deploy/*/config.toml

@@ -8,7 +8,7 @@
 # which one it used, because "not reachable" when the thing is plainly
 # running is a confusing way to end up with placeholders.
 #
-#   GARAGE="docker exec -i garage /garage" ./deploy/minipc/<script>.sh
+#   GARAGE="docker exec -i garage /garage" ./deploy/catalog-host/<script>.sh
 
 resolve_garage() {
     if [ -n "${GARAGE:-}" ]; then
