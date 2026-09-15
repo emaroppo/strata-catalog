@@ -283,9 +283,7 @@ class Annotations:
             ).first()
         if row is None or row.state == t.SKIPPED:
             return None
-        # Through the discriminator: read back as one task's value, a boxes
-        # annotation parses without complaint into an empty Choices, and the
-        # catalog silently forgets what a human actually said.
+        # Through the discriminator. docs/adr/0014
         return VALUE.validate_python(row.value)
 
     def values_of(self, label_set_id: int, sample_ids: Iterable[int]) -> dict[int, AnyValue]:

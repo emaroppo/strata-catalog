@@ -29,9 +29,7 @@ class LabelSets:
         """A label set by name, as whatever kind of schema it is.
 
         Read back through the discriminator rather than as one task's
-        schema: a label set is how a corpus is annotated, and pinning it to
-        classification would mean a catalog could hold boxes it could never
-        hand back.
+        schema. See ``docs/adr/0014``.
         """
         with self.engine.connect() as conn:
             row = conn.execute(
