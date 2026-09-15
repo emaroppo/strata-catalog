@@ -155,7 +155,7 @@ and the same bytes on a second run. `strata-prepare-email` and
 
 ## Decisions
 
-Recorded in the umbrella repository's `docs/adr/`: a sample is its bytes
+Recorded in the strata umbrella repository's `docs/adr/` (https://github.com/emaroppo/strata/tree/main/docs/adr): a sample is its bytes
 (0001), blobs are immutable shards (0002), a dataset version is frozen and
 inherited (0003), the manifest is the contract (0004), ids mean nothing
 outside their catalog (0008), disagreement is recorded and sources are
@@ -165,7 +165,11 @@ normalisation (0010), a feature is a role (0011), and signed URLs (0013).
 ## Tests
 
 ```bash
-uv run pytest packages/catalog
+.github/sibling-wheels.sh labels common   # the strata packages this one needs, until they are on an index
+uv sync --find-links dist --group dev --extra all
+uv run pytest
 ```
+
+Inside the strata workspace: `uv run pytest packages/catalog` from its root.
 
 The Postgres tests skip unless a database is reachable, and say why.
