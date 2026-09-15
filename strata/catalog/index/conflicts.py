@@ -1,8 +1,7 @@
 """Disagreement, recorded rather than resolved: two answers for one sample, kept side by side.
 
-Only a merge records one — a reviewer changing their mind is not a
-conflict, it is the point of being able to correct an answer — and a fresh
-answer clears it, whichever way it went. See ``docs/adr/0009``.
+Only a merge records one, and a fresh answer clears it, whichever way it
+went. See ``docs/adr/0009``.
 """
 
 import json
@@ -44,16 +43,9 @@ class Conflicts:
     ) -> None:
         """Note that two origins answered this sample differently.
 
-        Called by whatever merges one catalog into another. Not by
-        :meth:`annotate`: a reviewer changing their mind is not a conflict,
-        it is the point of being able to correct an answer. A conflict is
-        two answers that were made independently, and only a merge can see
-        that.
-
-        The catalog keeps the answer it already had. Choosing between them
-        is exactly what it cannot do — both were made by someone looking at
-        the sample — so it keeps one, remembers the other, and puts the pair
-        in front of a person.
+        Called by whatever merges one catalog into another, never by
+        :meth:`annotate`. The catalog keeps the answer it already had and
+        remembers the other. See ``docs/adr/0009``.
         """
         payload = {
             "kept_value": None if kept is None else json.loads(kept.model_dump_json()),

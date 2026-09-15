@@ -1,9 +1,8 @@
 """An executable specification of the preparer contract.
 
-A conversion is the one place in this workspace where bytes are invented
-rather than carried, so it is the one place where a mistake is not
-recoverable from what is stored. Written as tests a plugin runs against its
-own converter:
+A conversion is the one place bytes are invented rather than carried
+(``docs/adr/0033``). Written as tests a plugin runs against its own
+converter:
 
 .. code-block:: python
 
@@ -23,11 +22,8 @@ own converter:
 Two fixtures, and the plugin inherits the suite.
 
 **Determinism is the one that matters.** A corpus that comes out different
-on a second run re-checksums, and re-checksumming a corpus somebody has
-already annotated does not lose the annotations — it silently detaches them,
-leaving two samples where there was one and a reviewer being shown a
-document they have already done. Everything else here is a convenience
-compared to that.
+on a second run re-checksums and detaches its annotations. See
+``docs/adr/0010``.
 
 Importing this pulls in pytest, so it lives behind the ``test`` extra and
 should only ever be imported from a test module.
@@ -93,9 +89,8 @@ class PreparerContract:
         assert preparer.allows(source)
 
     def test_it_refuses_what_it_does_not_read(self, preparer, source, tmp_path):
-        # A source it cannot read is refused rather than skipped: a corpus
-        # that quietly comes out smaller than the directory it came from is
-        # the failure ingest already goes out of its way to avoid
+        # A source it cannot read is refused rather than skipped.
+        # docs/adr/0033, docs/adr/0036
         foreign = tmp_path / "elsewhere.unlikely-suffix"
         foreign.write_bytes(b"not for you")
         with pytest.raises(PreparerError):
@@ -111,24 +106,14 @@ class PreparerContract:
     def test_the_output_is_admitted_by_the_type_it_produces(
         self, preparer, source, sample_type, tmp_path
     ):
-        """The contract that makes 'prepare, then ingest' hold.
-
-        A converter writing files its own declared type would skip produces
-        a corpus that ingests as empty, and ingest reports that as a corpus
-        in the wrong place rather than as a broken converter.
-        """
+        """The contract that makes 'prepare, then ingest' hold. See ``docs/adr/0033``."""
         out = tmp_path / "out"
         run(preparer, [source], out)
         for name in _tree(out):
             assert sample_type.allows(out / name), f"{name} is not a {type(sample_type).__name__}"
 
     def test_the_output_is_already_canonical(self, preparer, source, sample_type, tmp_path):
-        """Canonical by construction, not by ingest rewriting it.
-
-        Ingest would canonicalise it anyway, and then the file on disk and
-        the sample in the catalog have different bytes and different
-        checksums — so the corpus no longer says what was catalogued.
-        """
+        """Canonical by construction, not by ingest rewriting it. See ``docs/adr/0033``."""
         out = tmp_path / "out"
         run(preparer, [source], out)
         for name, data in _tree(out).items():
@@ -154,9 +139,7 @@ class PreparerContract:
     def test_a_re_run_changes_nothing(self, preparer, source, tmp_path):
         """Converting a source directory that has grown must not disturb it.
 
-        The re-run is the ordinary case — more mail arrives, another video
-        is dropped in — and every file it rewrites identically is a sample
-        that keeps its checksum and therefore its annotations.
+        See ``docs/adr/0010``.
         """
         out = tmp_path / "out"
         run(preparer, [source], out)

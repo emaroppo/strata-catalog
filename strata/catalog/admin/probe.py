@@ -50,12 +50,8 @@ def probe(config: CatalogConfig) -> Probe:
     """The index answers a query, and a sample's bytes come back as the index recorded them.
 
     Proved on a sample the catalog holds, against the checksum its row
-    carries: a synthetic blob written and read back passes against a store
-    that cannot read the samples at all — a wrong prefix, a bucket holding
-    another catalog's shards — so it is only the fallback, for a catalog
-    with nothing in it yet. The round trip is the part worth having either
-    way: object storage that ignores a Range header returns the start of
-    the shard for every sample, which reads as data rather than as an error.
+    carries; a synthetic blob is the fallback for a catalog with nothing in
+    it yet. See ``docs/adr/0002``.
     """
     index = IndexProbe(where=where_index(config), reachable=False)
     try:
@@ -136,9 +132,8 @@ def _round_trip(config: CatalogConfig) -> BlobProbe:
             # A prefix of its own, so a probe never lands among real shards
             blobs.prefix = "probe"
         location = blobs.put(marker, checksum_of(marker))
-        # put only buffers for a packing backend; flush is what makes an
-        # object exist, so that is what decides whether there is one to
-        # clean up
+        # flush is what makes an object exist, so it decides whether there
+        # is one to clean up. docs/adr/0002
         blobs.flush()
         uploaded = location
         read = blobs.get(location)

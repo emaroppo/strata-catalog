@@ -13,8 +13,7 @@ class CatalogEntry(Strict):
     default: bool
     index: str
     blobs: str
-    #: Asked of the catalog rather than read from the file: two names
-    #: pointing at one database is the mistake this makes visible.
+    #: Asked of the catalog rather than read from the file. docs/adr/0008
     identity: str | None = None
     error: str | None = None
 

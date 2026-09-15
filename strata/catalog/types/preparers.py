@@ -50,8 +50,7 @@ class Preparer:
     name: ClassVar[str] = ""
 
     #: The registered sample type this produces. The output has to satisfy
-    #: that type — its extensions and its canonical form — which is what
-    #: makes "prepare, then ingest" a contract rather than a convention.
+    #: that type, its extensions and its canonical form. docs/adr/0033
     produces: ClassVar[str] = ""
 
     #: Extensions this consumes, lowercase and without the dot.
@@ -75,12 +74,7 @@ class Preparer:
     def report(self) -> dict[str, int]:
         """What this conversion did not carry across, for a caller to print.
 
-        A corpus arriving quietly smaller than the source it came from is
-        the failure ingest already goes out of its way to avoid, and a
-        conversion is the other place it can happen — a message with no
-        body, one too long to be useful, a span that does not slice to its
-        own text. Counted rather than logged, so one line at the end says
-        what was left behind.
+        Counted rather than logged. See ``docs/adr/0036``.
         """
         return {}
 
@@ -90,8 +84,7 @@ class Preparer:
         One in, many out: a mailbox is a corpus, a video is a corpus. Write
         into ``out_dir`` and return what was written. Re-running over a
         source already converted must produce the same bytes at the same
-        paths, or the corpus re-checksums and the annotations against it are
-        orphaned.
+        paths. See ``docs/adr/0010``.
         """
         raise NotImplementedError
 
@@ -110,8 +103,7 @@ def run(
     """Convert ``sources`` into ``out_dir``, and record what was written.
 
     The index is merged with whatever is already there rather than replacing
-    it, so converting a source directory that has grown adds to the corpus
-    instead of forgetting the rest of it.
+    it. See ``docs/adr/0033``.
     """
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -159,8 +151,7 @@ def resolve(name: str) -> type[Preparer]:
     """The class a preparer name refers to.
 
     A name registered twice is refused rather than resolved by whichever was
-    loaded first: two conversions of the same corpus produce different bytes,
-    and the one that runs would be decided by install order.
+    loaded first. See ``docs/adr/0033``.
     """
     entry = plugins.find(entries(), name, what="preparer", error=PreparerError)
     return plugins.load(entry, Preparer, error=PreparerError)
@@ -170,7 +161,8 @@ def for_source(produces: str, path: Path) -> type[Preparer]:
     """The preparer that turns this file into ``produces``.
 
     Resolved from the pair, since an extension alone is ambiguous across
-    types; ambiguity is refused with both names rather than picked.
+    types; ambiguity is refused with both names rather than picked. See
+    ``docs/adr/0033``.
     """
     candidates = []
     for name in sorted(available()):

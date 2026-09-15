@@ -96,16 +96,10 @@ def merge_annotations(
 ) -> MergeReport:
     """Fold ``source``'s annotations into ``target``.
 
-    Both must be the same catalog — the same identity, meaning one was
-    copied from the other. Two catalogs built independently hold different
-    corpora whose sample ids collide, and merging those is a different
-    problem: it would have to ingest as well as annotate, and decide what a
-    colliding id means. Refusing is the honest answer, not a placeholder.
-
-    ``dry_run`` reads everything and writes nothing, so the report can be
-    shown before anything is committed. Worth doing: a conflict is the
-    interesting outcome and it is easier to look at fifty of them before
-    the merge than to find them afterwards.
+    Both must be the same catalog: the same identity, meaning one was
+    copied from the other (``docs/adr/0008``). ``dry_run`` reads everything
+    and writes nothing, so the report can be shown before anything is
+    committed (``docs/adr/0009``).
     """
     if source.id != target.id:
         raise MergeError(
@@ -120,9 +114,7 @@ def merge_annotations(
         try:
             target_set_id, schema = target.label_sets.get(name)
         except CatalogError:
-            # Reported rather than created: a label set the target has never
-            # heard of is far more likely to be a typo or the wrong copy
-            # than something it wants invented on its behalf.
+            # Reported rather than created. docs/adr/0009
             report.unknown_label_sets.append(name)
             continue
 
@@ -150,9 +142,9 @@ def _merge_one(
 ) -> None:
     sample = target.samples.by_checksum(checksum)
     if sample is None:
-        # By content, so a file that arrived under a different name on the
-        # laptop still finds its sample here. If the bytes are unknown, the
-        # laptop ingested something this catalog has never seen.
+        # By content, so a file renamed on the laptop still finds its
+        # sample; unknown bytes were ingested there and never here.
+        # docs/adr/0001
         report.unknown_samples.append(checksum)
         return
 
@@ -170,10 +162,9 @@ def _merge_one(
     standing = None if here is None else t.AUTHORITY.get(here.source, 0)
 
     if here is None or here.state == t.SKIPPED:
-        # Absent, or skipped there and answered here. An answer beats a
-        # skip: someone got further with the sample than someone else did —
-        # unless the skip was a person's and the answer an import's, where
-        # nobody got further and a guess arrived.
+        # Absent, or skipped there and answered here: an answer beats a
+        # skip, unless the skip was a person's and the answer an import's.
+        # docs/adr/0009
         if standing is not None and standing > rank:
             report.outranked += 1
             return
@@ -187,16 +178,16 @@ def _merge_one(
     theirs = VALUE.validate_python(here.value)
     if theirs == value:
         if rank > standing:
-            # The same answer from a source that outranks the one here: a
-            # person on the other side confirmed what was only an import.
+            # The same answer from an outranking source confirms it.
+            # docs/adr/0009
             report.confirmed += 1
             if not dry_run:
                 target.annotations.annotate(sample.id, target_set_id, value, source=answered_by)
         else:
             report.agreed += 1
     elif rank > standing:
-        # A person's answer against an import's is not two people
-        # disagreeing, so there is nothing to put in front of anyone.
+        # A person's answer against an import's is not a conflict.
+        # docs/adr/0009
         report.superseded += 1
         if not dry_run:
             schema.validate_value(value)
@@ -219,15 +210,9 @@ def _label_sets(catalog: Catalog) -> list[tuple[str, int]]:
 
 
 def _answers(catalog: Catalog, label_set_id: int) -> list[tuple[str, str, dict | None, str]]:
-    """Every answer in a label set, keyed by content rather than by id.
+    """Every answer in a label set, keyed by content rather than by id, each with its source.
 
-    Ids agree across a copy, but content addressing is what actually
-    survives — and a merge that matched on ids would have no way to notice
-    if it were wrong.
-
-    Each carries where it came from. Left behind, every answer arriving
-    would be written as a person's, and an import made on a laptop would
-    come home looking reviewed.
+    See ``docs/adr/0001`` and ``docs/adr/0009``.
     """
     with catalog.engine.connect() as conn:
         return [

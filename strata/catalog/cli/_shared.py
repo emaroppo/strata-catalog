@@ -1,10 +1,8 @@
 """What every command starts from: the config, the catalog, the rendering.
 
-Standard library only — argparse and print — because this ships with the
-catalog, and the catalog's install stays as thin as it is. Every command
-builds a request, calls the operation and renders the record; ``--json``
-renders the record as it is, for anything that would rather read than
-parse a table.
+Standard library only. Every command builds a request, calls the
+operation and renders the record; ``--json`` prints the record whole. See
+``docs/adr/0030``.
 """
 
 import json

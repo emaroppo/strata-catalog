@@ -48,20 +48,17 @@ class BlobBackend(Protocol):
         ...
 
     def fetch(self, locations: Iterable[Location]) -> Iterator[tuple[Location, bytes]]:
-        """Many samples. Dense and bulk — what materialising a dataset uses.
+        """Many samples. Dense and bulk: what materialising a dataset uses.
 
-        Separate from :meth:`get` so a backend can read a whole shard once
-        instead of a range request per member, without callers arranging it.
+        See ``docs/adr/0002``.
         """
         ...
 
     def flush(self) -> object:
         """Make everything written so far durable.
 
-        A backend that packs cannot make an object exist until the pack is
-        closed, so a caller writing index rows has to flush before it commits
-        them — otherwise the index names a shard that was never uploaded. A
-        backend writing whole files has nothing to do here.
+        A caller writing index rows flushes before it commits them. See
+        ``docs/adr/0002``.
         """
         ...
 
@@ -107,19 +104,12 @@ class LocalBackend:
         if not target.exists():
             target.parent.mkdir(parents=True, exist_ok=True)
             try:
-                # Linking rather than copying, so cataloguing a corpus costs
-                # no disk. Unlike materialise, whose source is a blob this
-                # backend owns and treats as immutable, the source here
-                # belongs to whoever put it there — editing it in place would
-                # change the catalog's bytes without changing the checksum
-                # that addresses them. Acceptable for an archive nothing
-                # rewrites; the alternative is a second copy of the corpus.
+                # Linked, not copied: editing the source in place is the
+                # accepted cost. docs/adr/0002
                 os.link(source, target)
             except OSError:
-                # A different filesystem, which is the ordinary case once the
-                # catalog moves to its own drive. Via a temporary name, so an
-                # interrupted copy cannot leave a short file at the address
-                # of the real one.
+                # A different filesystem: copied via a temporary name.
+                # docs/adr/0002
                 partial = target.with_name(target.name + ".partial")
                 shutil.copyfile(source, partial)
                 partial.replace(target)
@@ -141,9 +131,7 @@ class LocalBackend:
     def path_for(self, location: Location) -> Path:
         """The file behind a location.
 
-        Not on :class:`BlobBackend`, and cannot be: a tar member in a bucket
-        has no path. It exists for the Label Studio mount and for the repack,
-        which reads files; the blob server (``docs/adr/0013``) is what makes
-        the mount optional.
+        Not on :class:`BlobBackend`: a tar member in a bucket has no path.
+        For the Label Studio mount and the repack. See ``docs/adr/0002``.
         """
         return self.root / location.container

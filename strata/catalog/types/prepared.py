@@ -26,13 +26,8 @@ class PreparedSample(BaseModel):
     #: is a key in here, respected by a version frozen with ``group_by``.
     metadata: dict = Field(default_factory=dict)
     #: The annotation the corpus arrived with, where it arrived with one.
-    #:
-    #: **A candidate, never ground truth.** Corpora that come labelled come
-    #: labelled by a regex or by somebody else's model, and the whole point
-    #: of the loop is a human deciding. Nothing here reaches the catalog on
-    #: its own: landing these is a separate, deliberate step, and it lands
-    #: them under a source of their own so an export cannot mistake them
-    #: for something a person said.
+    #: **A candidate, never ground truth**, landed in a separate step under
+    #: a source of its own. docs/adr/0028
     value: AnyValue | None = None
 
 
@@ -43,8 +38,7 @@ class PreparedIndex(BaseModel):
     #: Which preparer wrote this, for tracing a corpus back to the code
     #: that made it. Not authoritative for anything.
     produced_by: str = ""
-    #: Keyed by path relative to the corpus root, posix-style, so an index
-    #: survives the corpus being moved or read from another machine.
+    #: Keyed by path relative to the corpus root, posix-style. docs/adr/0033
     samples: dict[str, PreparedSample] = Field(default_factory=dict)
 
     # -- reading --------------------------------------------------------
@@ -77,9 +71,8 @@ class PreparedIndex(BaseModel):
     def merge(self, other: "PreparedIndex") -> "PreparedIndex":
         """This index updated with ``other``'s entries.
 
-        Later wins per file, and files this one knows about are kept. What
-        makes re-running a conversion over a grown source directory add to a
-        corpus rather than replace it.
+        Later wins per file, and files this one knows about are kept. See
+        ``docs/adr/0033``.
         """
         return PreparedIndex(
             version=self.version,
@@ -123,9 +116,8 @@ def index_for(root: Path) -> PreparedIndex | None:
         try:
             _CACHE[key] = PreparedIndex.load(root)
         except Exception:
-            # A corrupt or half-written index is not a reason to refuse a
-            # corpus: the files are what is being ingested, and the index
-            # only adds to what is recorded about them.
+            # A corrupt or half-written index does not refuse a corpus.
+            # docs/adr/0033
             _CACHE[key] = None
     return _CACHE[key]
 

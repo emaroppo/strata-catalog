@@ -35,9 +35,7 @@ class SampleType:
     adds, and inherits everything it does not override.
     """
 
-    #: Which media this is. May not change in a subclass: a query for images
-    #: has to keep returning satellite scenes, and nothing would report it
-    #: if one stopped.
+    #: Which media this is. May not change in a subclass. docs/adr/0010
     media: ClassVar[str] = ""
 
     #: What this adds below its parent. Empty for the unspecialised case of
@@ -45,8 +43,7 @@ class SampleType:
     segment: ClassVar[str] = ""
 
     #: Extensions this type admits, lowercase and without the dot. Checked
-    #: rather than used to discover, so a file outside the list is reported
-    #: rather than skipped in silence.
+    #: rather than used to discover. docs/adr/0010
     extensions: ClassVar[frozenset[str]] = frozenset()
 
     def __init_subclass__(cls, **kwargs):
@@ -75,9 +72,8 @@ class SampleType:
     def subtype(cls) -> str:
         """The stored path: every segment from the media's base down to here.
 
-        Built from the class chain rather than declared, so the string a
-        query matches on and the hierarchy code substitutes through cannot
-        drift apart.
+        Built from the class chain rather than declared. See
+        ``docs/adr/0010``.
         """
         segments = [
             klass.segment
@@ -100,11 +96,9 @@ class SampleType:
     def canonicalise(self, data: bytes) -> bytes:
         """These bytes in the one form the catalog stores them in.
 
-        Semantically null and idempotent. The test: would two independent
-        implementations produce identical bytes? If it encodes a
-        preference it is normalisation and does not belong here. The
-        default returns the bytes untouched, and ingest reads no file for
-        a type that leaves it that way. See ``docs/adr/0010``.
+        Semantically null and idempotent; normalisation does not belong
+        here. The default returns the bytes untouched, and ingest reads no
+        file for a type that leaves it that way. See ``docs/adr/0010``.
         """
         return data
 
@@ -112,9 +106,9 @@ class SampleType:
     def canonicalises(cls) -> bool:
         """Whether this type has a canonical form worth checking for.
 
-        Asked rather than assumed so ingest can keep its cheap path: a
-        corpus of images is hardlinked without ever being read, and only a
-        type that overrides :meth:`canonicalise` pays for the read.
+        Asked rather than assumed: only a type that overrides
+        :meth:`canonicalise` pays for reading the file. See
+        ``docs/adr/0010``.
         """
         return cls.canonicalise is not SampleType.canonicalise
 
@@ -122,10 +116,9 @@ class SampleType:
         """What to record about this sample beyond its bytes.
 
         Where it came from is added by ingest itself; this is for what only
-        the type knows — a capture time, a coordinate system, a frame index,
+        the type knows: a capture time, a coordinate system, a frame index,
         the video a frame belongs to. A grouping is a key in here like any
-        other: nothing about it is special until a version is frozen with
-        ``group_by`` naming the key.
+        other. See ``docs/adr/0023``.
 
         The default hands back whatever a conversion recorded for this file.
         A type that overrides this and still wants that should call

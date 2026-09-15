@@ -1,9 +1,6 @@
 """Saying where a catalog is, safely: an index URL with its password hidden, and the blobs.
 
-The operations behind ``strata-catalog``, as functions returning records,
-so the command renders and the orchestrator or a test reads. Copying,
-merging and repacking already live in their own modules and return their
-own reports; this holds the ones that were only ever a command body.
+See ``docs/adr/0030``.
 """
 
 from pathlib import Path
@@ -18,13 +15,7 @@ class Strict(BaseModel):
 
 
 def redacted(url: str) -> str:
-    """An index URL safe to print.
-
-    Every command that reports where the catalog is gets run when something
-    is broken, and its output gets pasted into a chat window or an issue.
-    A connection URL carries its password inline, so printing it raw makes
-    routine troubleshooting leak a credential.
-    """
+    """An index URL safe to print, its password hidden. See ``docs/adr/0030``."""
     from sqlalchemy.engine import make_url
 
     try:

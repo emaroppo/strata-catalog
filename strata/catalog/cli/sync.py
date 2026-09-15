@@ -9,7 +9,7 @@ def _copy(args) -> int:
     from ..sync.copy import CopyError, copy_index
 
     source, config = _open(args)
-    # Only the index moves: the copy points at exactly the same bytes
+    # Only the index moves. docs/adr/0002
     target = Catalog.create(args.to, blobs_for(config))
     show = _ticker("copying")
     try:
@@ -33,7 +33,7 @@ def _merge(args) -> int:
     from ..sync.merge import MergeError, merge_annotations
 
     target, config = _open(args)
-    # A copy is the same corpus, so it reads the same bytes this catalog does
+    # A copy is the same corpus, reading the same bytes. docs/adr/0008
     source = Catalog.connect(args.source, blobs_for(config))
     show = _ticker("merging")
     try:

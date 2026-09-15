@@ -17,8 +17,7 @@ from typing import Protocol
 
 from .blobs import Location
 
-#: Big enough that shards are few, small enough that one is a reasonable
-#: unit to fetch whole. Between 100MB and 1GB is the usual range.
+#: Shards few, each a reasonable unit to fetch whole. docs/adr/0002
 DEFAULT_SHARD_BYTES = 512 * 1024 * 1024
 
 
@@ -33,9 +32,7 @@ def _padded(size: int) -> int:
 class ObjectStore(Protocol):
     """The slice of the S3 API this needs.
 
-    Narrow on purpose: it is what lets a test drive the backend without a
-    bucket, and what keeps boto3 an optional dependency rather than a hard
-    one.
+    Narrow on purpose. See ``docs/adr/0002``.
     """
 
     def put_object(self, Bucket: str, Key: str, Body: bytes) -> object: ...
@@ -70,7 +67,7 @@ class S3Backend:
     def _open(self) -> tuple[tarfile.TarFile, tempfile.SpooledTemporaryFile, str]:
         """The open shard, its buffer and its key, opening one if none is."""
         if self._shard is None or self._buffer is None or self._key is None:
-            # Held open across puts and closed by flush, which is the point of a shard
+            # Held open across puts and closed by flush. docs/adr/0002
             self._buffer = tempfile.SpooledTemporaryFile(max_size=self.shard_bytes)  # noqa: SIM115
             self._shard = tarfile.open(fileobj=self._buffer, mode="w")  # noqa: SIM115
             self._key = f"{self.prefix}/{uuid.uuid4().hex}.tar"
@@ -80,8 +77,7 @@ class S3Backend:
         """Append a file to the open shard, returning where it landed.
 
         The location is final the moment the member is written, but the
-        object does not exist until :meth:`flush`. A caller writing index
-        rows has to flush before it commits them.
+        object does not exist until :meth:`flush`. See ``docs/adr/0002``.
         """
         source = Path(source)
         shard, buffer, key = self._open()
@@ -133,10 +129,9 @@ class S3Backend:
     def fetch(self, locations: Iterable[Location]) -> Iterator[tuple[Location, bytes]]:
         """Many samples, a shard at a time.
 
-        Grouped by shard and read whole, because pulling one object once
-        beats a range request per member when most of it is wanted — which
-        is the dense case this exists for. The order the caller gave is not
-        preserved; each result carries its own location.
+        Grouped by shard and read whole. The order the caller gave is not
+        preserved; each result carries its own location. See
+        ``docs/adr/0002``.
         """
         by_shard: dict[str, list[Location]] = {}
         for location in locations:

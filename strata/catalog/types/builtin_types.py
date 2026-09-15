@@ -1,9 +1,7 @@
 """The sample types this catalog provides.
 
-Deliberately few. These are the kinds of data the schema already assumes
-exist — an image, a document, a video frame — and anything more specific is
-a plugin's business. They are registered through the same entry point group
-as any plugin, so ``available()`` gives one answer rather than two.
+Deliberately few, and registered through the same entry point group as any
+plugin. See ``docs/adr/0033``.
 """
 
 import unicodedata
@@ -36,9 +34,8 @@ class Frames(Image):
     VIDEO: ClassVar[str] = "video"
 
     def metadata_for(self, path: Path, root: Path) -> dict:
-        # What extracted the frames knows which video they came from, and
-        # says so; the directory is how a corpus nobody prepared says the
-        # same thing.
+        # A prepared index says which video; the directory says it for a
+        # corpus nobody prepared. docs/adr/0023
         known = super().metadata_for(path, root)
         if known.get(self.VIDEO) is not None:
             return known
@@ -73,8 +70,6 @@ class Text(SampleType):
                 f"an encoding is a preparer's job, since only it knows what "
                 f"the corpus is."
             ) from None
-        # Windows and classic-Mac endings alike. A reviewer's browser
-        # normalises these on its own, so a document ingested with them
-        # gives a model different offsets from the ones a human produced.
+        # Windows and classic-Mac endings alike. docs/adr/0010
         text = text.replace("\r\n", "\n").replace("\r", "\n")
         return unicodedata.normalize("NFC", text).encode("utf-8")

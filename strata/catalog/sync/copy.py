@@ -11,13 +11,11 @@ from sqlalchemy import delete, func, insert, select, text
 
 from ..index import tables as t
 
-#: Parents before children. annotation_class is derived, but copying beats
-#: recomputing: it is written through the indexing contract, and rebuilding
-#: it here would mean this module knowing what a label value means.
+#: Parents before children. annotation_class is copied, not recomputed.
+#: docs/adr/0008
 ORDER = (
-    # First, and not merely alphabetically: a copy is the same corpus on
-    # another database, and everything after it means something only within
-    # the catalog this names.
+    # First: everything after it means something only within the catalog
+    # this names. docs/adr/0008
     t.catalog_identity,
     t.sample,
     t.sample_collection,
@@ -46,10 +44,7 @@ class CopyReport:
 def copy_index(source, target, batch: int = 2000, on_progress=None) -> CopyReport:
     """Copy every row from ``source``'s index into ``target``'s.
 
-    Refuses a target that already holds samples. Merging two catalogs is a
-    different problem — ids would collide and content-addressing would need
-    to arbitrate — and doing it by accident here would be worse than not
-    offering it.
+    Refuses a target that already holds samples. See ``docs/adr/0008``.
     """
     with target.engine.connect() as conn:
         existing = conn.execute(select(func.count()).select_from(t.sample)).scalar()
@@ -59,9 +54,7 @@ def copy_index(source, target, batch: int = 2000, on_progress=None) -> CopyRepor
             f"into an empty index; merging two catalogs is a different problem."
         )
 
-    # The target minted an identity when it was created, and it is about to
-    # stop being its own catalog. Dropping it first is what makes the copy
-    # the same corpus rather than a second one holding the same rows.
+    # The target's own minted identity goes first. docs/adr/0008
     with target.engine.begin() as conn:
         conn.execute(delete(t.catalog_identity))
 
@@ -84,10 +77,8 @@ def copy_index(source, target, batch: int = 2000, on_progress=None) -> CopyRepor
 def _reset_sequences(target) -> None:
     """Point each key sequence past the ids just inserted.
 
-    Only Postgres has them, and only because the ids came in explicitly:
-    inserting row 4271 by hand leaves the sequence at zero, so the next
-    insert without an id tries row 1 and collides with something already
-    there.
+    Only Postgres has them, and only because the ids came in explicitly.
+    See ``docs/adr/0008``.
     """
     if target.engine.dialect.name != "postgresql":
         return

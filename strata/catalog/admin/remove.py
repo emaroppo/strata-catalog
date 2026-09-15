@@ -1,12 +1,8 @@
 """Removing data: samples tombstoned, and their annotations gone with them.
 
-Discarding a batch of bad pictures is a fact about the samples, not about
-what was said of them. A removed sample leaves every reader — the queue,
-the labelled set, any version frozen from here on — and its annotations
-leave with it, since they hang off a sample nobody reads any more. The
-history stays, and so do the bytes: shards are immutable and a compaction
-pass is what reclaims them. A version already frozen keeps its members,
-because it is a record of what was trained on. See ``docs/adr/0002``.
+A removed sample leaves every reader and its annotations leave with it.
+The bytes stay, and a version already frozen keeps its members. See
+``docs/adr/0002``.
 """
 
 from ..catalog import Catalog
@@ -38,9 +34,8 @@ def remove(
     """Tombstone the live samples a selection names.
 
     A selection is at least one of: the collections to look in, metadata
-    values to match, checksums to name outright. With none of them there
-    is nothing to point at, and removing a whole catalog is not a thing a
-    command should be able to mean.
+    values to match, checksums to name outright. With none of them it is
+    refused. See ``docs/adr/0002``.
     """
     where = dict(where or {})
     named = set(checksums or ())

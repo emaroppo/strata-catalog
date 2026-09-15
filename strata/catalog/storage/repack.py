@@ -2,8 +2,8 @@
 
 The counterpart to :mod:`copy`: content stays, ``location``, ``offset`` and
 ``length`` are rewritten. A shard is uploaded before the rows naming it are
-committed, and samples are packed in group order. The source must have real
-files behind it. See ``docs/adr/0002``.
+committed, and samples are packed in ingest order. The source must have
+real files behind it. See ``docs/adr/0002``.
 """
 
 import hashlib
@@ -16,9 +16,8 @@ from sqlalchemy import bindparam, func, select, update
 from ..index import tables as t
 from .blobs import Location
 
-#: Tar offsets go into an INTEGER column, which Postgres caps at 2^31-1. A
-#: shard larger than this would silently wrap on the last members, so it is
-#: refused rather than trusted to stay under the default.
+#: Tar offsets go into an INTEGER column, which Postgres caps at 2^31-1; a
+#: larger shard is refused. docs/adr/0002
 MAX_SHARD_BYTES = 2**31 - 1
 
 
@@ -46,11 +45,9 @@ class RepackReport:
 def _pending(prefix: str):
     """Samples not yet in the target's prefix.
 
-    A packed sample's container is ``<prefix>/<hex>.tar``; a local one's is
-    ``aa/bb/<checksum><suffix>``, and the first two characters of a sha256
-    are hex, so no local blob can collide with a prefix. That is what makes
-    a re-run resume rather than pack everything a second time — no progress
-    file to fall out of step with the index.
+    A packed sample's container is ``<prefix>/<hex>.tar`` and a local one's
+    ``aa/bb/<checksum><suffix>``, so the two cannot collide and a re-run
+    resumes. See ``docs/adr/0002``.
     """
     return t.sample.c.location.notlike(f"{prefix}/%")
 
@@ -67,9 +64,8 @@ def repack_blobs(
     """Pack every unpacked blob into ``target``, rewriting where it lives.
 
     ``source`` defaults to the catalog's own backend and must expose
-    ``path_for`` — packing reads files. Nothing is deleted: the source keeps
-    its copy, which is the rollback, and what Label Studio reads when it
-    serves off the mount rather than the blob server.
+    ``path_for``: packing reads files. Nothing is deleted: the source keeps
+    its copy, the rollback. See ``docs/adr/0002``.
     """
     source = source or catalog.blobs
     if not hasattr(source, "path_for"):
@@ -100,9 +96,7 @@ def repack_blobs(
                 t.sample.c.length,
             )
             .where(_pending(prefix))
-            # Ingest order: a corpus is walked directory by directory, so a
-            # video's frames arrive together and pack together, and a
-            # resumed run repeats the previous ordering
+            # Ingest order keeps a video's frames together. docs/adr/0002
             .order_by(t.sample.c.id)
         ).all()
 
@@ -113,10 +107,9 @@ def repack_blobs(
             on_progress(report)
         return report
 
-    # Rows for the shard currently being filled. Held until it is known to
-    # have been uploaded — which is what a change of container tells us,
-    # since the backend flushes a full shard inside put and the next member
-    # opens a new one.
+    # Rows for the shard being filled, held until a change of container
+    # shows it was uploaded: the backend flushes a full shard inside put.
+    # docs/adr/0002
     pending: list[tuple[int, Location]] = []
     open_shard: str | None = None
     packed: list[tuple[str, str]] = []
@@ -138,9 +131,8 @@ def repack_blobs(
         if on_progress is not None:
             on_progress(report)
 
-    # The last shard is still open, and its rows are still uncommitted.
-    # flush is what makes the object exist; committing before it would name
-    # a shard nobody uploaded.
+    # The last shard is still open: flush before committing its rows.
+    # docs/adr/0002
     if pending:
         target.flush()
         _commit(catalog, pending)
@@ -158,7 +150,8 @@ def _commit(catalog, pending: list[tuple[int, Location]]) -> None:
     """Point rows at their packed location, one shard's worth at a time."""
     if not pending:
         return
-    # One statement and one round trip for the whole shard. Bind names differ
+    # One statement and one round trip for the whole shard (docs/adr/0032).
+    # Bind names differ
     # from the column names on purpose: reusing "offset" and "length" would
     # collide with the columns being set.
     stmt = (
@@ -188,11 +181,8 @@ def _commit(catalog, pending: list[tuple[int, Location]]) -> None:
 def _verify(catalog, target, packed, verify: int, seed: int, report: RepackReport) -> None:
     """Read a sample of members back and check they are what they claim.
 
-    A sample rather than all of them: verifying 60,000 members is 60,000
-    range requests, and what this is looking for — an off-by-one in offsets,
-    a backend ignoring Range — is systematic and shows up in the first few.
-    Every shard written is represented, since a fault is likelier to be per
-    shard than per member.
+    A sample rather than all of them, with every shard written represented.
+    See ``docs/adr/0002``.
     """
     by_shard: dict[str, list[str]] = {}
     for checksum, container in packed:

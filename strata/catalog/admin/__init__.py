@@ -1,9 +1,8 @@
 """Looking after a catalog: what is in it, whether it is reachable, what is installed.
 
-The operations behind ``strata-catalog``, as functions returning records,
-so the command renders and the orchestrator or a test reads. Copying,
-merging and repacking live in ``sync`` and ``storage`` and return their
-own reports; this holds the ones that were only ever a command body.
+The operations behind ``strata-catalog``, as functions returning records.
+Copying, merging and repacking live in ``sync`` and ``storage``. See
+``docs/adr/0030``.
 """
 
 from .installed import CatalogEntry, PreparerEntry, TypeEntry, catalogs, preparers, types
