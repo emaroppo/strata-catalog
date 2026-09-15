@@ -3,17 +3,15 @@
 Revision ID: 8e4b2d61f7a3
 Revises: 5c2e7a19d4b8
 
-An annotation was a cell: one row per sample per label set, updated in
-place, so a correction overwrote the previous answer and the catalog had
-no memory of what it used to say. It becomes append-only: a row is
-written and never changed, a correction writes a new row and stamps the
-old one as superseded, and the current answer is the one row not
-stamped. Every existing row becomes the first and only version of
-itself, which is true. A row also records which import batch it arrived
-in, or descends from.
+An annotation was one row per sample per label set, updated in place. It
+becomes append-only: a row is written and never changed, a correction
+writes a new row and stamps the old one as superseded, and the current
+answer is the one row not stamped. Every existing row becomes the first
+and only version of itself. A row also records which import batch it
+arrived in, or descends from. See ``docs/adr/0027``.
 
 The table is rebuilt rather than altered, since the primary key changes
-from the pair to a row id and SQLite cannot alter one in place.
+from the pair to a row id (see ``docs/adr/0021``).
 """
 
 from __future__ import annotations

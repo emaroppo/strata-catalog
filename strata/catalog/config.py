@@ -1,18 +1,9 @@
 """Which catalog a host uses, and opening it.
 
-Every process that touches a catalog — the labelling CLI, the blob server,
-the modelling host — needs the same two things: a description of where the
-catalog is, and a way to turn that description into an open catalog. Both
-live here, so the three cannot drift apart on either.
-
-**The file says where; the environment holds secrets.** A catalog's index,
-bucket and blob server are named in ``config.toml`` and nowhere else, so
-pointing a host at another catalog is an edit to that file. Credentials —
-``$PGPASSWORD`` for the index, ``$STRATA_S3_ACCESS_KEY`` and
-``$STRATA_S3_SECRET_KEY`` for the bucket, ``$STRATA_BLOB_SECRET`` for signed
-URLs — come from the environment and reach whichever catalog is configured.
-A variable naming a location would quietly override the file, and a switch
-made there would not take.
+Every process that touches a catalog reads the same file through this
+module. The file says where; the environment holds secrets: ``$PGPASSWORD``
+for the index, ``$STRATA_S3_ACCESS_KEY`` and ``$STRATA_S3_SECRET_KEY`` for
+the bucket, ``$STRATA_BLOB_SECRET`` for signed URLs. See ``docs/adr/0019``.
 
 Several catalogs can be described, as ``[catalog.<name>]`` tables layered on
 the flat ``[catalog]`` keys, and one of them is the host's default.
@@ -33,8 +24,7 @@ from .storage.blobs import BlobBackend, LocalBackend
 DEFAULT_CATALOG = "default"
 
 #: Credentials, by the environment variable that supplies each. Never read
-#: from the file: it gets copied between machines, and a secret in it
-#: travels with every copy.
+#: from the file. See docs/adr/0019.
 _SECRETS = {
     "s3_access_key": "STRATA_S3_ACCESS_KEY",
     "s3_secret_key": "STRATA_S3_SECRET_KEY",
@@ -60,13 +50,12 @@ class CatalogConfig:
     #: The local catalog directory: the SQLite index when ``url`` is empty,
     #: and the blobs when ``s3_endpoint`` is.
     root: str = "catalog"
-    #: The index. Empty means SQLite under ``root``, which is what keeps a
-    #: checkout runnable with nothing installed. A Postgres URL, written
-    #: without its password, points several machines at one index.
+    #: The index. Empty means SQLite under ``root``. A Postgres URL, written
+    #: without its password, points several machines at one index. See
+    #: docs/adr/0021.
     url: str = ""
     #: Where the blobs are. Empty means files under ``root``; an endpoint
-    #: means tar shards in an S3-compatible bucket, which is what lets the
-    #: machine that trains and the machine that labels read the same bytes.
+    #: means tar shards in an S3-compatible bucket. See docs/adr/0002.
     s3_endpoint: str = ""
     s3_bucket: str = "strata"
     #: Garage and MinIO ignore it, but boto3 insists on one being set.
@@ -80,8 +69,7 @@ class CatalogConfig:
     #: server takes over. Per catalog: two catalogs are two mounts.
     blobs_prefix: str = "blobs"
 
-    # Credentials, filled from the environment. Out of repr, so a config
-    # printed while troubleshooting does not print them.
+    # Credentials, filled from the environment. Out of repr. docs/adr/0019
     s3_access_key: str = field(default="", repr=False)
     s3_secret_key: str = field(default="", repr=False)
     #: Signs blob URLs, and must match what the blob server was started
@@ -121,15 +109,9 @@ class Catalogs:
         """One catalog by name, or the default when nothing is named.
 
         A name that does not exist is refused with the list of the ones
-        that do. Falling back to the default is the failure this naming
-        exists to prevent: sample ids mean nothing outside the catalog that
-        issued them, so a job reading the wrong one reports real numbers
-        about the wrong data without anything raising.
-
-        Asking for "the default" where several exist and none is marked is
-        refused for the same reason — but only here, at the point of the
-        ambiguity. A project or ``--catalog`` naming one settles it, and
-        loading the file cannot know whether anyone will.
+        that do; nothing falls back to the default. Asking for "the default"
+        where several exist and none is marked is refused here, at the point
+        of the ambiguity. See ``docs/adr/0020``.
         """
         if not name:
             if not self.default_name and self.by_name:
@@ -166,14 +148,9 @@ def host_catalog(environ: Mapping[str, str] | None = None) -> tuple[str, Catalog
     """The catalog a service on this host uses, and the name it goes by.
 
     The blob server and the modelling host read the same ``[catalog]``
-    tables the CLI does, from the file ``$STRATA_CONFIG`` names — on a
-    machine that also runs the CLI, the very same ``config.toml``. The
-    file's default is the one served, so pointing a host at another catalog
-    is changing that default and restarting.
-
-    Unlike the CLI, a missing file is an error rather than a default
-    catalog: a service that quietly opened ``./catalog`` would serve
-    nothing, and look healthy doing it.
+    tables the CLI does, from the file ``$STRATA_CONFIG`` names. The file's
+    default is the one served. Unlike the CLI, a missing file is an error
+    rather than a default catalog. See ``docs/adr/0019``.
     """
     environ = os.environ if environ is None else environ
     value = environ.get(CONFIG_ENV, "")
@@ -192,9 +169,9 @@ def host_catalog(environ: Mapping[str, str] | None = None) -> tuple[str, Catalog
 def read_catalogs(section: dict, environ: Mapping[str, str] | None = None) -> Catalogs:
     """A flat ``[catalog]``, or ``[catalog.<name>]`` tables, or both.
 
-    Flat keys are shared by every named table, which layers on top of them,
-    so two catalogs on one endpoint state the endpoint once. A file with no
-    named tables is the single-catalog case.
+    Flat keys are shared by every named table, which layers on top of them.
+    A file with no named tables is the single-catalog case. See
+    ``docs/adr/0019``.
 
     Credentials come from ``environ``, the process environment unless
     given, and reach every catalog described.
@@ -228,8 +205,7 @@ def read_catalogs(section: dict, environ: Mapping[str, str] | None = None) -> Ca
         [(name, only)] = by_name.items()
         return Catalogs(default=only, by_name=by_name, default_name=name)
     # Left unresolved rather than guessed, and not an error yet: a project
-    # or --catalog naming one settles it. Picking one alphabetically would
-    # hand over a corpus chosen by spelling.
+    # or --catalog naming one settles it. docs/adr/0020
     return Catalogs(default=base, by_name=by_name, default_name="")
 
 
@@ -266,10 +242,8 @@ def open_catalog(config: CatalogConfig, *, create: bool = False) -> Catalog:
     """The catalog a config describes: opened, or with ``create`` made if absent.
 
     Opening never creates. An index with no catalog in it is
-    :class:`CatalogMissing`, and a command that consults a catalog must not
-    leave one behind by accident, where it would hide the catalog configured
-    somewhere else. The commands that put data in pass ``create``: refusing
-    to make one would leave no way to make the first.
+    :class:`CatalogMissing`. The commands that put data in pass ``create``.
+    See ``docs/adr/0018``.
     """
     blobs = blobs_for(config)
     if config.url:

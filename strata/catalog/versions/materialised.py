@@ -1,18 +1,8 @@
 """A dataset version on disk: reused when it is the right one, rebuilt when not.
 
-Two machines materialise dataset versions into a directory of their own —
-the laptop for a local round, the modelling host for a remote one — named
-by dataset and version, so a round retried after running out of memory
-reuses the version rather than fetching it again. The rule for when a
-directory already there may be reused lived in both places, and drifted:
-the local copy learned that a change of features means a rebuild, the
-host's did not, and remote rounds trained without features.
-
-So it lives here, once. A directory is reused only when its manifest reads,
-was built from this catalog, and was built with the same feature
-declarations. Anything else is rebuilt: the directory is only a copy of what
-the catalog holds, so rebuilding costs a fetch, while reusing the wrong one
-costs a round trained on other data and a number reported for it.
+The one rule for both machines. A directory is reused only when its
+manifest reads, was built from this catalog, and was built with the same
+feature declarations. Anything else is rebuilt. See ``docs/adr/0026``.
 """
 
 import shutil
@@ -49,9 +39,7 @@ def ensure_materialised(
     ``catalog`` is anything with ``id``, ``datasets.named`` and
     ``materialise`` — a :class:`~strata.catalog.Catalog`, in practice.
 
-    Asked before fetching, not after: materialising into staging only to
-    find the version was already there meant pulling a whole dataset out of
-    object storage to delete it.
+    Reuse is checked before fetching. See ``docs/adr/0026``.
     """
     ref = catalog.datasets.named(dataset_id)
     name = ref.name
@@ -66,9 +54,7 @@ def ensure_materialised(
 
     staging = Path(root) / name / "pending"
     if staging.exists():
-        # An interrupted fetch. Its contents are unknowable — some files
-        # written, no manifest — and keeping them would let a partial
-        # dataset masquerade as a whole one.
+        # An interrupted fetch, discarded. docs/adr/0026
         shutil.rmtree(staging)
 
     fetched = 0
@@ -81,7 +67,7 @@ def ensure_materialised(
 
     catalog.materialise(dataset_id, staging, on_progress=tick, cache=cache, features=specs)
     # The manifest is written last, so a directory that has one is complete;
-    # the rename is what makes it visible under its version at all.
+    # the rename is what makes it visible under its version. docs/adr/0026
     staging.rename(directory)
     manifest = Manifest.model_validate_json((directory / MANIFEST_NAME).read_text())
     return Materialised(manifest, directory, fetched)
@@ -94,9 +80,8 @@ def _reusable(directory: Path, catalog_id: str | None, features: list[dict]) -> 
     except FileNotFoundError:
         return None
     except ManifestFormatError:
-        # Written by a release whose layout this one does not read, or before
-        # manifests said which layout they were. Guessing at its fields could
-        # cost a round trained on the wrong split.
+        # A layout this release does not read: rebuilt, never guessed at.
+        # docs/adr/0026
         return None
     if manifest.catalog_id != catalog_id:
         # Another catalog's version with the same name and number — which is
@@ -104,11 +89,8 @@ def _reusable(directory: Path, catalog_id: str | None, features: list[dict]) -> 
         # catalog, since its numbering starts again.
         return None
     if [dict(f) for f in manifest.features] != features:
-        # Features are not part of a version's identity: they change what the
-        # model is *told*, not which samples were chosen or what was said
-        # about them. So a project that adds one keeps its version and needs
-        # the directory rebuilt, or the round trains on a manifest written
-        # before the feature existed.
+        # Features are not part of a version's identity: adding one keeps the
+        # version and rebuilds the directory. docs/adr/0026
         return None
     return manifest
 

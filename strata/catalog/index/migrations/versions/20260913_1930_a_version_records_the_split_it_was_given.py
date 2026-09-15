@@ -3,12 +3,10 @@
 Revision ID: 5c2e7a19d4b8
 Revises: 6a0d9e3b7c14
 
-A corpus can arrive already divided — a public dataset's train and test —
-and a version may be frozen with that division fixed: the metadata key
-naming each sample's set, and which of its values are held out or
-validation. The version records what it was given, so a materialised
-directory says why its holdout is what it is, and two freezes given
-different splits are two versions. Existing versions were given nothing.
+A corpus can arrive already divided, and a version may be frozen with
+that division fixed: the metadata key naming each sample's set, and which
+of its values are held out or validation. The version records what it was
+given. Existing versions were given nothing. See ``docs/adr/0024``.
 """
 
 from __future__ import annotations

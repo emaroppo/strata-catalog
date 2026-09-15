@@ -22,8 +22,7 @@ class FeatureError(Exception):
 class FeatureSpec:
     """One value a project wants its model told about each sample."""
 
-    #: What the model calls it. Distinct from ``ref`` because the thing a
-    #: model wants is not always named the way the catalog stores it.
+    #: What the model calls it. Distinct from ``ref``. See docs/adr/0011.
     name: str
     #: Which kind of place to read it from.
     source: Literal["label_set", "metadata"]

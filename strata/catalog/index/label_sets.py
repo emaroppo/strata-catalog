@@ -53,9 +53,8 @@ class LabelSets:
     def set_classes(self, label_set_id: int, schema: AnySchema) -> None:
         """Replace a label set's schema.
 
-        Append-only is a convention rather than a constraint here, because a
-        run records the class list it trained with — that, not this table, is
-        what a checkpoint is checked against.
+        Append-only is a convention rather than a constraint here. See
+        ``docs/adr/0005``.
         """
         with self.engine.begin() as conn:
             conn.execute(

@@ -55,9 +55,8 @@ def asserted(
     """The classes each sample's answer asserts, through the schema's indexing contract.
 
     Read that way rather than by reaching into a payload this does not
-    understand — the same reason a new task type becomes queryable
-    without the catalog learning about it. Samples with no answer, or
-    an answer asserting nothing, are absent.
+    understand. Samples with no answer, or an answer asserting nothing,
+    are absent. See ``docs/adr/0039``.
     """
     found: dict[int, list[str]] = {}
     for chunk in chunks(list(sample_ids)):

@@ -11,9 +11,8 @@ def link_or_copy(source: Path, target: Path) -> None:
     """Put ``source``'s bytes at ``target``, sharing them if the filesystem can.
 
     A blob is immutable and addressed by its content, and anything derived
-    from it is the same bytes — so the two can share an inode. Without this
-    every dataset version costs a full copy of itself, and a project of any
-    size runs out of disk.
+    from it is the same bytes, so the two can share an inode. See
+    ``docs/adr/0002``.
     """
     try:
         os.link(source, target)
@@ -26,14 +25,8 @@ def link_or_copy(source: Path, target: Path) -> None:
 def materialised_name(row) -> str:
     """What a sample is called inside a materialised dataset.
 
-    Its checksum, not its container. A container was one file when blobs
-    were files, so naming after it happened to be unique; a tar shard holds
-    hundreds, and naming after it gave every sample in the shard the same
-    filename — one file on disk, every manifest entry pointing at it, and a
-    training run over one image repeated with nothing to say so.
-
-    The extension comes from the recorded source path, because a checksum
-    has none and some readers still look.
+    Its checksum, not its container. The extension comes from the recorded
+    source path, because a checksum has none. See ``docs/adr/0001``.
     """
     suffix = Path((row.metadata or {}).get("source_path") or "").suffix
     return f"{row.checksum}{suffix.lower()}"
@@ -96,11 +89,9 @@ def write_out(
             if cache is None:
                 target.write_bytes(body)
             else:
-                # Written to the cache and linked from it, so the bytes
-                # exist once however many versions reference them. Via a
-                # temporary name: an interrupted write must not leave a
-                # short file at the address of a whole one, which would
-                # then be served as a cache hit forever.
+                # Written to the cache and linked from it, via a temporary
+                # name so an interrupted write leaves no short file at the
+                # address of a whole one. docs/adr/0026
                 cached = cache / blob_path(target.stem, target.suffix)
                 cached.parent.mkdir(parents=True, exist_ok=True)
                 partial = cached.with_name(cached.name + ".partial")
@@ -130,9 +121,8 @@ def fetch_into(
     if path_for is None:
         for location, body in blobs.fetch(list(wanted)):
             target = wanted[location]
-            # Through a temporary name: a short file at the address of a
-            # whole one is served as a hit forever, and nothing rehashes
-            # a cache entry to notice.
+            # Through a temporary name, so an interrupted write leaves no
+            # short file at the address of a whole one. docs/adr/0026
             partial = target.with_name(target.name + ".partial")
             partial.write_bytes(body)
             partial.replace(target)

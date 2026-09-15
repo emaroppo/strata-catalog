@@ -39,12 +39,11 @@ def assign(
     is its own group. ``inherited`` carries the previous version's
     decisions, which are never overruled. ``given`` carries sides the
     corpus arrived with, fixed before anything else and outside the
-    grouping: a benchmark that cuts a group is reproduced, since matching
-    it is the point. Whether a given side may contradict an inherited one
-    is the caller's policy; here the given side wins.
+    grouping. Whether a given side may contradict an inherited one is the
+    caller's policy; here the given side wins.
 
     The achieved ratios are returned because grouping can make a target
-    unreachable (the fallback below); see ``docs/adr/0003``.
+    unreachable (the fallback below). See ``docs/adr/0024``.
     """
     if not members:
         return {}, Achieved(0.0, 0.0)
@@ -90,11 +89,8 @@ def assign(
     total = len(members)
 
     # Holdout first, so validation is drawn from what holdout left. Forced
-    # only when three groups exist: with two, a forced holdout leaves one
-    # group for train and val together, which the refusal below would catch
-    # — better to report an empty holdout than to refuse the round. A side
-    # the corpus gave counts towards the target, so a benchmark's test set
-    # is the holdout and nothing more is drawn for it.
+    # only when three groups exist. A side the corpus gave counts towards
+    # the target, so nothing more is drawn for it. docs/adr/0024
     undecided = _fill(
         HOLDOUT,
         round(total * holdout_ratio),
@@ -128,10 +124,9 @@ def _fill(
 ) -> list[str]:
     """Move whole groups from ``undecided`` onto ``side`` until the target is met.
 
-    Aims at the deficit rather than flipping a coin per sample, so a ratio
-    knocked off target by an earlier version is corrected by this one. A
-    group is taken only while doing so lands closer to the target than
-    skipping it would, which caps the overshoot at half a group.
+    Aims at the deficit rather than flipping a coin per sample. A group is
+    taken only while doing so lands closer to the target than skipping it
+    would. See ``docs/adr/0024``.
     """
     have = counts[side]
     remaining: list[str] = []
@@ -146,11 +141,8 @@ def _fill(
             remaining.append(key)
 
     if have == 0 and remaining and force:
-        # No group could improve on taking nothing, which happens whenever
-        # one group is larger than twice the target — guaranteed with two
-        # groups, since one of them holds at least half. Overshooting the
-        # ratio beats an empty side: too large is usable, empty is not. The
-        # achieved ratio is returned so a caller can say so.
+        # No group could improve on taking nothing. Overshooting the ratio
+        # beats an empty side, and the achieved ratio says so. docs/adr/0024
         closest = min(remaining, key=lambda k: abs(len(groups[k]) - target))
         for i in groups[closest]:
             assigned[i] = side

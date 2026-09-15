@@ -56,10 +56,9 @@ class Samples:
     def describe(self, conn, sample_id: int, *, subtype: str, metadata: dict | None) -> None:
         """Bring a known sample's description up to date.
 
-        Updated rather than left alone, so correcting how a corpus is
-        described is one re-run rather than a rebuild. Regrouping cannot
-        disturb a dataset already built: membership is materialised into
-        ``dataset_member``, so only later versions see the change.
+        Updated rather than left alone; a dataset already built is
+        undisturbed, since membership is materialised into
+        ``dataset_member``. See ``docs/adr/0023``.
         """
         conn.execute(
             update(t.sample)
@@ -71,8 +70,7 @@ class Samples:
         """Add samples to collections.
 
         Added rather than replaced: a sample already in one collection that
-        turns up in another belongs to both, which is what makes a corpus
-        reusable across jobs rather than owned by the first.
+        turns up in another belongs to both. See ``docs/adr/0022``.
         """
         for sample_id in sample_ids:
             for name in collections:
@@ -93,8 +91,8 @@ class Samples:
         """Each sample's group under metadata ``key``, None for its own.
 
         No key means no grouping: every sample is its own group. A sample
-        without the key, or with a null under it, is its own group too —
-        nothing groups unless the data says so.
+        without the key, or with a null under it, is its own group too. See
+        ``docs/adr/0023``.
         """
         if key is None:
             return dict.fromkeys(sample_ids)
@@ -139,11 +137,8 @@ class Samples:
 
         Per label set, not global: a sample can be classified and still be
         waiting for boxes. Skipped samples have a row, so they are excluded
-        by the same join rather than by a second condition.
-
-        Scoped, because a catalog holding several jobs' data would otherwise
-        offer every one of them to every job. What a project draws from is
-        the project's declaration, not the catalog's.
+        by the same join rather than by a second condition. Scoped to the
+        collections named. See ``docs/adr/0022``.
         """
         stmt = (
             select(*SAMPLE_COLUMNS)
@@ -168,12 +163,9 @@ class Samples:
     ) -> list[SampleRow]:
         """Samples with a real answer — skipped ones are not training data.
 
-        Scoped like the queue. Dropping a collection from a project means
-        declaring that data out of scope, training included: quietly
-        carrying it would move the metrics as well as the model, and neither
-        would say why. Keeping what is already answered while asking for no
-        more is what skipping is for. ``source`` narrows to answers from
-        one origin — a person's, for a second look.
+        Scoped like the queue: dropping a collection from a project declares
+        that data out of scope, training included. ``source`` narrows to
+        answers from one origin. See ``docs/adr/0022``.
         """
         predicates = [
             t.annotation.c.label_set_id == label_set_id,
@@ -189,10 +181,9 @@ class Samples:
 
         Every reader takes live samples only, so a removed sample leaves
         the queue, the labelled set and any version frozen from here on;
-        its rows and its history stay, since shards are immutable and a
-        compaction pass is what reclaims them. A version already frozen
-        keeps its members: it is a record of what was trained on. Returns
-        how many were live and are not now.
+        its rows and its history stay. A version already frozen keeps its
+        members. Returns how many were live and are not now. See
+        ``docs/adr/0002``.
         """
         gone = 0
         with self.engine.begin() as conn:
@@ -208,8 +199,8 @@ class Samples:
         """Live samples in ``collections`` whose metadata has every key of ``where`` at its value.
 
         Compared as strings, since a value typed at a command line is one.
-        The metadata is filtered here rather than in SQL: JSON access
-        differs between the two dialects, and a selection is read once.
+        The metadata is filtered here rather than in SQL. See
+        ``docs/adr/0021``.
         """
         stmt = select(*SAMPLE_COLUMNS).where(live())
         with self.engine.connect() as conn:
@@ -226,8 +217,7 @@ class Samples:
         """Samples whose current answer arrived with the corpus and nobody has confirmed.
 
         Trusted and trained on, since an import is an answer; listed so a
-        spot review can pick among them, by wherever a model disagrees with
-        what was imported.
+        spot review can pick among them. See ``docs/adr/0028``.
         """
         return self._joined(
             t.annotation,
@@ -253,7 +243,7 @@ class Samples:
         )
 
     def with_class(self, label_set_id: int, class_name: str, collections) -> list[SampleRow]:
-        """Every sample asserting a class — the join the index table exists for."""
+        """Every sample asserting a class: the join the index exists for. See ``docs/adr/0039``."""
         return self._joined(
             t.annotation_class,
             t.annotation_class.c.label_set_id == label_set_id,
@@ -286,15 +276,8 @@ class Samples:
         """What the samples in these collections are, keyed (media, subtype).
 
         A project declares both so ``ingest`` can work before anything is
-        catalogued: media picks which files count, and subtype decides
-        whether they are grouped. Afterwards the samples are the truth, and
-        the two can disagree — a collection a project did not fill, or a
-        declaration changed after the fact.
-
-        Subtype is the one that matters quietly. Frames ingested as plain
-        images each become their own group, so near-duplicates land on both
-        sides of a train/val split and validation reads high for a model
-        that has memorised them.
+        catalogued. Afterwards the samples are the truth, and the two can
+        disagree. See ``docs/adr/0010``.
         """
         stmt = (
             select(t.sample.c.media, t.sample.c.subtype, func.count())

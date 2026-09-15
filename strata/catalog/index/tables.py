@@ -1,8 +1,8 @@
 """The catalog's schema, defined once for both SQLite and Postgres.
 
 SQLAlchemy Core, not the ORM: these are tables and queries, and the rows
-they return are data rather than objects with behaviour. The behaviour lives
-in :mod:`strata.labels`, which is where a value knows what it means.
+they return are data rather than objects with behaviour. See
+``docs/adr/0021``.
 
 Two things in here are load-bearing and easy to misread:
 
@@ -12,11 +12,9 @@ is a shard of one — so that packing samples into tars later is a new backend
 rather than a migration.
 
 A grouping — which samples belong together, so a split can keep them on
-one side — is a metadata key, not a column. Frames carry ``video``, mail
-may carry ``thread``, and a project can write any key of its own. Nothing
-groups unless a version is frozen with ``group_by`` naming a key, and one
-catalog can be split by several groupings in turn. The dataset records
-which key it respected.
+one side — is a metadata key, not a column. Nothing groups unless a
+version is frozen with ``group_by`` naming a key, and the dataset records
+which key it respected. See ``docs/adr/0023``.
 """
 
 from sqlalchemy import (
@@ -45,8 +43,7 @@ SKIPPED = "skipped"
 STATES = (ANNOTATED, SKIPPED)
 
 #: Where an annotation came from. Predictions are not annotations and do not
-#: belong in this table, but an imported guess that a human then accepted is
-#: worth telling apart from one typed from scratch.
+#: belong in this table. See docs/adr/0027.
 HUMAN, IMPORT, MODEL = "human", "import", "model"
 SOURCES = (HUMAN, MODEL, IMPORT)
 
@@ -82,8 +79,7 @@ sample = Table(
     # video a frame came from.
     Column("metadata", JSON, nullable=True),
     Column("ingested_at", DateTime, server_default=func.now()),
-    # Shards are immutable, so removal is a tombstone and a compaction pass
-    # later rather than a delete.
+    # Removal is a tombstone rather than a delete. docs/adr/0002
     Column("deleted_at", DateTime, nullable=True),
     Index("ix_sample_subtype", "media", "subtype"),
 )
@@ -91,12 +87,8 @@ sample = Table(
 
 #: Where a sample came from, as a path: ``sat_images``,
 #: ``sat_images/2024-batch``. A sample carries one row per collection it
-#: belongs to, because the same images can feed more than one job — which is
-#: the whole reason a catalog is worth keeping.
-#:
-#: Distinct from ``media``/``subtype``, which say what a sample is made of,
-#: and from any grouping key in its metadata. One collection holds many
-#: groups; the axes are independent.
+#: belongs to. Distinct from ``media``/``subtype``, which say what a sample
+#: is made of, and from any grouping key in its metadata. See docs/adr/0022.
 sample_collection = Table(
     "sample_collection",
     metadata,
@@ -111,19 +103,17 @@ label_set = Table(
     metadata,
     Column("id", Integer, primary_key=True),
     Column("name", String(255), nullable=False, unique=True),
-    # A strata.labels schema, serialized. Append-only by convention: a
-    # checkpoint maps output neurons to the class list by position, so a run
-    # records the list it trained with rather than trusting this to hold still.
+    # A strata.labels schema, serialized. Append-only by convention.
+    # docs/adr/0005
     Column("schema", JSON, nullable=False),
     Column("created_at", DateTime, server_default=func.now()),
 )
 
 
 #: Append-only. A row is written and never changed; a correction writes a
-#: new row and stamps the old one, so the catalog remembers what it used
-#: to say, by whom, and when. The current answer for a sample under a
+#: new row and stamps the old one. The current answer for a sample under a
 #: label set is the one row with ``superseded_at`` null; unlabelled is
-#: having none. See docs/adr/0009.
+#: having none. See docs/adr/0027.
 annotation = Table(
     "annotation",
     metadata,
@@ -136,9 +126,9 @@ annotation = Table(
     # which is a real answer and must not be confused with the first.
     Column("value", JSON, nullable=True),
     Column("source", String(16), nullable=False, default="human"),
-    # Which import this answer arrived in. Carried onto the row that
-    # confirms or corrects it, so a batch can be read against how its
-    # labels fared under review. Null for an answer nothing imported.
+    # Which import this answer arrived in, carried onto the row that
+    # confirms or corrects it. Null for an answer nothing imported.
+    # docs/adr/0027
     Column("batch", String(255), nullable=True),
     Column("created_at", DateTime, server_default=func.now()),
     # Null while this is the current answer. Set when a later row replaced
@@ -151,9 +141,7 @@ annotation = Table(
 
 
 #: Derived from ``annotation.value`` on every write, through the indexing
-#: contract in strata.labels. Its whole purpose is to turn "every sample
-#: labelled X" into a join instead of a scan over JSON, and it is why a new
-#: task type becomes queryable without the catalog understanding it.
+#: contract in strata.labels. See docs/adr/0039.
 annotation_class = Table(
     "annotation_class",
     metadata,
@@ -172,7 +160,7 @@ dataset = Table(
     Column("name", String(255), nullable=False),
     Column("version", Integer, nullable=False),
     # A dataset is samples *and their annotations against one label set*.
-    # Without this, materialising would have to be told which it meant.
+    # docs/adr/0024
     Column("label_set_id", ForeignKey("label_set.id"), nullable=False),
     # What selected the members, kept for provenance rather than replayed:
     # re-running it later would return something else, which is the point of
@@ -195,12 +183,11 @@ dataset = Table(
     # The version whose side assignment this one continues. A version
     # inherits its predecessor's sides and carries this forward; one that
     # re-split from nothing names itself. A warm start never reaches back
-    # past it: a model trained before a re-split may have seen what is now
-    # held out. Null for a version frozen before this was recorded.
+    # past it. Null for a version frozen before this was recorded.
+    # docs/adr/0024
     Column("sides_from_version", Integer, nullable=True),
     # What drew the sides this version decided. Part of a re-split's
-    # identity, since the draw is the whole of what it did; not of an
-    # inheriting version's, where it reaches only the samples that are new.
+    # identity; not of an inheriting version's.
     Column("seed", Integer, nullable=True),
     # A split the corpus arrived with, as the freeze read it: the metadata
     # key, and which of its values were held out or validation. Null when
@@ -224,21 +211,10 @@ dataset_member = Table(
 )
 
 
-#: Two origins that answered the same sample differently.
-#:
-#: A merge cannot decide this. Both answers were made by someone looking at
-#: the sample, so one of them is a mistake and only a person can say which —
-#: and the useful thing to show that person is *what* disagreed, which is
-#: lost the moment either answer is discarded.
-#:
-#: Not a relaxation of ``annotation``'s key. One current answer per sample
-#: per label set is worth keeping: everything that reads an annotation wants
-#: the answer, not a set of candidates. This records that the answer is
-#: disputed, alongside it.
-#:
-#: One row per sample per label set. A third disagreement replaces the
-#: second — the pair being shown matters more than the history of who
-#: disagreed when, and the history is in the origins anyway.
+#: Two origins that answered the same sample differently. Not a relaxation
+#: of ``annotation``'s key: this records that the one current answer is
+#: disputed, alongside it. One row per sample per label set; a third
+#: disagreement replaces the second. See docs/adr/0009.
 annotation_conflict = Table(
     "annotation_conflict",
     metadata,
@@ -247,8 +223,7 @@ annotation_conflict = Table(
     #: What the catalog holds, and what arrived disagreeing with it.
     Column("kept_value", JSON, nullable=True),
     Column("other_value", JSON, nullable=True),
-    #: Which catalog the disagreeing answer came from, so "the laptop said
-    #: otherwise" is answerable rather than merely "something did".
+    #: Which catalog the disagreeing answer came from.
     Column("other_origin", String(64), nullable=True),
     Column("noticed_at", DateTime, server_default=func.now()),
 )

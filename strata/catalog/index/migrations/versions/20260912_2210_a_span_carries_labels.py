@@ -9,8 +9,8 @@ the list form so the reader no longer has to accept both. An empty label
 becomes no labels: it was how a region sent without one was represented,
 and an empty string is not a class name.
 
-Rows are read and written through the JSON column so the same code runs on
-SQLite and Postgres. Re-running is a no-op.
+Rows are read and written through the JSON column (see ``docs/adr/0021``).
+Re-running is a no-op.
 """
 
 from __future__ import annotations

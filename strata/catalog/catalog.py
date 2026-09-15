@@ -1,8 +1,7 @@
 """The catalog itself: ingest, annotate, query, materialise.
 
 Everything a caller needs goes through here, so the index and the blob
-backend stay implementation details. That is what lets SQLite and a
-directory be swapped for Postgres and a bucket without a consumer noticing.
+backend stay implementation details. See ``docs/adr/0021``.
 """
 
 import hashlib
@@ -95,8 +94,7 @@ class Catalog:
     def local(cls, root: Path) -> "Catalog":
         """A catalog needing no infrastructure: SQLite beside a blob directory.
 
-        The reason the repository stays runnable by someone who just cloned
-        it, and the same schema and queries as the server configuration.
+        See ``docs/adr/0021``.
         """
         root = Path(root)
         root.mkdir(parents=True, exist_ok=True)
@@ -106,11 +104,9 @@ class Catalog:
     def connect(cls, url: str, blobs: BlobBackend) -> "Catalog":
         """Open a catalog that exists. Nothing is created, and nothing is written.
 
-        One schema, two dialects: SQLite for a checkout with nothing
-        installed, Postgres once the corpus is millions of rows read from
-        several machines at once. An index with no catalog in it is
-        :class:`CatalogMissing`; one behind the code is refused with the
-        command that brings it up to date. Creating is :meth:`create`.
+        An index with no catalog in it is :class:`CatalogMissing`; one
+        behind the code is refused with the command that brings it up to
+        date. Creating is :meth:`create`. See ``docs/adr/0018``.
         """
         catalog = cls(database.engine(url), blobs)
         catalog._verify()
@@ -120,13 +116,9 @@ class Catalog:
     def create(cls, url: str, blobs: BlobBackend) -> "Catalog":
         """A catalog on ``url``, built if the index holds none, opened if it does.
 
-        Stamped rather than migrated: this creates everything in one step,
-        which is what keeps a checkout runnable and the suite fast, and a
-        database built that way is at head by construction. Without the
-        stamp the first ``alembic upgrade`` would replay the baseline
-        against tables that already exist. Only a database this call found
-        empty is stamped; one that already held tables is opened, and the
-        migration guard decides whether it is current.
+        Only a database this call found empty is built and stamped at head;
+        one that already held tables is opened, and the migration guard
+        decides whether it is current. See ``docs/adr/0018``.
         """
         catalog = cls(database.engine(url), blobs)
         if catalog._exists():
@@ -195,32 +187,23 @@ class Catalog:
         re-running ingest over a growing directory safe.
 
         ``metadata`` applies to the whole batch; ``metadata_for`` supplies it
-        per file, for anything that differs sample by sample — where a file
-        came from, its frame index, its capture time, the video it belongs
-        to. A grouping is a metadata key like any other, respected only by
-        a version frozen with ``group_by`` naming it.
-
-        A known sample has its ``subtype`` and ``metadata`` brought up to
-        date rather than left alone, so correcting how a corpus is described
-        is one re-run rather than a rebuild. Regrouping cannot disturb a
-        dataset already built: membership is materialised into
-        ``dataset_member``, so only later versions see the change.
+        per file. A grouping is a metadata key like any other, respected
+        only by a version frozen with ``group_by`` naming it. A known sample
+        has its ``subtype`` and ``metadata`` brought up to date rather than
+        left alone; a dataset already built is undisturbed. See
+        ``docs/adr/0023``.
 
         ``collections`` says where these samples came from, as paths. They
-        are added rather than replaced: a sample already in one collection
-        that turns up in another belongs to both, which is what makes a
-        corpus reusable across jobs rather than owned by the first.
+        are added rather than replaced. See ``docs/adr/0022``.
 
         ``canonicalise`` is a sample type's canonical form, passed in rather
-        than resolved here so that a catalog stays free of the type registry.
-        Where it changes a file's bytes, those are what is stored and what
-        the checksum addresses; the sample records ``canonicalised`` and the
-        original's ``source_checksum``. Omitted — which is every media whose
-        type does not override it — no file is read at all.
+        than resolved here. Where it changes a file's bytes, those are what
+        is stored and what the checksum addresses; the sample records
+        ``canonicalised`` and the original's ``source_checksum``. Omitted, no
+        file is read at all. See ``docs/adr/0010``.
 
-        The whole batch is one transaction — a commit per file costs an
-        fsync each and turns an import into a crawl — so ``on_sample`` is how
-        a caller reports progress without breaking that up.
+        The whole batch is one transaction; ``on_sample`` is how a caller
+        reports progress without breaking that up. See ``docs/adr/0032``.
         """
         ids: list[int] = []
         with TemporaryDirectory(prefix="strata-canonical-") as scratch, self.engine.begin() as conn:
@@ -286,14 +269,12 @@ class Catalog:
         ``given`` is a split the corpus arrived with, read off a metadata
         key: the samples it names are fixed on their side before anything
         is drawn, and the rest are drawn by ratio. A given side that
-        contradicts an inherited one is refused, since a model warm-started
-        under this name may have trained on what would now be held out;
-        ``inherit=False`` is how to say that is intended.
+        contradicts an inherited one is refused.
 
         ``inherit=False`` re-splits: every side is drawn afresh, under this
         call's grouping and seed, and the version records that its sides
         start here. A warm start never reaches back past such a version.
-        See ``docs/adr/0003``.
+        See ``docs/adr/0024``.
         """
         if sample_ids is None:
             if collections is None:
@@ -379,15 +360,12 @@ class Catalog:
     ) -> dict[str, Path]:
         """Files on this host for these samples, fetching what is missing.
 
-        For work that is not a dataset — ranking a review pool means scoring
-        every unlabelled sample, and those are by definition in no dataset
-        version. The cache is content-addressed, so a sample already pulled
-        for a dataset is already here, and a sample pulled for this is there
-        for the next one.
+        For work that is not a dataset, such as scoring a review pool. The
+        cache is content-addressed and shared with :meth:`materialise`. See
+        ``docs/adr/0002``.
 
         Returns only what the catalog knows. A checksum it has never seen is
-        absent rather than an error, because the caller asked about samples
-        and is entitled to hear that one is not among them.
+        absent rather than an error.
         """
         cache = Path(cache)
         paths: dict[str, Path] = {}
@@ -424,10 +402,8 @@ class Catalog:
         by checksum, so re-materialising after a labelling round rewrites the
         manifest and copies nothing.
 
-        ``on_progress(done, total)`` is called as blobs land. It exists
-        because this stopped being instant: linking local files is over
-        before anyone looks, but pulling shards out of a bucket is minutes
-        of silence, and silence is indistinguishable from a hang.
+        ``on_progress(done, total)`` is called as blobs land. See
+        ``docs/adr/0031``.
 
         ``cache`` is a directory of blobs by checksum, consulted before the
         backend and filled from it. Successive versions of a dataset share
@@ -448,10 +424,8 @@ class Catalog:
         info = self.datasets.info(dataset_id)
         rows = self.datasets.members(dataset_id, info.label_set_id)
 
-        # A member whose feature is under dispute is left out: two people
-        # answered the label set it reads from differently, and a feature
-        # is something a model is told as a fact. Named in the manifest so
-        # the omission is visible, and back in once someone settles it.
+        # A member whose feature is under dispute is left out and named in
+        # the manifest. docs/adr/0011
         disputed = self._disputed_features(features, [row.id for row in rows])
         left_out = [row.checksum for row in rows if row.id in disputed]
         rows = [row for row in rows if row.id not in disputed]
@@ -480,9 +454,7 @@ class Catalog:
                     features=resolved.get(row.id, {}),
                     source=row.source,
                     batch=row.batch,
-                    # A person's answer is a reviewed one, and a confirmed
-                    # import is written as a person's answer, so the source
-                    # says it: an import nobody has looked at stays import.
+                    # Reviewed is derived from the source. docs/adr/0027
                     reviewed=None if row.source is None else row.source == t.HUMAN,
                     value=(
                         VALUE.validate_python(row.value)
@@ -549,9 +521,8 @@ class Catalog:
     ) -> dict[int, dict]:
         """Read each declared feature for each sample.
 
-        One query per declaration rather than per sample: a review pool is
-        tens of thousands of samples and a round trip each would dwarf the
-        round.
+        One query per declaration rather than per sample. See
+        ``docs/adr/0032``.
 
         A sample the declaration does not cover is simply absent from its
         entry. Filling in a default would be inventing an answer, and the

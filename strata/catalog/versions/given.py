@@ -1,17 +1,10 @@
 """A split a corpus arrived with, read off a metadata key.
 
-A public dataset comes divided — ``train`` and ``test``, sometimes ``dev``
-— and results are published on its test set. To be comparable with them a
-version has to hold out exactly those samples and never train on them.
 The division is recorded once, at ingest, as a metadata key on each
 sample; this says which of that key's values are holdout and which are
-validation. Everything else is drawn by ratio as usual, since a corpus
-with no ``dev`` still needs a validation side.
-
-Given sides are fixed before anything is drawn, and win over grouping: a
-benchmark that cuts a group is reproduced, not corrected, because
-matching its split is the whole point. How many groups it cut is counted
-and reported.
+validation. Everything else is drawn by ratio as usual. Given sides are
+fixed before anything is drawn, and win over grouping: a group they cut is
+reproduced, not corrected, and counted. See ``docs/adr/0024``.
 """
 
 from collections.abc import Mapping

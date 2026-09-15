@@ -126,8 +126,7 @@ class Datasets:
         Exactly this: the same members, the same answers about them, the
         same ratios asked for, the same grouping respected, the same split
         given — and, for a freeze that re-splits, a latest version that
-        re-split itself from the same seed, since one that inherited, or
-        drew otherwise, holds other sides. See ``docs/adr/0003``.
+        re-split itself from the same seed. See ``docs/adr/0024``.
         """
         latest = conn.execute(
             select(
@@ -147,10 +146,7 @@ class Datasets:
         ).first()
         if latest is None:
             return None
-        # Null is unknown rather than equal: a version frozen before this
-        # column existed cannot say what answers it holds, so it cannot
-        # claim to hold these. The cost is one extra version per project on
-        # upgrade, which is visible; the alternative is silent staleness.
+        # Null is unknown rather than equal. docs/adr/0024
         if digest is not None and latest.annotation_digest != digest:
             return None
         if val_ratio is not None and latest.val_ratio != val_ratio:
@@ -177,8 +173,8 @@ class Datasets:
         """How many of a version's groups have members on more than one side.
 
         Zero unless a split the corpus arrived with put them there: the
-        draw keeps a group whole, and a benchmark's division is reproduced
-        rather than corrected. Reported so the number is read knowing it.
+        draw keeps a group whole, and a given division is reproduced rather
+        than corrected. See ``docs/adr/0024``.
         """
         if group_by is None:
             return 0
@@ -194,9 +190,7 @@ class Datasets:
         ``name``, and the version those sides descend from.
 
         The second is the latest version's own ``sides_from_version``, or
-        its number where it recorded none: a version frozen before this
-        was recorded started, as far as anyone can tell, a lineage of its
-        own.
+        its number where it recorded none. See ``docs/adr/0024``.
         """
         previous = conn.execute(
             select(t.dataset.c.id, t.dataset.c.version, t.dataset.c.sides_from_version)
@@ -244,7 +238,7 @@ class Datasets:
         seed: int | None = None,
         given_split: dict | None = None,
     ) -> int:
-        """Write a version and its members. One statement per chunk of members."""
+        """Write a version and its members. One statement per chunk. See ``docs/adr/0032``."""
         dataset_id = conn.execute(
             insert(t.dataset).values(
                 name=name,

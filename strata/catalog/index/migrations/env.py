@@ -1,10 +1,9 @@
 """Alembic environment for the catalog index.
 
-There is no ``alembic.ini``: the URL comes from where every other reader of
-a catalog gets it: the ``[catalog]`` tables of ``config.toml`` — the file
-``$STRATA_CONFIG`` names, or ``./config.toml`` — and their default, or the
-one named with ``-x catalog=<name>``. The password comes from
-``$PGPASSWORD``, as it does everywhere.
+There is no ``alembic.ini``: the URL comes from the ``[catalog]`` tables of
+``config.toml`` — the file ``$STRATA_CONFIG`` names, or ``./config.toml`` —
+and their default, or the one named with ``-x catalog=<name>``. The
+password comes from ``$PGPASSWORD``. See ``docs/adr/0018``.
 
 ``$STRATA_CATALOG_URL``, or ``$STRATA_CATALOG_ROOT`` for a SQLite directory,
 points a run at one database directly, which is how a test migrates a

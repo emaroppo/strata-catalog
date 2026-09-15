@@ -1,14 +1,12 @@
 """Annotations: what was said about a sample, by whom, and what was said before.
 
 Append-only. A write never changes a row: it stamps the current one as
-superseded and adds a new one, so the catalog remembers what it used to
-say. Writes honour :data:`tables.AUTHORITY`: a write never replaces an
-answer from a source that outranks it. Unlabelled is the absence of a
-current row, so returning a sample to the queue stamps one and writes
-nothing. The class index follows the current row through the indexing
-contract in :mod:`strata.labels`. See ``docs/adr/0009``. Disputes live in
-:mod:`conflicts`; the reads a version or a feature makes over answers live
-in :mod:`answers`.
+superseded and adds a new one. Writes honour :data:`tables.AUTHORITY`: a
+write never replaces an answer from a source that outranks it. Unlabelled
+is the absence of a current row. The class index follows the current row
+through the indexing contract in :mod:`strata.labels`. See
+``docs/adr/0027``. Disputes live in :mod:`conflicts`; the reads a version
+or a feature makes over answers live in :mod:`answers`.
 """
 
 import json
@@ -88,8 +86,7 @@ class Annotations:
         Returns whether it was recorded: not when a source outranking this
         one already answered (see :data:`tables.AUTHORITY`). ``batch``
         names the import this arrived in; a write that names none inherits
-        the batch of the answer it replaces, so a person's confirmation or
-        correction of an import still says which import.
+        the batch of the answer it replaces. See ``docs/adr/0027``.
         """
         _, schema = self._schema(label_set_id)
         schema.validate_value(value)
@@ -191,9 +188,9 @@ class Annotations:
     def unskip(self, label_set_id: int, sample_ids: Iterable[int]) -> int:
         """Return skipped samples to the queue; returns how many moved.
 
-        Stamps the skip as superseded with nothing after it, since
-        unlabelled is the absence of a current row; the skip stays in the
-        history. Anything annotated is left alone. See ``docs/adr/0009``.
+        Stamps the skip as superseded with nothing after it; the skip stays
+        in the history. Anything annotated is left alone. See
+        ``docs/adr/0027``.
         """
         moved = 0
         with self.engine.begin() as conn:
@@ -379,7 +376,7 @@ class Annotations:
         Per sample: the latest imported answer, and what stands now. Still
         the import, nobody has looked. A person's answer after it, equal in
         value, is an acceptance; a different one, or a skip, a correction.
-        Read from the history, which is what the history is for.
+        See ``docs/adr/0027``.
         """
         with self.engine.connect() as conn:
             rows = conn.execute(

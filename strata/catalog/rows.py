@@ -2,8 +2,7 @@
 
 A caller never sees a raw database row; it sees one of the records here.
 And every query over samples names the collections it draws from, through
-:func:`scoped`, so "all of it" is a thing you choose rather than a thing
-you get by omission.
+:func:`scoped`. See ``docs/adr/0022``.
 """
 
 from dataclasses import dataclass, field
@@ -21,10 +20,8 @@ from .storage.blobs import Location
 SCHEMA = TypeAdapter(AnySchema)
 VALUE = TypeAdapter(AnyValue)
 
-#: Every collection, said out loud. A query has to name what it wants —
-#: forgetting to scope one is how a project's review queue fills with
-#: another project's data — so this exists to make "all of it" a thing you
-#: choose rather than a thing you get by omission.
+#: Every collection, said out loud. A query has to name what it wants. See
+#: docs/adr/0022.
 EVERYTHING = "*"
 
 
@@ -45,12 +42,8 @@ class SampleRow:
     location: Location
     media: str
     subtype: str
-    #: Out of comparison, and therefore out of the generated hash. A frozen
-    #: dataclass hashes every field it compares, and a dict cannot be
-    #: hashed — so a row carrying metadata could not be put in a set or used
-    #: as a key at all. It stayed usable only while every sample had none.
-    #: Excluding it is also the truer reading: two rows for the same sample
-    #: are the same sample, whatever is recorded about where it came from.
+    #: Out of comparison, and therefore out of the generated hash: two rows
+    #: for the same sample are the same sample. See docs/adr/0001.
     metadata: dict | None = field(default=None, compare=False)
 
 
@@ -79,9 +72,7 @@ class AnnotateReport(NamedTuple):
 def chunks(items: list, size: int = 500):
     """SQLite caps parameters per statement, and a review pool is past it.
 
-    The cap depends on the interpreter: an apt-installed Python allows
-    250,000 bound parameters and a uv-managed one 32,766, so a corpus that
-    held fine on one machine failed on another.
+    See ``docs/adr/0032``.
     """
     for start in range(0, len(items), size):
         yield items[start : start + size]
@@ -90,13 +81,10 @@ def chunks(items: list, size: int = 500):
 def within(collections) -> ColumnElement[bool] | None:
     """A condition matching samples in any of ``collections``.
 
-    ``None`` when the answer is everything, so a caller can drop the join
-    entirely rather than filter on a tautology.
+    ``None`` when the answer is everything, so a caller can drop the join.
 
     Selecting a collection selects what is under it: ``sat_images`` covers
-    ``sat_images/2024`` but never ``sat_images_old``, which a bare prefix
-    match would swallow. That distinction lives here rather than at each
-    call site.
+    ``sat_images/2024`` but never ``sat_images_old``. See ``docs/adr/0022``.
     """
     names = [collections] if isinstance(collections, str) else list(collections)
     if names == [EVERYTHING]:
@@ -133,11 +121,7 @@ def current():
 def scoped(stmt, collections):
     """Restrict a sample query to the collections a caller named.
 
-    An EXISTS rather than a join, because a sample in three collections
-    would otherwise come back three times and need a DISTINCT to fix —
-    and Postgres cannot take DISTINCT over a json column at all, so the
-    obvious shape fails on one dialect and silently duplicates on the
-    other.
+    An EXISTS rather than a join. See ``docs/adr/0021``.
     """
     condition = within(collections)
     if condition is None:

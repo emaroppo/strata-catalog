@@ -3,11 +3,8 @@
 Three of them. ``dataset`` freezes a version, ``materialise`` puts it on
 disk, and ``split`` decides — or, by default, reads — which side each
 sample is on. Each takes a request and a context and returns a record that
-names what it made by identity: a dataset id, a directory. Nothing in a
-record is large, so the record can sit in a ledger whole.
-
-The CLI calls these and renders what comes back; the orchestrator calls
-them from a config. Neither has a second implementation.
+names what it made by identity: a dataset id, a directory. See
+``docs/adr/0030``.
 """
 
 from collections.abc import Callable
@@ -39,7 +36,7 @@ Side = Literal["train", "val", "holdout"]
 
 
 class Strict(BaseModel):
-    """Unknown keys are an error; a misspelled one would silently do nothing."""
+    """Unknown keys are an error. See ``docs/adr/0030``."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -76,6 +73,7 @@ class DatasetRequest(Strict):
     group_by: str | None = None
     #: False re-splits from nothing rather than keeping the previous
     #: version's sides; the version records it, and a warm start stops there.
+    #: See docs/adr/0024.
     inherit: bool = True
     #: A split the corpus arrived with: the metadata key naming each
     #: sample's set, and which names are holdout and which val. The samples
@@ -96,7 +94,7 @@ class DatasetRecord(Strict):
     #: How many samples' sides the corpus gave rather than the draw.
     given: int = 0
     #: How many groups the given sides cut across. Reproduced rather than
-    #: corrected, and counted so the number is read knowing it.
+    #: corrected, and counted. See docs/adr/0024.
     groups_cut: int = 0
 
 
@@ -185,10 +183,8 @@ def materialise(request: MaterialiseRequest, context: Context) -> MaterialiseRec
     )
     manifest = result.manifest
     if context.on_progress is not None:
-        # One last tick, whichever way the version was obtained. A version
-        # already on disk fetches nothing, and a local backend links rather
-        # than downloads — so a caller watching ticks would never learn that
-        # materialising was over, and would keep saying so while the GPU ran.
+        # One last tick, whichever way the version was obtained, so a caller
+        # watching ticks learns that materialising is over. docs/adr/0031
         context.on_progress(len(manifest.samples), len(manifest.samples))
     return MaterialiseRecord(
         directory=result.directory,
@@ -211,14 +207,12 @@ def materialise(request: MaterialiseRequest, context: Context) -> MaterialiseRec
 class SplitRequest(Strict):
     """Which side each sample is on, read from the version or drawn afresh.
 
-    Without a seed the sides are the ones the catalog's version carries —
-    the default, and what makes trials comparable. With one, the sides are
-    drawn again from nothing and written into a copy of the directory; the
-    version on disk is never rewritten, since the catalog reuses it by
-    name. ``group_by`` names the metadata key whose values stay on one
-    side in that draw, which need not be the key the version was frozen
-    under: a directory carries every sample's metadata, so it can be split
-    by video for one study and by actor for another.
+    Without a seed the sides are the ones the catalog's version carries.
+    With one, the sides are drawn again from nothing and written into a
+    copy of the directory; the version on disk is never rewritten.
+    ``group_by`` names the metadata key whose values stay on one side in
+    that draw, which need not be the key the version was frozen under. See
+    ``docs/adr/0024``.
     """
 
     dataset_dir: Path
@@ -232,9 +226,8 @@ class SplitRecord(Strict):
     """Where the sides are, and how many samples landed on each.
 
     The realisation itself — which sample landed where — is not here. It
-    is the manifest in ``directory``, and the run store records it beside
-    the run that trained on it, as what that run saw. A record names what
-    it made and never embeds it.
+    is the manifest in ``directory``. A record names what it made and never
+    embeds it. See ``docs/adr/0030``.
     """
 
     directory: Path
@@ -271,8 +264,7 @@ def split(request: SplitRequest, context: Context) -> SplitRecord:
         seed=request.seed,
     )
     del achieved  # recomputed from the sides by apply_sides, the same way
-    # Beside the version, named for the draw, so two seeds are two
-    # directories and the same seed is the same one.
+    # Beside the version, named for the draw. docs/adr/0024
     tag = short_hash(
         {
             "seed": request.seed,
@@ -309,11 +301,9 @@ def apply_sides(
     """A copy of ``source`` whose manifest puts each sample on the side given, by position.
 
     Used by ``split`` for a draw it made and by the modelling host for a
-    draw a caller sent, so the same code writes the same directory either
-    way. Beside the version, named for ``tag``: the same draw is the same
-    directory and another draw is another. The version on disk is never
-    rewritten, since the catalog reuses it by name. ``group_by`` is what the
-    copy's manifest says its sides respect.
+    draw a caller sent. Beside the version, named for ``tag``; the version
+    on disk is never rewritten. ``group_by`` is what the copy's manifest
+    says its sides respect. See ``docs/adr/0024``.
     """
     if len(sides) != len(manifest.samples):
         raise CatalogError(

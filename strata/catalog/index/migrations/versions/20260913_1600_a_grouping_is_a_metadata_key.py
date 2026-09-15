@@ -4,13 +4,11 @@ Revision ID: 2f8c41b6e0d9
 Revises: 103841d7ceaf
 
 ``sample.group_id`` was one grouping, filled at ingest by the sample
-type's rule and respected by every split whether asked or not. A grouping
-is now a metadata key — ``video`` for frames, or any key a project writes
-— and a version is frozen with ``group_by`` naming the one it respects,
+type's rule and respected by every split. A grouping is now a metadata
+key, and a version is frozen with ``group_by`` naming the one it respects,
 or none. Every existing group id moves into the sample's metadata under
-the key its type would write today, so nothing already ingested loses
-its grouping; a version frozen before this records no ``group_by``, which
-is true — it was grouped by a column that no longer exists.
+the key its type would write today; a version frozen before this records
+no ``group_by``. See ``docs/adr/0023``.
 """
 
 from __future__ import annotations
