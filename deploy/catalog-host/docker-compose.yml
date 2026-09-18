@@ -5,8 +5,16 @@
 # for object storage. This is the deployment those stand in for, and the two
 # should never be confused for each other.
 #
-# Garage is not here. It runs on this host already and owns its own data;
-# bringing it under this file would mean this file could take it down.
+# Garage is not here. It owns its own data, and bringing it under this file
+# would mean this file could take it down. start-garage.sh beside this file
+# runs one; a host that has one already points config.toml at it.
+
+# Pinned, so the database volume is catalog-host_catalog-db wherever the
+# checkout sits. Without it the project is named after this directory, and a
+# checkout moved or renamed starts on a new, empty volume while the old one
+# holds the catalog. A host set up under another name keeps it by setting
+# COMPOSE_PROJECT_NAME in .env, which takes precedence over this.
+name: catalog-host
 
 services:
   catalog-db:
@@ -32,8 +40,10 @@ services:
     # here depends on a registry or on a prebuilt artifact. A host that
     # already has the image tagged this way uses it and skips the build —
     # which is what lets a machine that cannot reach Docker Hub run the
-    # thing anyway, by having the image loaded from elsewhere.
+    # thing anyway, by having the image loaded from elsewhere. Never pulled:
+    # no registry has it, and asking one first only prints its refusal.
     image: strata-blobs:latest
+    pull_policy: never
     build:
       # The strata-catalog repository's root.
       context: ../..

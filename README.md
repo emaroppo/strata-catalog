@@ -135,8 +135,49 @@ strata-catalog-migrate -x catalog=NAME upgrade head
 **The blob server**, `strata-blobs`, serves one sample per request over a
 signed URL naming its checksum, which is how a reviewer's browser reaches
 samples without a mount. Its container and the catalog host's compose file
-are under `deploy/catalog-host/`, with `new-catalog.sh` to make a new catalog's
-database, bucket and key grants.
+are under `deploy/catalog-host/`.
+
+## A catalog host
+
+A machine holding the shared index and the bucket and serving blobs:
+Postgres and the blob server under Docker, Garage beside them. Everything is
+under `deploy/catalog-host/`, run from a clone of this repository alone, on
+any 64-bit Linux, a Raspberry Pi 4 with 4 GB included.
+
+Needs `git`, `openssl` and Docker Engine with its compose plugin, usable
+**without sudo**: the scripts run `docker` as you, so add yourself to its
+group (`sudo usermod -aG docker $USER`) and log in again. They check this
+first and say so.
+
+```bash
+./deploy/catalog-host/start-garage.sh     # skip if this host already runs Garage
+./deploy/catalog-host/bootstrap-env.sh    # .env and config.toml, the blob server's read-only key
+cd deploy/catalog-host
+docker compose up -d catalog-db
+STRATA_WRITE_KEY=strata-write ./new-catalog.sh demo   # a catalog: database, bucket, grants
+```
+
+- `start-garage.sh` runs a single-node Garage with fresh secrets, the bucket
+  `config.toml` names, and a read-write key for the machine that ingests,
+  whose secret it writes to `~/garage/<key>.key` rather than printing.
+- `new-catalog.sh` prints the `[catalog.<name>]` tables to add, one for this
+  host's `config.toml` and one for the machines that use it. It names this
+  host by its first address; set `STRATA_CATALOG_HOST` if they reach it by
+  another. Set `default` to the new catalog in this host's `config.toml`.
+- A new catalog is an empty index until the first ingest into it, from a
+  machine configured for it with the write key, `PGPASSWORD` and
+  `STRATA_BLOB_SECRET` from `.env`. The blob server refuses an empty index
+  and says so; after that ingest, `docker compose up -d blobs`, and
+  `/healthz` on port 8081 names the catalog it serves.
+- The containers restart on their own after a reboot.
+- **After updating this repository, rebuild:** `docker compose build
+  --no-cache blobs`, then `docker compose up -d blobs`. The image is never
+  pulled and never rebuilt on its own, so a host that has one keeps
+  running it.
+- The compose project is pinned as `catalog-host`, so the database volume
+  does not change with where the checkout sits. A host first set up under
+  another name keeps its volume with `COMPOSE_PROJECT_NAME=<that name>` in
+  `.env`.
 
 ## Stages
 

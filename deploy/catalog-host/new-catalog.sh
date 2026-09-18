@@ -5,7 +5,7 @@
 #
 # A catalog is an index and a bucket; here both are named after it. This
 # makes both, gives the read-only keys the blob server and the modelling host
-# use read access to the bucket, and the laptop's key read and write, then
+# use read access to the bucket, and the ingesting machine's key read and write, then
 # prints the [catalog.<name>] tables to add to each machine's config.toml.
 # Pointing the setup at the new catalog is then making it each file's
 # default, restarting the two services, and running catalog-check.
@@ -13,7 +13,9 @@
 #   STRATA_SERVE_KEY   the blob server's read-only key   (default strata-serve)
 #   STRATA_GPU_KEY     the modelling host's read-only key (default strata-gpu)
 #   STRATA_WRITE_KEY   the key the laptop ingests with   (none by default)
-#   STRATA_CATALOG_HOST  how other machines reach this one (default: hostname)
+#   STRATA_CATALOG_HOST  how other machines reach this one (default: this host's
+#                        first address, since a LAN without DNS cannot resolve
+#                        its name; else its name)
 #
 # Keys that do not exist are reported and skipped, never created: a key's
 # secret prints once, at creation, so each is made where it is captured.
@@ -24,6 +26,7 @@ set -euo pipefail
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 # shellcheck source=garage.sh
 source "$here/garage.sh"
+require_docker
 
 name=${1:-}
 # The strictest of the two rulebooks: S3 bucket names, which Postgres also
@@ -38,7 +41,8 @@ db_port=${STRATA_DB_PORT:-5432}
 serve_key=${STRATA_SERVE_KEY:-strata-serve}
 gpu_key=${STRATA_GPU_KEY:-strata-gpu}
 write_key=${STRATA_WRITE_KEY:-}
-host=${STRATA_CATALOG_HOST:-$(hostname)}
+host=${STRATA_CATALOG_HOST:-$(hostname -I 2>/dev/null | awk '{print $1}')}
+host=${host:-$(hostname)}
 compose="docker compose -f $here/docker-compose.yml"
 
 # -- the index ------------------------------------------------------------
@@ -64,7 +68,7 @@ echo "Garage: $garage"
 if $garage bucket info "$name" >/dev/null 2>&1; then
     echo "Bucket $name already exists."
 else
-    $garage bucket create "$name"
+    $garage bucket create "$name" > /dev/null
     echo "Created bucket $name."
 fi
 
@@ -72,7 +76,7 @@ grant() {
     local key=$1
     shift
     if $garage key info "$key" >/dev/null 2>&1; then
-        $garage bucket allow "$@" "$name" --key "$key"
+        $garage bucket allow "$@" "$name" --key "$key" > /dev/null
         echo "  $key: $* on $name"
     else
         echo "  $key: no such key — skipped" >&2
@@ -83,7 +87,7 @@ grant "$gpu_key" --read
 if [ -n "$write_key" ]; then
     grant "$write_key" --read --write
 else
-    echo "  no STRATA_WRITE_KEY: give the laptop's key write access yourself" >&2
+    echo "  no STRATA_WRITE_KEY: give the ingesting machine's key write access yourself" >&2
 fi
 
 cat <<EOF
