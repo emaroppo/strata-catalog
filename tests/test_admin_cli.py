@@ -6,7 +6,7 @@ import pytest
 
 from strata.catalog import EVERYTHING, Catalog
 from strata.catalog.cli import main
-from strata.labels import Choices, ClassificationSchema
+from strata.contracts import Choices, ClassificationSchema
 
 
 @pytest.fixture

@@ -4,7 +4,7 @@ import pytest
 
 from strata.catalog import EVERYTHING
 from strata.catalog.versions.features import FeatureError, FeatureSpec
-from strata.labels import Choices, ClassificationSchema
+from strata.contracts import Choices, ClassificationSchema
 
 
 def test_a_declaration_must_name_its_source():
@@ -31,7 +31,7 @@ def test_a_metadata_feature_reaches_the_manifest(catalog, files, label_set, tmp_
         tmp_path / "out",
         features=[FeatureSpec(name="species", source="metadata", ref="species")],
     )
-    from strata.labels import Manifest
+    from strata.contracts import Manifest
 
     manifest = Manifest.model_validate_json((out / "manifest.json").read_text())
 
@@ -53,7 +53,7 @@ def test_a_label_set_feature_reaches_the_manifest(catalog, files, label_set, tmp
         tmp_path / "out",
         features=[FeatureSpec(name="species", source="label_set", ref="species")],
     )
-    from strata.labels import Manifest
+    from strata.contracts import Manifest
 
     manifest = Manifest.model_validate_json((out / "manifest.json").read_text())
 
@@ -77,7 +77,7 @@ def test_a_sample_the_feature_does_not_cover_is_left_absent(catalog, files, labe
         tmp_path / "out",
         features=[FeatureSpec(name="species", source="label_set", ref="species")],
     )
-    from strata.labels import Manifest
+    from strata.contracts import Manifest
 
     manifest = Manifest.model_validate_json((out / "manifest.json").read_text())
     covered = [s for s in manifest.samples if s.features]

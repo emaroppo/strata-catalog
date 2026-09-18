@@ -198,7 +198,7 @@ def test_spans_written_with_one_label_are_rewritten_to_labels(url, monkeypatch):
 
     from sqlalchemy import text
 
-    from strata.labels import Spans
+    from strata.contracts import Spans
 
     monkeypatch.setenv("STRATA_CATALOG_URL", url)
     command.upgrade(_config(url), "7d3f0c1a9b2e")

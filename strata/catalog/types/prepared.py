@@ -12,7 +12,7 @@ from pathlib import Path
 
 from pydantic import BaseModel, Field
 
-from strata.labels import AnyValue
+from strata.contracts import AnyValue
 
 #: The index's filename, at the root of the prepared corpus.
 PREPARED_NAME = "prepared.json"

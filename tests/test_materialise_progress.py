@@ -9,7 +9,7 @@ interface rather than a nicety.
 import pytest
 
 from strata.catalog import EVERYTHING
-from strata.labels import Choices, ClassificationSchema
+from strata.contracts import Choices, ClassificationSchema
 
 
 @pytest.fixture

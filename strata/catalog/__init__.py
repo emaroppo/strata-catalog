@@ -2,7 +2,7 @@
 
 The durable asset, and it imports no tool. See ``docs/adr/0015``.
 
-**May import:** ``labels``, the standard library, and its own optional
+**May import:** ``contracts``, the standard library, and its own optional
 storage drivers.
 
 **May not import:** ``strata.labeller``, ``modelling``, Label Studio, or any ML

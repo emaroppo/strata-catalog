@@ -5,7 +5,7 @@ import json
 from sqlalchemy import insert, select, update
 from sqlalchemy.engine import Engine
 
-from strata.labels import AnySchema
+from strata.contracts import AnySchema
 
 from ..rows import SCHEMA, CatalogError
 from . import tables as t

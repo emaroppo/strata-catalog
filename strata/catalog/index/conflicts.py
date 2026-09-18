@@ -9,7 +9,7 @@ import json
 from sqlalchemy import and_, delete, insert, select, update
 from sqlalchemy.engine import Engine
 
-from strata.labels import AnyValue
+from strata.contracts import AnyValue
 
 from ..rows import VALUE, live, scoped
 from . import tables as t

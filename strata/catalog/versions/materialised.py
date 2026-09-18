@@ -10,7 +10,7 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import NamedTuple
 
-from strata.labels import MANIFEST_NAME, Manifest, ManifestFormatError
+from strata.contracts import MANIFEST_NAME, Manifest, ManifestFormatError
 
 from .features import FeatureSpec
 

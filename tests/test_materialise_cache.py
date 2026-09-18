@@ -11,7 +11,7 @@ import hashlib
 import pytest
 
 from strata.catalog import EVERYTHING, blob_path
-from strata.labels import Choices, ClassificationSchema
+from strata.contracts import Choices, ClassificationSchema
 
 
 class Refuses:

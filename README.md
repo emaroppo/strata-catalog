@@ -12,7 +12,7 @@ uv add "strata-catalog[s3]"              # blobs as tar shards in a bucket
 uv add "strata-catalog[serve]"           # the blob server
 ```
 
-Depends on `strata-labels`, `strata-common[migrations]`, SQLAlchemy and
+Depends on `strata-contracts`, `strata-common[migrations]`, SQLAlchemy and
 alembic. May not import `strata-modelling`, `strata-labeller` or Label
 Studio.
 
@@ -165,7 +165,7 @@ normalisation (0010), a feature is a role (0011), and signed URLs (0013).
 ## Tests
 
 ```bash
-.github/sibling-wheels.sh labels common   # the strata packages this one needs, until they are on an index
+.github/sibling-wheels.sh contracts common   # the strata packages this one needs, until they are on an index
 uv sync --find-links dist --group dev --extra all
 uv run pytest
 ```

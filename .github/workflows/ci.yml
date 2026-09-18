@@ -19,7 +19,7 @@ jobs:
       - uses: astral-sh/setup-uv@v5
         with:
           enable-cache: true
-      - run: .github/sibling-wheels.sh labels common
+      - run: .github/sibling-wheels.sh contracts common
       - run: uv sync --no-cache --find-links dist --group dev --extra all
       - run: uv run --no-sync ruff check .
       - run: uv run --no-sync ruff format --check .
@@ -31,7 +31,7 @@ jobs:
       - uses: astral-sh/setup-uv@v5
         with:
           enable-cache: true
-      - run: .github/sibling-wheels.sh labels common
+      - run: .github/sibling-wheels.sh contracts common
       - run: uv sync --no-cache --find-links dist --group dev --extra all
       - run: uv run --no-sync pytest -q
 
@@ -42,7 +42,7 @@ jobs:
       - uses: astral-sh/setup-uv@v5
         with:
           enable-cache: true
-      - run: .github/sibling-wheels.sh labels common
+      - run: .github/sibling-wheels.sh contracts common
       - run: uv sync --no-cache --find-links dist --group dev --extra all
       - run: uv run --no-sync pyright
 
@@ -68,7 +68,7 @@ jobs:
       - uses: astral-sh/setup-uv@v5
         with:
           enable-cache: true
-      - run: .github/sibling-wheels.sh labels common
+      - run: .github/sibling-wheels.sh contracts common
       - run: uv sync --no-cache --find-links dist --group dev --extra postgres
       - run: uv run --no-sync pytest tests/test_postgres.py -q
         env:
@@ -86,7 +86,7 @@ jobs:
       - uses: astral-sh/setup-uv@v5
         with:
           enable-cache: true
-      - run: .github/sibling-wheels.sh labels common
+      - run: .github/sibling-wheels.sh contracts common
       - run: uv build --wheel --out-dir dist .
       - run: uv venv --python 3.13 standalone
       - name: install the package alone

@@ -16,7 +16,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from strata.common.canonical import short_hash
 from strata.common.stages import Stage
-from strata.labels import MANIFEST_NAME, Manifest
+from strata.contracts import MANIFEST_NAME, Manifest
 
 from .catalog import Catalog
 from .rows import CatalogError

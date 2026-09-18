@@ -3,7 +3,7 @@
 # Built from this repository's root, which is the compose file's context:
 # the catalog comes from the checkout, and the two packages below it from
 # their repositories at STRATA_REF. Once they are published, the two URL
-# specs become plain pins: "strata-labels==0.1.0",
+# specs become plain pins: "strata-contracts==0.1.0",
 # "strata-common[migrations,service]==0.1.0".
 FROM python:3.13-slim
 
@@ -23,7 +23,7 @@ COPY . /src/catalog
 # Installed rather than mounted: the container should hold a fixed version,
 # not whatever the checkout happens to be at.
 RUN uv pip install --system --no-cache \
-      "strata-labels @ git+${STRATA_GIT}/strata-labels.git@${STRATA_REF}" \
+      "strata-contracts @ git+${STRATA_GIT}/strata-contracts.git@${STRATA_REF}" \
       "strata-common[migrations,service] @ git+${STRATA_GIT}/strata-common.git@${STRATA_REF}" \
       "/src/catalog[s3,postgres,serve]"
 

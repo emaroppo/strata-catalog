@@ -57,7 +57,7 @@ def test_a_copy_is_the_same_catalog(tmp_path):
 
 
 def _stocked(tmp_path):
-    from strata.labels import ClassificationSchema
+    from strata.contracts import ClassificationSchema
 
     catalog = Catalog.local(tmp_path / "catalog")
     root = tmp_path / "raw"
@@ -70,7 +70,7 @@ def _stocked(tmp_path):
 
 
 def test_a_conflict_keeps_both_answers(tmp_path):
-    from strata.labels import Choices
+    from strata.contracts import Choices
 
     catalog, sample_id, label_set_id = _stocked(tmp_path)
     catalog.annotations.annotate(sample_id, label_set_id, Choices(values=["cat"]))
@@ -91,7 +91,7 @@ def test_a_conflict_keeps_both_answers(tmp_path):
 
 
 def test_the_catalog_keeps_the_answer_it_had(tmp_path):
-    from strata.labels import Choices
+    from strata.contracts import Choices
 
     catalog, sample_id, label_set_id = _stocked(tmp_path)
     catalog.annotations.annotate(sample_id, label_set_id, Choices(values=["cat"]))
@@ -106,7 +106,7 @@ def test_the_catalog_keeps_the_answer_it_had(tmp_path):
 
 
 def test_answering_again_settles_it(tmp_path):
-    from strata.labels import Choices
+    from strata.contracts import Choices
 
     catalog, sample_id, label_set_id = _stocked(tmp_path)
     catalog.annotations.annotate(sample_id, label_set_id, Choices(values=["cat"]))
@@ -122,7 +122,7 @@ def test_answering_again_settles_it(tmp_path):
 
 
 def test_a_third_disagreement_replaces_the_second(tmp_path):
-    from strata.labels import Choices
+    from strata.contracts import Choices
 
     catalog, sample_id, label_set_id = _stocked(tmp_path)
     catalog.annotations.annotate(sample_id, label_set_id, Choices(values=["cat"]))

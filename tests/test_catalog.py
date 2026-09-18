@@ -5,7 +5,7 @@ import json
 import pytest
 
 from strata.catalog import EVERYTHING, CatalogError, SplitError
-from strata.labels import Choices, ClassificationSchema, Manifest, SchemaError
+from strata.contracts import Choices, ClassificationSchema, Manifest, SchemaError
 
 # ----------------------------------------------------------------------
 # Ingest
@@ -849,7 +849,7 @@ def test_a_label_set_keeps_whatever_kind_of_schema_it_is(tmp_path):
     schema was next used, not where it was made.
     """
     from strata.catalog import Catalog
-    from strata.labels import BBoxSchema, ClassificationSchema, SpanSchema
+    from strata.contracts import BBoxSchema, ClassificationSchema, SpanSchema
 
     catalog = Catalog.local(tmp_path / "catalog")
     for name, schema in [

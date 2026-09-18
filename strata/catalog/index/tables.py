@@ -103,7 +103,7 @@ label_set = Table(
     metadata,
     Column("id", Integer, primary_key=True),
     Column("name", String(255), nullable=False, unique=True),
-    # A strata.labels schema, serialized. Append-only by convention.
+    # A strata.contracts schema, serialized. Append-only by convention.
     # docs/adr/0005
     Column("schema", JSON, nullable=False),
     Column("created_at", DateTime, server_default=func.now()),
@@ -121,7 +121,7 @@ annotation = Table(
     Column("sample_id", ForeignKey("sample.id", ondelete="CASCADE"), nullable=False),
     Column("label_set_id", ForeignKey("label_set.id", ondelete="CASCADE"), nullable=False),
     Column("state", String(16), nullable=False),
-    # A strata.labels value, serialized. Null when skipped — there is no
+    # A strata.contracts value, serialized. Null when skipped — there is no
     # answer — and an empty value when a human looked and found nothing,
     # which is a real answer and must not be confused with the first.
     Column("value", JSON, nullable=True),
@@ -141,7 +141,7 @@ annotation = Table(
 
 
 #: Derived from ``annotation.value`` on every write, through the indexing
-#: contract in strata.labels. See docs/adr/0039.
+#: contract in strata.contracts. See docs/adr/0039.
 annotation_class = Table(
     "annotation_class",
     metadata,

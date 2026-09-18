@@ -16,7 +16,7 @@ import uuid
 import pytest
 
 from strata.catalog import EVERYTHING, Catalog, LocalBackend
-from strata.labels import Choices, ClassificationSchema
+from strata.contracts import Choices, ClassificationSchema
 
 
 def _default_url() -> str:
@@ -181,7 +181,7 @@ def test_a_grouped_split_holds(catalog, files, tmp_path):
         catalog.annotations.annotate_many(label_set_id, [(i, Choices(values=["a"])) for i in ids])
 
     dataset_id = catalog.create_dataset("d", label_set_id, collections=EVERYTHING, group_by="video")
-    from strata.labels import Manifest
+    from strata.contracts import Manifest
 
     directory = catalog.materialise(dataset_id, tmp_path / "out")
     manifest = Manifest.model_validate_json((directory / "manifest.json").read_text())
@@ -296,7 +296,7 @@ def test_copying_into_a_populated_index_is_refused(populated, catalog, files):
 
 def test_a_dataset_still_materialises_after_the_move(populated, catalog, tmp_path):
     from strata.catalog import copy_index
-    from strata.labels import Manifest
+    from strata.contracts import Manifest
 
     source, label_set_id, _ = populated
     copy_index(source, catalog)

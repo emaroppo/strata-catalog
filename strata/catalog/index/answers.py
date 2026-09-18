@@ -6,7 +6,7 @@ from collections.abc import Sequence
 
 from sqlalchemy import and_, select
 
-from strata.labels import AnySchema
+from strata.contracts import AnySchema
 
 from ..rows import VALUE, chunks, current
 from . import tables as t

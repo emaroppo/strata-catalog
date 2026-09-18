@@ -1,7 +1,7 @@
 """Every label type through the catalog.
 
 The catalog stores annotations it does not otherwise understand, so each
-type is checked here against the examples ``strata.labels`` ships: a type
+type is checked here against the examples ``strata.contracts`` ships: a type
 added there is covered here on the next upgrade, and fails until the
 catalog handles it. Six places once assumed classification, none of them
 raised, and each was found by hand.
@@ -9,8 +9,8 @@ raised, and each was found by hand.
 
 import pytest
 
-from strata.labels import MANIFEST_NAME, Manifest, SchemaError, Span, Spans, SpanSchema
-from strata.labels.examples import EXAMPLES
+from strata.contracts import MANIFEST_NAME, Manifest, SchemaError, Span, Spans, SpanSchema
+from strata.contracts.examples import EXAMPLES
 
 each_type = pytest.mark.parametrize("example", EXAMPLES, ids=lambda e: e.name)
 

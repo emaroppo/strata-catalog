@@ -14,7 +14,7 @@ from strata.catalog.stages import (
     materialise,
     split,
 )
-from strata.labels import MANIFEST_NAME, Choices, ClassificationSchema, Manifest
+from strata.contracts import MANIFEST_NAME, Choices, ClassificationSchema, Manifest
 
 
 @pytest.fixture

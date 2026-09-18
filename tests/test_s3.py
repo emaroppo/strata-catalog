@@ -242,7 +242,7 @@ def test_an_ingest_failure_leaves_no_rows_naming_a_missing_shard(tmp_path):
         catalog.ingest(paths, media="image")
 
     label_set_id = catalog.label_sets.create(
-        "x", __import__("strata.labels", fromlist=["C"]).ClassificationSchema()
+        "x", __import__("strata.contracts", fromlist=["C"]).ClassificationSchema()
     )
     assert catalog.samples.unlabelled(label_set_id, EVERYTHING) == []
 
@@ -254,7 +254,7 @@ def test_materialising_from_a_bucket_pulls_shards_not_members(store, tmp_path):
     lives in one shard should cost one object.
     """
     from strata.catalog import Catalog
-    from strata.labels import Choices, ClassificationSchema, Manifest
+    from strata.contracts import Choices, ClassificationSchema, Manifest
 
     backend = S3Backend(store, bucket="test", shard_bytes=1 << 20)
     catalog = Catalog.create(f"sqlite:///{tmp_path / 'index.db'}", backend)
@@ -294,7 +294,7 @@ def test_materialising_from_a_bucket_pulls_shards_not_members(store, tmp_path):
 
 def test_a_materialised_file_is_not_re_fetched(store, tmp_path):
     from strata.catalog import Catalog
-    from strata.labels import Choices, ClassificationSchema
+    from strata.contracts import Choices, ClassificationSchema
 
     backend = S3Backend(store, bucket="test", shard_bytes=1 << 20)
     catalog = Catalog.create(f"sqlite:///{tmp_path / 'index.db'}", backend)

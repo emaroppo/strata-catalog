@@ -12,7 +12,7 @@ from pydantic import TypeAdapter
 from sqlalchemy import and_, or_, select
 from sqlalchemy.sql import ColumnElement
 
-from strata.labels import AnySchema, AnyValue
+from strata.contracts import AnySchema, AnyValue
 
 from .index import tables as t
 from .storage.blobs import Location

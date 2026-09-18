@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import ClassVar
 
 from strata.common import plugins
-from strata.labels import AnyValue
+from strata.contracts import AnyValue
 
 from .prepared import PreparedIndex, PreparedSample, relative_key
 

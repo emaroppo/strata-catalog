@@ -11,7 +11,7 @@ import pytest
 
 from strata.catalog import EVERYTHING, ensure_materialised
 from strata.catalog.versions.features import FeatureSpec
-from strata.labels import MANIFEST_NAME, Choices
+from strata.contracts import MANIFEST_NAME, Choices
 
 
 @pytest.fixture

@@ -16,7 +16,7 @@ from sqlalchemy.engine import Engine
 
 from strata.common import database
 from strata.common.migrations import require_current, stamp_if_new
-from strata.labels import (
+from strata.contracts import (
     FILES_DIR,
     MANIFEST_FORMAT,
     MANIFEST_NAME,

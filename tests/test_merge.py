@@ -14,7 +14,7 @@ from strata.catalog import (
     copy_index,
     merge_annotations,
 )
-from strata.labels import BBoxSchema, Box, Boxes, Choices, ClassificationSchema
+from strata.contracts import BBoxSchema, Box, Boxes, Choices, ClassificationSchema
 
 
 def _catalog(tmp_path, name, files=("a.jpg", "b.jpg", "c.jpg")):

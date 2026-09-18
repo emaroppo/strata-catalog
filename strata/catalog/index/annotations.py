@@ -4,7 +4,7 @@ Append-only. A write never changes a row: it stamps the current one as
 superseded and adds a new one. Writes honour :data:`tables.AUTHORITY`: a
 write never replaces an answer from a source that outranks it. Unlabelled
 is the absence of a current row. The class index follows the current row
-through the indexing contract in :mod:`strata.labels`. See
+through the indexing contract in :mod:`strata.contracts`. See
 ``docs/adr/0027``. Disputes live in :mod:`conflicts`; the reads a version
 or a feature makes over answers live in :mod:`answers`.
 """
@@ -17,7 +17,7 @@ from datetime import datetime
 from sqlalchemy import and_, func, insert, select, update
 from sqlalchemy.engine import Engine
 
-from strata.labels import AnySchema, AnyValue
+from strata.contracts import AnySchema, AnyValue
 
 from ..rows import SCHEMA, VALUE, AnnotateReport, CatalogError, current
 from . import conflicts
