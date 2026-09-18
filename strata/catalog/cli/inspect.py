@@ -28,27 +28,16 @@ def _types(args) -> int:
     def render(entries):
         for e in entries:
             files = ", ".join(f".{x}" for x in e.extensions) or "-"
-            yield f"{e.name:<12} {e.media:<8} {e.subtype:<8} {files}"
+            requires = ", ".join(e.requires) or "-"
+            stored = "canonical" if e.canonical else "as is"
+            yield (
+                f"{e.name:<12} {e.media:<8} {e.subtype:<8} {stored:<10} "
+                f"requires {requires:<12} {files}"
+            )
         yield "Read from what is installed. A plugin registers here too; built-ins are reserved."
+        yield "Preparing a corpus in one of these shapes: strata-prepare preparers."
 
     _emit(args, types(), render)
-    return 0
-
-
-def _preparers(args) -> int:
-    from ..admin import preparers
-
-    def render(entries):
-        if not entries:
-            yield (
-                "None installed. A conversion is a plugin — it carries a decoder or a "
-                "parser, and a checkout with nothing to convert should not have to install one."
-            )
-            return
-        for e in entries:
-            yield f"{e.name:<12} reads {', '.join('.' + x for x in e.reads) or '-'} -> {e.produces}"
-
-    _emit(args, preparers(), render)
     return 0
 
 

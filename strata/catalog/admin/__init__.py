@@ -5,7 +5,7 @@ Copying, merging and repacking live in ``sync`` and ``storage``. See
 ``docs/adr/0030``.
 """
 
-from .installed import CatalogEntry, PreparerEntry, TypeEntry, catalogs, preparers, types
+from .installed import CatalogEntry, TypeEntry, catalogs, types
 from .probe import BlobProbe, IndexProbe, Probe, probe
 from .remove import RemoveReport, remove
 from .stats import LabelSetStats, Stats, stats
@@ -16,13 +16,11 @@ __all__ = [
     "CatalogEntry",
     "IndexProbe",
     "LabelSetStats",
-    "PreparerEntry",
     "Probe",
     "RemoveReport",
     "Stats",
     "TypeEntry",
     "catalogs",
-    "preparers",
     "probe",
     "redacted",
     "remove",

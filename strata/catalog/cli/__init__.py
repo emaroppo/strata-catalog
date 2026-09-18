@@ -6,7 +6,7 @@ from pathlib import Path
 
 from ..config import CatalogConfigError
 from ._shared import CONFIG, Refused
-from .inspect import _list, _preparers, _probe, _stats, _types
+from .inspect import _list, _probe, _stats, _types
 from .remove import _remove
 from .repack import _repack
 from .sync import _copy, _merge
@@ -38,11 +38,8 @@ def _parser() -> argparse.ArgumentParser:
     commands.add_parser("list", help="The catalogs this host is configured for").set_defaults(
         run=_list
     )
-    commands.add_parser("types", help="The sample types this catalog can ingest").set_defaults(
+    commands.add_parser("types", help="The sample types this catalog can take").set_defaults(
         run=_types
-    )
-    commands.add_parser("preparers", help="The conversions installed here").set_defaults(
-        run=_preparers
     )
     commands.add_parser("stats", help="What is in the catalog").set_defaults(run=_stats)
     commands.add_parser(

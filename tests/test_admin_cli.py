@@ -60,13 +60,16 @@ def test_a_credential_in_the_file_is_refused(tmp_path, capsys):
     assert "STRATA_S3_SECRET_KEY" in capsys.readouterr().err
 
 
-def test_types_and_preparers_read_what_is_installed(capsys):
+def test_types_read_what_is_installed_and_what_each_requires(capsys):
     code, out = run(capsys, "types")
     assert code == 0 and "image" in out and "frames" in out
     code, out = run(capsys, "--json", "types")
-    assert {e["name"] for e in json.loads(out)} >= {"image", "text", "frames"}
-    code, _ = run(capsys, "preparers")
-    assert code == 0
+    entries = {e["name"]: e for e in json.loads(out)}
+    assert set(entries) >= {"image", "text", "frames"}
+    # What a corpus of each must arrive with, and how its bytes are kept
+    assert entries["frames"]["requires"] == ["video"]
+    assert entries["image"]["requires"] == []
+    assert entries["text"]["canonical"] and not entries["image"]["canonical"]
 
 
 def test_stats_counts_samples_collections_and_classes(stocked, config, capsys):

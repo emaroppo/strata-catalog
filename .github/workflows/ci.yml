@@ -93,5 +93,5 @@ jobs:
         # set -f: the extras' brackets are not a glob.
         run: |
           set -f
-          uv pip install --no-cache --python standalone/bin/python --find-links dist strata-catalog[test,serve,s3] httpx pytest
+          uv pip install --no-cache --python standalone/bin/python --find-links dist strata-catalog[serve,s3] httpx pytest
       - run: standalone/bin/python -m pytest -q tests

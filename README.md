@@ -23,15 +23,26 @@ its bytes. Ingesting the same file twice under two names is one sample,
 and a reference written today still resolves after the bytes have moved
 from a directory into a tar in a bucket.
 
-**A type per sample, and types inherit.** `image`, `text` and `frames` are
-built in; a plugin adds `satellite` by subclassing `Image`, or `email` by
-subclassing `Text`, and everything that accepts the parent accepts it. A
-type declares the extensions it admits, checked and reported rather than
-used to discover; what metadata to read off a file, the video a frame came
-from included; and what canonical form its bytes are stored in. Text is stored one way, UTF-8,
-LF, NFC, no BOM, so two documents that read identically are one sample and
-a reviewer and a tokenizer see the same character offsets. Encoding is
-refused rather than guessed.
+**A prepared corpus, taken whole or not at all.** What a catalog ingests
+is a directory and the `prepared.json` naming the sample type and every
+file, each with its metadata and any candidate annotation it arrived with
+(`strata-prepare` writes one). `strata.catalog.admit` checks every file
+against the type — inside the root, present, admitted by extension,
+carrying the metadata the type requires, `video` for a frame — and refuses
+the corpus with every shortfall listed before anything is written. A file
+the index does not name is counted, not taken.
+
+**A type per sample, and types inherit.** The types are defined in
+`strata-contracts`: `image`, `text` and `frames` are built in; a plugin adds
+`satellite` by subclassing `Image`, or `email` by subclassing `Text`, and
+everything that accepts the parent accepts it.
+
+**Canonical form is the catalog's**, per media, since it decides what a
+checksum addresses. Text is stored one way, UTF-8, LF, NFC, no BOM, so two
+documents that read identically are one sample and a reviewer and a
+tokenizer see the same character offsets. Encoding is refused rather than
+guessed. A candidate annotation on text the catalog would rewrite is
+refused, since its offsets address the bytes the preparer wrote.
 
 **Collections say where data came from**, `sat_images` or
 `sat_images/2024` for one batch. A project names which collections it
@@ -101,8 +112,7 @@ catalog name that matches nothing is refused rather than falling back.
 | `strata-catalog` | |
 |---|---|
 | `list` | this host's catalogs and their identities |
-| `types` | the installed sample types |
-| `preparers` | the installed conversions |
+| `types` | the installed sample types, what each requires, and whether it is stored canonical |
 | `stats` | what is in the catalog |
 | `probe` | prove this host can reach index and blobs |
 | `copy --to URL` | move the index into another database, keys preserved |
@@ -137,21 +147,17 @@ record naming what it made.
 
 ## Extending it
 
-Two plugin surfaces, both through entry points, both with built-in names
-reserved and a `resolve()` that refuses an ambiguity:
+One plugin surface of its own, through an entry point:
 
-| group | adds | extends |
+| group | adds | as |
 |---|---|---|
-| `strata.sample_types` | a kind of sample | an existing `SampleType` |
-| `strata.preparers` | a way to convert a corpus into what a type stores | `Preparer` |
+| `strata.canonical_forms` | the form a plugin type's bytes are stored in, by the type's name | a function of bytes to bytes |
 
-A preparer writes files and a `prepared.json` index of what the conversion
-knew, metadata and any candidate annotations the corpus arrived with, and
-stops; `ingest` catalogues. `PreparerContract` in
-`strata.catalog.types.preparer_conformance` is the suite a preparer runs against
-itself: its output is admitted by the type it claims, already canonical,
-and the same bytes on a second run. `strata-prepare-email` and
-`strata-prepare-video` are the two that ship.
+A type without one takes the nearest registered ancestor's, then its
+media's. Sample types themselves register under `strata.sample_types`,
+defined in `strata-contracts`; preparers under `strata.preparers`, defined
+in `strata-prepare`. The catalog imports neither preparers nor their
+package.
 
 ## Decisions
 
@@ -160,7 +166,8 @@ Recorded in the strata umbrella repository's `docs/adr/` (https://github.com/ema
 inherited (0003), the manifest is the contract (0004), ids mean nothing
 outside their catalog (0008), disagreement is recorded and sources are
 ranked (0009), a sample type is a plugin and canonical form is not
-normalisation (0010), a feature is a role (0011), and signed URLs (0013).
+normalisation (0010), a feature is a role (0011), signed URLs (0013), and
+what enters a catalog is declared outside it (0040).
 
 ## Tests
 

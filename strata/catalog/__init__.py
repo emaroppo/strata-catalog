@@ -21,15 +21,15 @@ See ``docs/adr/0021``.
 
 """
 
+from .canonical import CanonicalError, canonical_form
 from .catalog import Catalog
+from .intake import Admission, IntakeError, admit
 from .rows import EVERYTHING, AnnotateReport, CatalogError, CatalogMissing, DatasetRef, SampleRow
 from .storage.blobs import BlobBackend, LocalBackend, Location, blob_path, checksum_of
 from .storage.repack import RepackError, RepackReport, repack_blobs
 from .storage.signing import SignedUrls, SigningError, suffix_of
 from .sync.copy import CopyError, CopyReport, copy_index
 from .sync.merge import MergeError, MergeReport, merge_annotations
-from .types.prepared import PREPARED_NAME, PreparedIndex, PreparedSample
-from .types.preparers import Prepared, Preparer, PreparerError
 from .versions.given import GivenSplit
 from .versions.materialised import Materialised, ensure_materialised
 from .versions.split import HOLDOUT, TRAIN, VAL, Achieved, SplitError, assign
@@ -39,11 +39,10 @@ from .versions.split import HOLDOUT, TRAIN, VAL, Achieved, SplitError, assign
 #: package's own, and the dependency graph test refuses it.
 PUBLIC_MODULES = frozenset(
     {
+        "canonical",
         "config",
+        "intake",
         "stages",
-        "types.prepared",
-        "types.preparers",
-        "types.sample_types",
         "versions.features",
     }
 )
@@ -51,12 +50,13 @@ PUBLIC_MODULES = frozenset(
 __all__ = [
     "EVERYTHING",
     "HOLDOUT",
-    "PREPARED_NAME",
     "TRAIN",
     "VAL",
     "Achieved",
+    "Admission",
     "AnnotateReport",
     "BlobBackend",
+    "CanonicalError",
     "Catalog",
     "CatalogError",
     "CatalogMissing",
@@ -64,24 +64,22 @@ __all__ = [
     "CopyReport",
     "DatasetRef",
     "GivenSplit",
+    "IntakeError",
     "LocalBackend",
     "Location",
     "Materialised",
     "MergeError",
     "MergeReport",
-    "Prepared",
-    "PreparedIndex",
-    "PreparedSample",
-    "Preparer",
-    "PreparerError",
     "RepackError",
     "RepackReport",
     "SampleRow",
     "SignedUrls",
     "SigningError",
     "SplitError",
+    "admit",
     "assign",
     "blob_path",
+    "canonical_form",
     "checksum_of",
     "copy_index",
     "ensure_materialised",
