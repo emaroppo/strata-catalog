@@ -170,6 +170,9 @@ STRATA_WRITE_KEY=strata-write ./new-catalog.sh demo   # a catalog: database, buc
   and says so; after that ingest, `docker compose up -d blobs`, and
   `/healthz` on port 8081 names the catalog it serves.
 - The containers restart on their own after a reboot.
+- The image takes `strata-contracts` and `strata-common` from GitHub. A
+  host building from a mirror sets `STRATA_GIT` in `.env` to the base URL
+  its repositories sit under, before the first build.
 - **After updating this repository, rebuild:** `docker compose build
   --no-cache blobs`, then `docker compose up -d blobs`. The image is never
   pulled and never rebuilt on its own, so a host that has one keeps
