@@ -135,7 +135,7 @@ strata-catalog-migrate -x catalog=NAME upgrade head
 **The blob server**, `strata-blobs`, serves one sample per request over a
 signed URL naming its checksum, which is how a reviewer's browser reaches
 samples without a mount. Its container and the catalog host's compose file
-are under `deploy/minipc/`, with `new-catalog.sh` to make a new catalog's
+are under `deploy/catalog-host/`, with `new-catalog.sh` to make a new catalog's
 database, bucket and key grants.
 
 ## Stages
