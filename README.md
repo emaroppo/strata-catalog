@@ -5,11 +5,18 @@ about them, and the dataset versions built from them. The durable asset
 every other strata package produces for or consumes from. Annotations
 outlive the tool that collected them.
 
+Not on PyPI: it installs from its repository at a release tag. uv takes a
+git source only for a package named directly, so the strata packages
+beneath it are named beside it.
+
 ```bash
-uv add strata-catalog                    # SQLite index, blobs as local files
-uv add "strata-catalog[postgres]"        # a shared index
-uv add "strata-catalog[s3]"              # blobs as tar shards in a bucket
-uv add "strata-catalog[serve]"           # the blob server
+g=git+https://github.com/emaroppo
+uv add "strata-catalog @ $g/strata-catalog@v0.1.0"     \
+       "strata-contracts @ $g/strata-contracts@v0.1.0" \
+       "strata-common @ $g/strata-common@v0.1.0"         # SQLite index, blobs as local files
+uv add "strata-catalog[postgres] @ $g/strata-catalog@v0.1.0"   # a shared index
+uv add "strata-catalog[s3] @ $g/strata-catalog@v0.1.0"   # blobs as tar shards in a bucket
+uv add "strata-catalog[serve] @ $g/strata-catalog@v0.1.0"   # the blob server
 ```
 
 Depends on `strata-contracts`, `strata-common[migrations]`, SQLAlchemy and
@@ -216,7 +223,7 @@ what enters a catalog is declared outside it (0040).
 ## Tests
 
 ```bash
-.github/sibling-wheels.sh contracts common   # the strata packages this one needs, until they are on an index
+.github/sibling-wheels.sh contracts common   # the strata packages this one needs, from their repositories
 uv sync --find-links dist --group dev --extra all
 uv run pytest
 ```
