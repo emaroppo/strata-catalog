@@ -6,7 +6,6 @@ over their annotations. See ``docs/adr/0003``.
 """
 
 from collections.abc import Sequence
-from typing import Any
 
 from sqlalchemy import and_, insert, select
 from sqlalchemy.engine import Engine, Row
@@ -72,7 +71,7 @@ class Datasets:
             raise CatalogError(f"No dataset with id {dataset_id}")
         return info
 
-    def members(self, dataset_id: int, label_set_id: int) -> Sequence[Row[Any]]:
+    def members(self, dataset_id: int, label_set_id: int) -> Sequence[Row]:
         """Every member with its side and its annotation against ``label_set_id``.
 
         The label set is bound rather than joined: an ON clause cannot
