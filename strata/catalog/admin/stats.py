@@ -14,9 +14,11 @@ from .where import Strict
 
 class LabelSetStats(Strict):
     name: str
-    task: str
+    #: What its annotations look like: classification, span or bbox
+    #: (docs/adr/0041).
+    label_type: str
     #: Whether choices are exclusive, for a classification set; null for
-    #: a task with no such notion.
+    #: a label type with no such notion.
     multiple: bool | None
     annotated: int
     awaiting: int
@@ -72,7 +74,7 @@ def stats(catalog: Catalog, where: str) -> Stats:
         label_sets.append(
             LabelSetStats(
                 name=name,
-                task=schema.task,
+                label_type=schema.label_type,
                 multiple=getattr(schema, "multiple", None),
                 annotated=len(catalog.samples.labelled(label_set_id, EVERYTHING)),
                 awaiting=len(catalog.samples.unlabelled(label_set_id, EVERYTHING)),

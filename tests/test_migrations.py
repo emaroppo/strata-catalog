@@ -254,3 +254,39 @@ def test_spans_written_with_one_label_are_rewritten_to_labels(url, monkeypatch):
         rows = dict(conn.execute(text("SELECT label_set_id, value FROM annotation")).all())
     assert json.loads(rows[1]) == old
     assert json.loads(rows[2]) == blank
+
+
+def test_a_label_sets_task_is_rewritten_to_label_type(url, monkeypatch):
+    """The key is renamed in place and nothing else moves (docs/adr/0041)."""
+    import json
+
+    from sqlalchemy import text
+
+    from strata.catalog.rows import SCHEMA
+    from strata.contracts import SpanSchema
+
+    monkeypatch.setenv("STRATA_CATALOG_URL", url)
+    command.upgrade(_config(url), "8e4b2d61f7a3")
+
+    old = {"task": "span", "classes": ["PER"], "multi_label": False, "overlapping": False}
+    engine = create_engine(url)
+    with engine.begin() as conn:
+        conn.execute(
+            text("INSERT INTO label_set (id, name, schema) VALUES (1, 'entities', :s)"),
+            {"s": json.dumps(old)},
+        )
+
+    def stored():
+        with engine.connect() as conn:
+            return json.loads(conn.execute(text("SELECT schema FROM label_set")).scalar_one())
+
+    command.upgrade(_config(url), "head")
+    assert stored() == {**{k: v for k, v in old.items() if k != "task"}, "label_type": "span"}
+    assert isinstance(SCHEMA.validate_python(stored()), SpanSchema)
+
+    # Re-running changes nothing
+    command.downgrade(_config(url), "8e4b2d61f7a3")
+    assert stored() == old
+    command.upgrade(_config(url), "head")
+    command.upgrade(_config(url), "head")
+    assert stored()["label_type"] == "span"

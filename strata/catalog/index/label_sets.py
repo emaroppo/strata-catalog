@@ -28,7 +28,7 @@ class LabelSets:
     def get(self, name: str) -> tuple[int, AnySchema]:
         """A label set by name, as whatever kind of schema it is.
 
-        Read back through the discriminator rather than as one task's
+        Read back through the discriminator rather than as one label type's
         schema. See ``docs/adr/0014``.
         """
         with self.engine.connect() as conn:

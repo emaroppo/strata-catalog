@@ -60,7 +60,7 @@ def _stats(args) -> int:
         for ls in s.label_sets:
             choice = "multi" if ls.multiple else "single"
             detail = "" if ls.multiple is None else f", {choice}-choice"
-            yield f"{ls.name} — {ls.task}{detail}"
+            yield f"{ls.name} — {ls.label_type}{detail}"
             yield f"  {ls.annotated:,} annotated, {ls.awaiting:,} awaiting review"
             for class_name, count in ls.classes.items():
                 yield f"  {class_name:<30} {count:>9,}"
