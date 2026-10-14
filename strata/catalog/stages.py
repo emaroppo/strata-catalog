@@ -112,7 +112,7 @@ def dataset(request: DatasetRequest, context: Context) -> DatasetRecord:
             f"Run ingest first, or set [catalog] label_set."
         ) from exc
     if request.version is not None:
-        return _pinned(request, context, label_set_id)
+        return _pinned(request, context, label_set_id, request.version)
     labelled = catalog.samples.labelled(label_set_id, request.collections)
     if not labelled:
         raise CatalogError(
@@ -147,19 +147,21 @@ def dataset(request: DatasetRequest, context: Context) -> DatasetRecord:
     )
 
 
-def _pinned(request: DatasetRequest, context: Context, label_set_id: int) -> DatasetRecord:
+def _pinned(
+    request: DatasetRequest, context: Context, label_set_id: int, version: int
+) -> DatasetRecord:
     """A version already frozen, recorded as the stage would have recorded it."""
     catalog = context.catalog
-    found = catalog.datasets.find(request.name, request.version)
+    found = catalog.datasets.find(request.name, version)
     if found is None:
         raise CatalogError(
-            f"No version {request.version} of dataset {request.name!r} in this catalog. "
+            f"No version {version} of dataset {request.name!r} in this catalog. "
             f"Leave version out to freeze what is labelled now."
         )
     dataset_id, pinned_label_set = found
     if pinned_label_set != label_set_id:
         raise CatalogError(
-            f"Dataset {request.name!r} v{request.version} was frozen over another label "
+            f"Dataset {request.name!r} v{version} was frozen over another label "
             f"set than {request.label_set!r}."
         )
     ref = catalog.datasets.named(dataset_id)
