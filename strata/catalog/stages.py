@@ -79,6 +79,10 @@ class DatasetRequest(Strict):
     #: sample's set, and which names are holdout and which val. The samples
     #: it names are fixed; the rest are drawn.
     given: GivenSplit | None = None
+    #: A version already frozen, to use as it stands rather than freeze
+    #: what is labelled now: its members, sides and ratios, whatever has
+    #: been labelled since. None freezes (or reuses) the newest.
+    version: int | None = None
 
 
 class DatasetRecord(Strict):
@@ -107,6 +111,8 @@ def dataset(request: DatasetRequest, context: Context) -> DatasetRecord:
             f"No label set named {request.label_set!r} in the catalog. "
             f"Run ingest first, or set [catalog] label_set."
         ) from exc
+    if request.version is not None:
+        return _pinned(request, context, label_set_id)
     labelled = catalog.samples.labelled(label_set_id, request.collections)
     if not labelled:
         raise CatalogError(
@@ -137,6 +143,34 @@ def dataset(request: DatasetRequest, context: Context) -> DatasetRecord:
         label_set_id=label_set_id,
         samples=len(labelled),
         given=given,
+        groups_cut=catalog.datasets.groups_cut(dataset_id, label_set_id, request.group_by),
+    )
+
+
+def _pinned(request: DatasetRequest, context: Context, label_set_id: int) -> DatasetRecord:
+    """A version already frozen, recorded as the stage would have recorded it."""
+    catalog = context.catalog
+    found = catalog.datasets.find(request.name, request.version)
+    if found is None:
+        raise CatalogError(
+            f"No version {request.version} of dataset {request.name!r} in this catalog. "
+            f"Leave version out to freeze what is labelled now."
+        )
+    dataset_id, pinned_label_set = found
+    if pinned_label_set != label_set_id:
+        raise CatalogError(
+            f"Dataset {request.name!r} v{request.version} was frozen over another label "
+            f"set than {request.label_set!r}."
+        )
+    ref = catalog.datasets.named(dataset_id)
+    return DatasetRecord(
+        dataset_id=dataset_id,
+        name=ref.name,
+        version=ref.version,
+        annotation_digest=ref.annotation_digest,
+        catalog_id=catalog.id,
+        label_set_id=label_set_id,
+        samples=len(catalog.datasets.members(dataset_id, label_set_id)),
         groups_cut=catalog.datasets.groups_cut(dataset_id, label_set_id, request.group_by),
     )
 

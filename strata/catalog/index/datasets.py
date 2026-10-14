@@ -46,6 +46,16 @@ class Datasets:
         """Which version a dataset id is. See :meth:`named`."""
         return self.named(dataset_id).version
 
+    def find(self, name: str, version: int) -> tuple[int, int] | None:
+        """The id and label set id of ``name`` at ``version``, or None if never frozen."""
+        with self.engine.connect() as conn:
+            row = conn.execute(
+                select(t.dataset.c.id, t.dataset.c.label_set_id).where(
+                    and_(t.dataset.c.name == name, t.dataset.c.version == version)
+                )
+            ).first()
+        return None if row is None else (row.id, row.label_set_id)
+
     def info(self, dataset_id: int):
         """A version's row with its label set's name and schema, for a manifest."""
         with self.engine.connect() as conn:

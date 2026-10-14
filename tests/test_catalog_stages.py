@@ -75,6 +75,25 @@ def test_nothing_labelled_is_refused(catalog, tmp_path):
         dataset(_request(), Context(catalog, tmp_path / "datasets"))
 
 
+def test_a_pinned_version_stands_whatever_is_labelled_since(context, files):
+    first = dataset(_request(), context)
+    catalog = context.catalog
+    label_set, _ = catalog.label_sets.get("presence")
+    more = catalog.ingest(files(4, prefix="later"), media="image", metadata={"video": "later"})
+    catalog.annotations.annotate_many(label_set, [(i, Choices(values=["cat"])) for i in more])
+
+    pinned = dataset(_request(version=1), context)
+    assert (pinned.dataset_id, pinned.version, pinned.samples) == (first.dataset_id, 1, 20)
+    assert pinned.annotation_digest == first.annotation_digest
+    # Without the pin, the new labels freeze the next version
+    assert dataset(_request(), context).version == 2
+
+
+def test_a_version_never_frozen_is_refused_with_the_way_forward(context):
+    with pytest.raises(CatalogError, match="Leave version out"):
+        dataset(_request(version=3), context)
+
+
 def test_a_request_refuses_a_key_it_does_not_know():
     with pytest.raises(ValueError, match="extra"):
         DatasetRequest(name="d", label_set="p", collections=["*"], val_ration=0.3)
