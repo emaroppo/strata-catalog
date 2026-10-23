@@ -19,6 +19,6 @@ s3_bucket = "mydata"
 
 # new-catalog.sh prints the table to add for each catalog it makes:
 #
-#   [catalog.demo]
-#   url = "postgresql+psycopg://strata@catalog-db:5432/demo"
-#   s3_bucket = "demo"
+#   [catalog.alt]
+#   url = "postgresql+psycopg://strata@catalog-db:5432/alt"
+#   s3_bucket = "alt"

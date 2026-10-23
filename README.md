@@ -101,9 +101,9 @@ stated once above them:
 
 ```toml
 [catalog]
-default = "images"
+default = "main"
 
-[catalog.images]
+[catalog.main]
 root = "catalog"                       # SQLite index and blobs under here
 # url = "postgresql+psycopg://user@host/db"   # a shared index instead
 # s3_endpoint = "http://host:3900"            # shards in a bucket instead
@@ -164,7 +164,7 @@ first and say so.
 ./deploy/catalog-host/bootstrap-env.sh    # .env and config.toml, the blob server's read-only key
 cd deploy/catalog-host
 docker compose up -d catalog-db
-STRATA_WRITE_KEY=strata-write ./new-catalog.sh demo   # a catalog: database, bucket, grants
+STRATA_WRITE_KEY=strata-write ./new-catalog.sh alt    # a catalog: database, bucket, grants
 ```
 
 - `start-garage.sh` runs a single-node Garage with fresh secrets, the bucket
