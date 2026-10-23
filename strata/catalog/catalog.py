@@ -248,6 +248,27 @@ class Catalog:
             self.blobs.flush()
         return ids
 
+    def export_answers(self, label_set: str, sources: Iterable[str] = ()):
+        """One label set's answers, every row of their history, keyed by checksum.
+
+        For another catalog to import. See :mod:`strata.catalog.transfer`.
+        """
+        from .transfer import export_answers
+
+        return export_answers(self, label_set, sources)
+
+    def import_answers(self, answers, *, into=None, pairs=None, dry_run=False, on_sample=None):
+        """Another catalog's answers, written as one import run.
+
+        Matched by checksum, or through ``pairs`` where a sample's bytes
+        changed. See :mod:`strata.catalog.transfer` and ``docs/adr/0045``.
+        """
+        from .transfer import import_answers
+
+        return import_answers(
+            self, answers, into=into, pairs=pairs, dry_run=dry_run, on_sample=on_sample
+        )
+
     def ingest_raw(
         self,
         root: Path,

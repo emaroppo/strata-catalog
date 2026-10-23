@@ -14,7 +14,7 @@ from dataclasses import dataclass, field
 from sqlalchemy import func, select
 
 from .index import tables as t
-from .index.runs import INGEST, PREPARE, files_digest
+from .index.runs import IMPORT, INGEST, PREPARE, files_digest
 from .rows import chunks, live
 from .storage.blobs import Location
 
@@ -60,6 +60,8 @@ def verify_run(catalog, run_id: str, deep: bool = False) -> VerifyReport:
             _ingested(conn, run, given, report)
         elif run.kind == PREPARE:
             _prepared(conn, run, given, report)
+        elif run.kind == IMPORT:
+            _imported(conn, run, report)
 
         if deep:
             _deep(catalog, conn, run, report)
@@ -114,6 +116,23 @@ def _prepared(conn, run, given: list[str], report: VerifyReport) -> None:
         "present",
         expected is None or samples == expected,
         f"{samples:,} live sample(s) with an origin in this run, {expected} recorded",
+    )
+
+
+def _imported(conn, run, report: VerifyReport) -> None:
+    """Every row the import counted is there, under its run."""
+    written = conn.execute(
+        select(func.count()).select_from(t.annotation).where(t.annotation.c.run_id == run.id)
+    ).scalar_one()
+    counts = run.counts
+    landed = counts.get("matched", 0) + counts.get("paired", 0)
+    report.add(
+        "counts",
+        written == counts.get("rows")
+        and counts.get("samples") == landed + counts.get("unmatched", 0),
+        f"{written:,} row(s) carry this run, {counts.get('rows')} recorded; "
+        f"{counts.get('samples')} sample(s) = {landed:,} landed + "
+        f"{counts.get('unmatched')} unmatched",
     )
 
 

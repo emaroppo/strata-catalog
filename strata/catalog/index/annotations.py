@@ -209,8 +209,24 @@ class Annotations:
                     moved += 1
         return moved
 
-    def _write(self, conn, sample_id, label_set_id, *, state, value, source, batch) -> bool:
+    def _write(
+        self,
+        conn,
+        sample_id,
+        label_set_id,
+        *,
+        state,
+        value,
+        source,
+        batch,
+        run_id: str | None = None,
+        created_at: datetime | None = None,
+    ) -> bool:
         """Append one answer, superseding the current one unless it outranks ``source``.
+
+        ``run_id`` names the import or judge run writing it (record 0048).
+        ``created_at`` keeps the time an answer carried from another catalog
+        was first given; a new answer takes the database's.
 
         Returns whether it wrote. See :data:`tables.AUTHORITY`: an import
         landing on a sample a person already answered leaves the answer
@@ -248,6 +264,8 @@ class Annotations:
                 value=value,
                 source=source,
                 batch=batch,
+                run_id=run_id,
+                **({} if created_at is None else {"created_at": created_at}),
             )
         )
         return True

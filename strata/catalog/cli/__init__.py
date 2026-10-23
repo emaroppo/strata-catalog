@@ -6,6 +6,7 @@ from pathlib import Path
 
 from ..config import CatalogConfigError
 from ._shared import CONFIG, Refused
+from .answers import _export_answers, _import_answers
 from .inspect import _list, _probe, _stats, _types
 from .raw import _ingest, _prepare, _raw_ls, _runs, _verify
 from .remove import _remove
@@ -90,6 +91,28 @@ def _parser() -> argparse.ArgumentParser:
     ls = raw.add_parser("ls", help="A collection's names, one a line; or every collection")
     ls.add_argument("collection", nargs="?", help="Which collection (default: list them)")
     ls.set_defaults(run=_raw_ls)
+
+    export = commands.add_parser(
+        "export-answers", help="One label set's answers and their history, by checksum, to a file"
+    )
+    export.add_argument("--label-set", required=True, metavar="NAME", help="Which label set")
+    export.add_argument(
+        "--source", action="append", metavar="SOURCE", help="Only answers from this source"
+    )
+    export.add_argument("--out", type=Path, metavar="FILE", help="Where (default: stdout)")
+    export.set_defaults(run=_export_answers)
+
+    imported = commands.add_parser(
+        "import-answers", help="Another catalog's exported answers, as an import run"
+    )
+    imported.add_argument("answers", type=Path, help="A file export-answers wrote")
+    imported.add_argument("--into", metavar="NAME", help="The label set here (default: its own)")
+    imported.add_argument(
+        "--pairs", type=Path, metavar="LIST",
+        help="'old new' checksums, one pair a line, for samples whose bytes changed",
+    )  # fmt: skip
+    imported.add_argument("--dry-run", action="store_true", help="Report, and keep nothing")
+    imported.set_defaults(run=_import_answers)
 
     runs = commands.add_parser("runs", help="What wrote to the catalog")
     runs.add_argument("--kind", help="Only runs of this kind: ingest, prepare, import, ...")
