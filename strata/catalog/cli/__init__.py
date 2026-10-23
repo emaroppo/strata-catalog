@@ -7,7 +7,7 @@ from pathlib import Path
 from ..config import CatalogConfigError
 from ._shared import CONFIG, Refused
 from .inspect import _list, _probe, _stats, _types
-from .raw import _ingest, _raw_ls, _runs, _verify
+from .raw import _ingest, _prepare, _raw_ls, _runs, _verify
 from .remove import _remove
 from .repack import _repack
 from .sync import _copy, _merge
@@ -71,6 +71,20 @@ def _parser() -> argparse.ArgumentParser:
         "--files", type=Path, metavar="LIST", help="Paths under the root, one a line (default: all)"
     )
     ingest.set_defaults(run=_ingest)
+
+    prepare = commands.add_parser("prepare", help="Prepare samples from raw files, by a spec")
+    prepare.add_argument("spec", type=Path, help="The spec: a chain of stages, and the output")
+    prepare.add_argument(
+        "--files", type=Path, required=True, metavar="LIST",
+        help="Raw names or checksums, one a line; - reads stdin",
+    )  # fmt: skip
+    prepare.add_argument(
+        "--allow-missing", action="store_true", help="Count names nothing ingested, not refuse"
+    )
+    prepare.add_argument(
+        "--continues", metavar="RUN", help="The run whose samples this one supersedes"
+    )
+    prepare.set_defaults(run=_prepare)
 
     raw = commands.add_parser("raw", help="Raw files").add_subparsers(dest="raw", required=True)
     ls = raw.add_parser("ls", help="A collection's names, one a line; or every collection")

@@ -7,6 +7,10 @@ from ._shared import Refused, _emit, _open, _ticker
 
 
 def _lines(path: Path) -> list[str]:
+    if str(path) == "-":
+        import sys
+
+        return sys.stdin.read().splitlines()
     try:
         return path.read_text().splitlines()
     except OSError as e:
@@ -94,3 +98,45 @@ def _verify(args) -> int:
 
     _emit(args, {**asdict(report), "ok": report.ok}, render)
     return 0 if report.ok else 1
+
+
+def _prepare(args) -> int:
+    from ..prepare_run import load_chain, prepare
+    from ..rows import CatalogError
+
+    catalog, _ = _open(args)
+    show = _ticker("preparing")
+    try:
+        chain = load_chain(args.spec)
+        report = prepare(
+            catalog,
+            chain,
+            _lines(args.files),
+            allow_missing=args.allow_missing,
+            continues=args.continues,
+            on_input=lambda d, n: show(f"{d:,}/{n:,}"),
+        )
+    except CatalogError as e:
+        raise Refused(str(e)) from None
+
+    def render(_):
+        c = report.counts
+        yield f"run {report.run_id} into {report.collection} ({report.sample_type})"
+        yield f"  {report.names:,} name(s), {c['missing']:,} missing, {report.inputs:,} input(s)"
+        yield (
+            f"  {c['produced']:,} produced, {c['already']:,} already prepared by this chain, "
+            f"{sum(c['emptied'].values()):,} left empty"
+        )
+        for reason, n in c["emptied"].items():
+            yield f"    empty   {reason:<30} {n:>9,}"
+        for reason, n in c["dropped"].items():
+            yield f"    dropped {reason:<30} {n:>9,}"
+        yield f"  {c['samples']:,} sample(s), {c['new_samples']:,} new"
+        if "superseded" in c:
+            yield (
+                f"  supersedes {c['superseded']:,} earlier sample(s), "
+                f"{c['superseded_answered']:,} with a person's answer"
+            )
+
+    _emit(args, asdict(report), render)
+    return 0

@@ -184,26 +184,10 @@ def test_a_checksum_stands_for_itself(catalog, maildir):
 # ----------------------------------------------------------------------
 
 
-class _Store:
-    def __init__(self):
-        self.objects: dict[str, bytes] = {}
-
-    def put_object(self, Bucket, Key, Body):
-        self.objects[Key] = Body
-        return {}
-
-    def get_object(self, Bucket, Key, Range=""):
-        body = self.objects[Key]
-        if Range:
-            first, last = Range.removeprefix("bytes=").split("-")
-            body = body[int(first) : int(last) + 1]
-        return {"Body": type("R", (), {"read": lambda self: body})()}
-
-
-def test_a_repack_moves_raw_rows_and_packs_each_checksum_once(catalog, maildir):
+def test_a_repack_moves_raw_rows_and_packs_each_checksum_once(catalog, maildir, object_store):
     catalog.ingest_raw(maildir, "enron/maildir")
     catalog.ingest([maildir / "lay-k/inbox/1."], media="text")
-    target = S3Backend(_Store(), bucket="b")
+    target = S3Backend(object_store, bucket="b")
 
     report = repack_blobs(catalog, target)
 

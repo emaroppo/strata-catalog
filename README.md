@@ -50,6 +50,14 @@ several names are several rows over one blob. Every ingest is a run,
 recorded beside what it wrote with the checksums it was given and its
 counts, and `verify --run` checks that it still holds.
 
+**Samples are prepared from raw files by a run.** `strata-catalog prepare`
+reads a spec, a chain of `strata-prepare` stages and the collection and
+type it writes, and is handed the raw names to prepare. Each output is
+stored once by checksum with an origin row for the input it came from,
+and its metadata is what its bytes say, then its origins' facts, first
+value kept. The same chain over inputs it already prepared writes
+nothing; a different one says which run it continues.
+
 **A type per sample, and types inherit.** The types are defined in
 `strata-contracts`: `image`, `text` and `frames` are built in; a plugin adds
 `satellite` by subclassing `Image`, or `email` by subclassing `Text`, and
@@ -140,6 +148,7 @@ nothing is refused rather than falling back.
 | `merge --from URL` | fold a copy's annotations back in |
 | `repack` | pack local blobs, samples' and raw files', into a bucket |
 | `ingest ROOT --collection PATH` | keep raw files as they are; `--files LIST` for some of them |
+| `prepare SPEC --files LIST` | run a spec's chain of stages over raw files into samples, one run; `--continues RUN` to supersede |
 | `raw ls [COLLECTION]` | a collection's names, one a line, or every collection counted |
 | `runs` | what wrote to the catalog, and what each counted |
 | `verify --run ID` | check a run still holds; `--deep` hashes every blob it wrote |

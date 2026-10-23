@@ -40,3 +40,34 @@ def label_set(catalog) -> int:
     return catalog.label_sets.create(
         "presence", ClassificationSchema(classes=["cat", "dog", "bird"])
     )
+
+
+class FakeObjectStore:
+    """Enough of S3 to pack shards into and read ranges back from."""
+
+    def __init__(self):
+        self.objects: dict[str, bytes] = {}
+
+    def put_object(self, Bucket, Key, Body):
+        self.objects[Key] = Body
+        return {}
+
+    def get_object(self, Bucket, Key, Range=""):
+        body = self.objects[Key]
+        if Range:
+            first, last = Range.removeprefix("bytes=").split("-")
+            body = body[int(first) : int(last) + 1]
+        return {"Body": _Reader(body)}
+
+
+class _Reader:
+    def __init__(self, body):
+        self.body = body
+
+    def read(self):
+        return self.body
+
+
+@pytest.fixture
+def object_store() -> FakeObjectStore:
+    return FakeObjectStore()

@@ -9,6 +9,9 @@ dependencies = [
     # The migration plumbing and the entry-point resolver. Its migrations
     # extra is sqlalchemy and alembic, which this package needs anyway.
     "strata-common[migrations]>=0.1,<0.2",
+    # The stage engine a prepare run hands its raw files to. It never
+    # imports the catalog. See docs/adr/0047.
+    "strata-prepare>=0.1,<0.2",
     "sqlalchemy>=2.0",
     # Schema changes are migrations, not create_all: an existing database
     # never gains a column from metadata alone. See strata-catalog-migrate.
