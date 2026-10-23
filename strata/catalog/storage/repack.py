@@ -30,6 +30,9 @@ class RepackReport:
     """What a repack did, or would do."""
 
     samples: int = 0
+    #: Raw rows pointed at a packed blob, whether packed for them or for a
+    #: sample with the same bytes. docs/adr/0045
+    raw: int = 0
     bytes: int = 0
     shards: list[str] = field(default_factory=list)
     #: Samples already in the target, skipped rather than packed twice.
@@ -42,14 +45,18 @@ class RepackReport:
         return not self.failures
 
 
-def _pending(prefix: str):
-    """Samples not yet in the target's prefix.
+#: What holds a location: samples, then raw files. docs/adr/0045
+_HOLDERS = (t.sample, t.raw)
 
-    A packed sample's container is ``<prefix>/<hex>.tar`` and a local one's
+
+def _pending(prefix: str, table=t.sample):
+    """Rows not yet in the target's prefix.
+
+    A packed row's container is ``<prefix>/<hex>.tar`` and a local one's
     ``aa/bb/<checksum><suffix>``, so the two cannot collide and a re-run
     resumes. See ``docs/adr/0002``.
     """
-    return t.sample.c.location.notlike(f"{prefix}/%")
+    return table.c.location.notlike(f"{prefix}/%")
 
 
 def repack_blobs(
@@ -83,26 +90,44 @@ def repack_blobs(
     prefix = getattr(target, "prefix", "shards")
     report = RepackReport()
 
+    rows: list[tuple] = []
+    # Where a checksum already sits in the target. One blob per checksum
+    # however many rows name it, so a second row reuses the first's member.
+    # docs/adr/0045
+    packed_at: dict[str, Location] = {}
     with catalog.engine.connect() as conn:
         report.already_packed = conn.execute(
             select(func.count()).select_from(t.sample).where(~_pending(prefix))
         ).scalar()
-        rows = conn.execute(
-            select(
-                t.sample.c.id,
-                t.sample.c.checksum,
-                t.sample.c.location,
-                t.sample.c.offset,
-                t.sample.c.length,
+        for table in _HOLDERS:
+            for row in conn.execute(
+                select(table.c.checksum, table.c.location, table.c.offset, table.c.length).where(
+                    ~_pending(prefix, table)
+                )
+            ):
+                packed_at.setdefault(row.checksum, Location(row.location, row.offset, row.length))
+            rows.extend(
+                (table, *row)
+                for row in conn.execute(
+                    select(
+                        table.c.id,
+                        table.c.checksum,
+                        table.c.location,
+                        table.c.offset,
+                        table.c.length,
+                    )
+                    .where(_pending(prefix, table))
+                    # Ingest order keeps a video's frames together. docs/adr/0002
+                    .order_by(table.c.id)
+                )
             )
-            .where(_pending(prefix))
-            # Ingest order keeps a video's frames together. docs/adr/0002
-            .order_by(t.sample.c.id)
-        ).all()
 
     if dry_run:
-        report.samples = len(rows)
-        report.bytes = sum(row.length for row in rows)
+        report.samples = sum(1 for row in rows if row[0] is t.sample)
+        report.raw = len(rows) - report.samples
+        report.bytes = sum(
+            length for _, _, checksum, _, _, length in _distinct(rows) if checksum not in packed_at
+        )
         if on_progress is not None:
             on_progress(report)
         return report
@@ -110,24 +135,29 @@ def repack_blobs(
     # Rows for the shard being filled, held until a change of container
     # shows it was uploaded: the backend flushes a full shard inside put.
     # docs/adr/0002
-    pending: list[tuple[int, Location]] = []
+    pending: list[tuple[object, int, Location]] = []
     open_shard: str | None = None
     packed: list[tuple[str, str]] = []
 
-    for row in rows:
-        path = source.path_for(Location(row.location, row.offset, row.length))
-        location = target.put(path, row.checksum)
+    for table, row_id, checksum, container, offset, length in rows:
+        location = packed_at.get(checksum)
+        if location is None:
+            path = source.path_for(Location(container, offset, length))
+            location = packed_at[checksum] = target.put(path, checksum)
 
-        if open_shard is not None and location.container != open_shard:
-            _commit(catalog, pending)
-            report.shards.append(open_shard)
-            pending = []
-        open_shard = location.container
+            if open_shard is not None and location.container != open_shard:
+                _commit(catalog, pending)
+                report.shards.append(open_shard)
+                pending = []
+            open_shard = location.container
+            packed.append((checksum, location.container))
+            report.bytes += location.length
 
-        pending.append((row.id, location))
-        packed.append((row.checksum, location.container))
-        report.samples += 1
-        report.bytes += location.length
+        pending.append((table, row_id, location))
+        if table is t.sample:
+            report.samples += 1
+        else:
+            report.raw += 1
         if on_progress is not None:
             on_progress(report)
 
@@ -146,36 +176,47 @@ def repack_blobs(
     return report
 
 
-def _commit(catalog, pending: list[tuple[int, Location]]) -> None:
+def _distinct(rows):
+    """The first row for each checksum."""
+    seen: set[str] = set()
+    for row in rows:
+        if row[2] not in seen:
+            seen.add(row[2])
+            yield row
+
+
+def _commit(catalog, pending: list[tuple[object, int, Location]]) -> None:
     """Point rows at their packed location, one shard's worth at a time."""
     if not pending:
         return
-    # One statement and one round trip for the whole shard (docs/adr/0032).
-    # Bind names differ
-    # from the column names on purpose: reusing "offset" and "length" would
-    # collide with the columns being set.
-    stmt = (
-        update(t.sample)
-        .where(t.sample.c.id == bindparam("row_id"))
-        .values(
-            location=bindparam("container"),
-            offset=bindparam("at"),
-            length=bindparam("size"),
-        )
-    )
     with catalog.engine.begin() as conn:
-        conn.execute(
-            stmt,
-            [
+        for table in _HOLDERS:
+            batch = [
                 {
-                    "row_id": sample_id,
+                    "row_id": row_id,
                     "container": location.container,
                     "at": location.offset,
                     "size": location.length,
                 }
-                for sample_id, location in pending
-            ],
-        )
+                for holder, row_id, location in pending
+                if holder is table
+            ]
+            if not batch:
+                continue
+            # One statement and one round trip per table for the whole
+            # shard (docs/adr/0032). Bind names differ from the column names
+            # on purpose: reusing "offset" and "length" would collide with
+            # the columns being set.
+            conn.execute(
+                update(table)
+                .where(table.c.id == bindparam("row_id"))
+                .values(
+                    location=bindparam("container"),
+                    offset=bindparam("at"),
+                    length=bindparam("size"),
+                ),
+                batch,
+            )
 
 
 def _verify(catalog, target, packed, verify: int, seed: int, report: RepackReport) -> None:
@@ -194,14 +235,18 @@ def _verify(catalog, target, packed, verify: int, seed: int, report: RepackRepor
     for checksums in by_shard.values():
         chosen.extend(rng.sample(checksums, min(per_shard, len(checksums))))
 
+    rows = []
     with catalog.engine.connect() as conn:
-        rows = conn.execute(
-            select(
-                t.sample.c.checksum, t.sample.c.location, t.sample.c.offset, t.sample.c.length
-            ).where(t.sample.c.checksum.in_(chosen))
-        ).all()
+        for table in _HOLDERS:
+            rows.extend(
+                conn.execute(
+                    select(
+                        table.c.checksum, table.c.location, table.c.offset, table.c.length
+                    ).where(table.c.checksum.in_(chosen))
+                ).all()
+            )
 
-    for row in rows:
+    for row in {row.checksum: row for row in rows}.values():
         body = target.get(Location(row.location, row.offset, row.length))
         got = hashlib.sha256(body).hexdigest()
         if got != row.checksum:

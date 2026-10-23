@@ -30,6 +30,8 @@ from .index.annotations import Annotations
 from .index.conflicts import Conflicts
 from .index.datasets import Datasets
 from .index.label_sets import LabelSets
+from .index.raw import Raw
+from .index.runs import Runs
 from .index.samples import Samples
 from .index.schema_version import MIGRATIONS
 from .rows import (
@@ -89,6 +91,8 @@ class Catalog:
         self.conflicts = Conflicts(engine)
         self.samples = Samples(engine)
         self.datasets = Datasets(engine)
+        self.raw = Raw(engine)
+        self.runs = Runs(engine)
 
     @classmethod
     def local(cls, root: Path) -> "Catalog":
@@ -217,7 +221,11 @@ class Catalog:
                 checksum = checksum_of(source)
                 known = self.samples.find(conn, checksum)
                 if known is None:
-                    location = self.blobs.put(source, checksum)
+                    # A raw file's blob, if one holds these bytes: one copy
+                    # per checksum. docs/adr/0045
+                    location = self.raw.stored(conn, [checksum]).get(checksum)
+                    if location is None:
+                        location = self.blobs.put(source, checksum)
                     known = self.samples.add(
                         conn,
                         checksum,
@@ -239,6 +247,24 @@ class Catalog:
             # shard that failed to upload would be worse than no rows.
             self.blobs.flush()
         return ids
+
+    def ingest_raw(
+        self,
+        root: Path,
+        collection: str,
+        files: Iterable[str] | None = None,
+        on_file: Callable[[int, int], None] | None = None,
+    ):
+        """Store files as they are, under ``collection``, as one ingest run.
+
+        ``files`` lists paths under ``root``; without it, every file under
+        the root goes in. A name already held with the same bytes writes
+        nothing, and one held with other bytes refuses the whole ingest. See
+        :mod:`strata.catalog.raw_ingest` and ``docs/adr/0045``.
+        """
+        from .raw_ingest import ingest_raw
+
+        return ingest_raw(self, root, collection, files, on_file)
 
     # ------------------------------------------------------------------
     # Datasets

@@ -62,6 +62,72 @@ catalog_identity = Table(
 )
 
 
+#: Something that wrote to the catalog: an ingest, a prepare, an import, a
+#: judge or a backfill. Minted as modelling's runs are, a timestamp and a
+#: host token, so either store can name the other's. See docs/adr/0045.
+run = Table(
+    "run",
+    metadata,
+    Column("id", String(64), primary_key=True),
+    Column("kind", String(16), nullable=False),
+    # What ran, and the code identity behind it: package and stage
+    # versions, rule-file digests.
+    Column("producer", String(255), nullable=False),
+    Column("code", JSON, nullable=True),
+    # Canonical, never a path: a path says where a file sat, not what it
+    # said. docs/adr/0037
+    Column("spec", JSON, nullable=True),
+    Column("spec_hash", String(64), nullable=True),
+    # The spec hash, each stage's version and every rule file's digest: two
+    # runs with one chain identity do the same thing to an input.
+    Column("chain", String(64), nullable=True),
+    # Over the distinct checksums the run was given; the checksums
+    # themselves are run_input.
+    Column("files_digest", String(64), nullable=True),
+    # The run this one supersedes, for the inputs both prepared.
+    Column("continues", ForeignKey("run.id"), nullable=True),
+    # Per reason, under the names the run's stages chose.
+    Column("counts", JSON, nullable=True),
+    Column("started_at", DateTime, nullable=False),
+    Column("finished_at", DateTime, nullable=True),
+    Index("ix_run_chain", "chain"),
+)
+
+
+#: The distinct checksums a run was handed, after its names resolved. A
+#: row per checksum rather than a list on the run: a corpus can be half a
+#: million files. See docs/adr/0045.
+run_input = Table(
+    "run_input",
+    metadata,
+    Column("run_id", ForeignKey("run.id", ondelete="CASCADE"), primary_key=True),
+    Column("checksum", String(64), primary_key=True),
+)
+
+
+#: A file as it arrived. Append-only; a name means one set of bytes. The
+#: same bytes under several names are several rows over one blob, so the
+#: checksum is not unique. Not a sample: nothing labels a raw file. See
+#: docs/adr/0045.
+raw = Table(
+    "raw",
+    metadata,
+    Column("id", Integer, primary_key=True),
+    # Kept apart from the path, since a collection has segments and a name
+    # alone would not say where it ends.
+    Column("collection", String(255), nullable=False),
+    Column("path", Text, nullable=False),
+    Column("checksum", String(64), nullable=False),
+    Column("location", Text, nullable=False),
+    Column("offset", Integer, nullable=False, default=0),
+    Column("length", Integer, nullable=False),
+    Column("run_id", ForeignKey("run.id"), nullable=False),
+    Column("ingested_at", DateTime, server_default=func.now()),
+    UniqueConstraint("collection", "path", name="uq_raw_name"),
+    Index("ix_raw_checksum", "checksum"),
+)
+
+
 sample = Table(
     "sample",
     metadata,
@@ -98,6 +164,31 @@ sample_collection = Table(
 )
 
 
+#: What an origin's input is: a raw file, or another sample.
+RAW_INPUT, SAMPLE_INPUT = "raw", "sample"
+INPUT_KINDS = (RAW_INPUT, SAMPLE_INPUT)
+
+#: What a sample was made from: one row per input, in each run that made
+#: it. The input is named by checksum, so a row means the same in every
+#: copy of the catalog. Lineage is the chain of these hops. ``metadata`` is
+#: the facts of this one occurrence, as the stages recorded them. See
+#: docs/adr/0045 and docs/adr/0049.
+origin = Table(
+    "origin",
+    metadata,
+    Column("id", Integer, primary_key=True),
+    Column("sample_id", ForeignKey("sample.id", ondelete="CASCADE"), nullable=False),
+    Column("run_id", ForeignKey("run.id"), nullable=False),
+    Column("input_kind", String(8), nullable=False),
+    Column("input", String(64), nullable=False),
+    Column("metadata", JSON, nullable=True),
+    Column("recorded_at", DateTime, server_default=func.now()),
+    UniqueConstraint("sample_id", "run_id", "input_kind", "input", name="uq_origin_hop"),
+    Index("ix_origin_input", "input"),
+    Index("ix_origin_run", "run_id"),
+)
+
+
 label_set = Table(
     "label_set",
     metadata,
@@ -130,6 +221,9 @@ annotation = Table(
     # confirms or corrects it. Null for an answer nothing imported.
     # docs/adr/0027
     Column("batch", String(255), nullable=True),
+    # The import or judge run that wrote this row. Null for a person's
+    # answer, which has no run. docs/adr/0048
+    Column("run_id", ForeignKey("run.id"), nullable=True),
     Column("created_at", DateTime, server_default=func.now()),
     # Null while this is the current answer. Set when a later row replaced
     # it, or when it was withdrawn — a skip returned to the queue — with

@@ -17,8 +17,12 @@ ORDER = (
     # First: everything after it means something only within the catalog
     # this names. docs/adr/0008
     t.catalog_identity,
+    t.run,
+    t.run_input,
+    t.raw,
     t.sample,
     t.sample_collection,
+    t.origin,
     t.label_set,
     t.annotation,
     t.annotation_class,
@@ -61,7 +65,8 @@ def copy_index(source, target, batch: int = 2000, on_progress=None) -> CopyRepor
     report = CopyReport()
     for table in ORDER:
         with source.engine.connect() as read, target.engine.begin() as write:
-            rows = read.execute(select(table))
+            # In key order, so a run is in before the run it continues
+            rows = read.execute(select(table).order_by(*table.primary_key.columns))
             count = 0
             while chunk := rows.fetchmany(batch):
                 write.execute(insert(table), [dict(row._mapping) for row in chunk])
@@ -83,7 +88,7 @@ def _reset_sequences(target) -> None:
     if target.engine.dialect.name != "postgresql":
         return
     with target.engine.begin() as conn:
-        for table in (t.sample, t.label_set, t.dataset):
+        for table in (t.raw, t.sample, t.origin, t.label_set, t.annotation, t.dataset):
             conn.execute(
                 text(
                     "SELECT setval("

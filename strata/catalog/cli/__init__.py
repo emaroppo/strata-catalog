@@ -7,6 +7,7 @@ from pathlib import Path
 from ..config import CatalogConfigError
 from ._shared import CONFIG, Refused
 from .inspect import _list, _probe, _stats, _types
+from .raw import _ingest, _raw_ls, _runs, _verify
 from .remove import _remove
 from .repack import _repack
 from .sync import _copy, _merge
@@ -60,6 +61,30 @@ def _parser() -> argparse.ArgumentParser:
     repack.add_argument("--shard-mb", type=int, default=512, help="Shard size in MB")
     repack.add_argument("--verify", type=int, default=64, help="Members to read back afterwards")
     repack.set_defaults(run=_repack)
+
+    ingest = commands.add_parser("ingest", help="Keep raw files as they are, under a collection")
+    ingest.add_argument("root", type=Path, help="Directory the names are paths under")
+    ingest.add_argument(
+        "--collection", required=True, metavar="PATH", help="Where they go: enron/maildir"
+    )
+    ingest.add_argument(
+        "--files", type=Path, metavar="LIST", help="Paths under the root, one a line (default: all)"
+    )
+    ingest.set_defaults(run=_ingest)
+
+    raw = commands.add_parser("raw", help="Raw files").add_subparsers(dest="raw", required=True)
+    ls = raw.add_parser("ls", help="A collection's names, one a line; or every collection")
+    ls.add_argument("collection", nargs="?", help="Which collection (default: list them)")
+    ls.set_defaults(run=_raw_ls)
+
+    runs = commands.add_parser("runs", help="What wrote to the catalog")
+    runs.add_argument("--kind", help="Only runs of this kind: ingest, prepare, import, ...")
+    runs.set_defaults(run=_runs)
+
+    verify = commands.add_parser("verify", help="Check a run is still what it recorded")
+    verify.add_argument("--run", dest="run_id", required=True, metavar="ID", help="Which run")
+    verify.add_argument("--deep", action="store_true", help="Also hash every blob it wrote")
+    verify.set_defaults(run=_verify)
 
     remove = commands.add_parser(
         "remove", help="Tombstone samples — bad data — and their annotations with them"

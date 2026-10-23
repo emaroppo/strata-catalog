@@ -6,6 +6,7 @@ And every query over samples names the collections it draws from, through
 """
 
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import NamedTuple
 
 from pydantic import TypeAdapter
@@ -45,6 +46,40 @@ class SampleRow:
     #: Out of comparison, and therefore out of the generated hash: two rows
     #: for the same sample are the same sample. See docs/adr/0001.
     metadata: dict | None = field(default=None, compare=False)
+
+
+@dataclass(frozen=True)
+class RunRow:
+    """A run that wrote to the catalog, as callers see it. docs/adr/0045"""
+
+    id: str
+    kind: str
+    producer: str
+    code: dict | None
+    spec: dict | None
+    spec_hash: str | None
+    chain: str | None
+    files_digest: str | None
+    continues: str | None
+    counts: dict
+    started_at: datetime
+    #: Null for a run whose transaction is still open; a failed one left no row.
+    finished_at: datetime | None
+
+
+@dataclass(frozen=True)
+class RawRow:
+    """A raw file as callers see it: its name, and where its bytes are."""
+
+    collection: str
+    path: str
+    checksum: str
+    location: Location
+    run_id: str
+
+    @property
+    def name(self) -> str:
+        return f"{self.collection}/{self.path}"
 
 
 class DatasetRef(NamedTuple):

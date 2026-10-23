@@ -39,6 +39,17 @@ carrying the metadata the type requires, `video` for a frame — and refuses
 the corpus with every shortfall listed before anything is written. A file
 the index does not name is counted, not taken.
 
+**Raw files, kept as they arrived.** `strata-catalog ingest` stores a
+directory's files as they are, each a raw row named by its collection and
+its path under the root: `enron/maildir/quenet-j/inbox/6.`. A raw file is
+not a sample, and nothing labels it; it is what samples are prepared from,
+so a corpus can be prepared again after its source directory is gone. A
+name means one set of bytes, so ingesting it again with the same bytes
+writes nothing and with other bytes is refused; the same bytes under
+several names are several rows over one blob. Every ingest is a run,
+recorded beside what it wrote with the checksums it was given and its
+counts, and `verify --run` checks that it still holds.
+
 **A type per sample, and types inherit.** The types are defined in
 `strata-contracts`: `image`, `text` and `frames` are built in; a plugin adds
 `satellite` by subclassing `Image`, or `email` by subclassing `Text`, and
@@ -127,7 +138,11 @@ nothing is refused rather than falling back.
 | `probe` | prove this host can reach index and blobs |
 | `copy --to URL` | move the index into another database, keys preserved |
 | `merge --from URL` | fold a copy's annotations back in |
-| `repack` | pack local blobs into a bucket |
+| `repack` | pack local blobs, samples' and raw files', into a bucket |
+| `ingest ROOT --collection PATH` | keep raw files as they are; `--files LIST` for some of them |
+| `raw ls [COLLECTION]` | a collection's names, one a line, or every collection counted |
+| `runs` | what wrote to the catalog, and what each counted |
+| `verify --run ID` | check a run still holds; `--deep` hashes every blob it wrote |
 
 Every command takes `--json` and `--catalog NAME`; `copy`, `merge` and
 `repack` report what they would do and write nothing until `--apply`.
