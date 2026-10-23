@@ -48,9 +48,10 @@ services:
       # The strata-catalog repository's root.
       context: ../..
       dockerfile: deploy/catalog-host/Dockerfile
-      # Where the image takes strata-contracts and strata-common from, and at
-      # which ref. The Dockerfile's defaults unless .env says otherwise: a host
-      # building from a mirror sets STRATA_GIT there once.
+      # Where the image takes strata-contracts, strata-common and
+      # strata-prepare from, and at which ref. The Dockerfile's defaults
+      # unless .env says otherwise: a host building from a mirror sets
+      # STRATA_GIT there once.
       args:
         STRATA_GIT: ${STRATA_GIT:-https://github.com/emaroppo}
         STRATA_REF: ${STRATA_REF:-main}
