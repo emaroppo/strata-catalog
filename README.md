@@ -111,8 +111,11 @@ root = "catalog"                       # SQLite index and blobs under here
 ```
 
 Credentials come from the environment, never from the file: `PGPASSWORD`,
-`STRATA_S3_ACCESS_KEY`, `STRATA_S3_SECRET_KEY`, `STRATA_BLOB_SECRET`. A
-catalog name that matches nothing is refused rather than falling back.
+`STRATA_S3_ACCESS_KEY`, `STRATA_S3_SECRET_KEY`, `STRATA_BLOB_SECRET`. A named
+catalog reads its own first, the same names suffixed with its own
+(`STRATA_BLOB_SECRET_ALT` for `[catalog.alt]`), so two catalogs on
+one machine need not share a key or a secret. A catalog name that matches
+nothing is refused rather than falling back.
 
 ## Commands
 

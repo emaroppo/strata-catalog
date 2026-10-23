@@ -3,13 +3,16 @@
 Every process that touches a catalog reads the same file through this
 module. The file says where; the environment holds secrets: ``$PGPASSWORD``
 for the index, ``$STRATA_S3_ACCESS_KEY`` and ``$STRATA_S3_SECRET_KEY`` for
-the bucket, ``$STRATA_BLOB_SECRET`` for signed URLs. See ``docs/adr/0019``.
+the bucket, ``$STRATA_BLOB_SECRET`` for signed URLs. A named catalog reads
+its own first, ``$STRATA_BLOB_SECRET_ALT`` for ``[catalog.alt]``.
+See ``docs/adr/0019``.
 
 Several catalogs can be described, as ``[catalog.<name>]`` tables layered on
 the flat ``[catalog]`` keys, and one of them is the host's default.
 """
 
 import os
+import re
 import tomllib
 from collections.abc import Mapping
 from dataclasses import dataclass, field
@@ -24,7 +27,8 @@ from .storage.blobs import BlobBackend, LocalBackend
 DEFAULT_CATALOG = "default"
 
 #: Credentials, by the environment variable that supplies each. Never read
-#: from the file. See docs/adr/0019.
+#: from the file. A named catalog reads the variable suffixed with its name
+#: first, so two catalogs on one host hold two keys. See docs/adr/0019.
 _SECRETS = {
     "s3_access_key": "STRATA_S3_ACCESS_KEY",
     "s3_secret_key": "STRATA_S3_SECRET_KEY",
@@ -34,7 +38,7 @@ _SECRETS = {
 #: Keys refused under ``[catalog]``, and what to do instead. They would be
 #: refused anyway as unknown; these only make the refusal useful.
 _MOVED = {
-    key: f"It is a credential, and comes from ${variable} only."
+    key: f"It is a credential, and comes from ${variable}_<NAME> or ${variable} only."
     for key, variable in _SECRETS.items()
 }
 
@@ -174,7 +178,8 @@ def read_catalogs(section: dict, environ: Mapping[str, str] | None = None) -> Ca
     ``docs/adr/0019``.
 
     Credentials come from ``environ``, the process environment unless
-    given, and reach every catalog described.
+    given. Each named catalog takes its own where one is set, and the
+    unsuffixed one otherwise. See :func:`secret_variables`.
     """
     environ = os.environ if environ is None else environ
     scalars = {k: v for k, v in section.items() if not isinstance(v, dict)}
@@ -183,7 +188,7 @@ def read_catalogs(section: dict, environ: Mapping[str, str] | None = None) -> Ca
 
     base = _config(scalars, "catalog", environ)
     by_name = {
-        name: _config({**scalars, **table}, f"catalog.{name}", environ)
+        name: _config({**scalars, **table}, f"catalog.{name}", environ, name=name)
         for name, table in tables.items()
     }
 
@@ -261,7 +266,23 @@ def open_catalog(config: CatalogConfig, *, create: bool = False) -> Catalog:
     return Catalog.create(url, blobs) if create else Catalog.connect(url, blobs)
 
 
-def _config(values: dict, where: str, environ: Mapping[str, str]) -> CatalogConfig:
+def secret_variables(variable: str, name: str) -> tuple[str, ...]:
+    """Where a catalog's credential is looked for, in order.
+
+    ``$STRATA_BLOB_SECRET_ALT`` for ``[catalog.alt]``, then the
+    unsuffixed variable, the way modelling hosts name their tokens. A catalog
+    whose own is unset takes the shared one, and a server it does not belong
+    to refuses it. The flat ``[catalog]`` has no name and reads only the
+    shared one. See ``docs/adr/0019``.
+    """
+    if not name:
+        return (variable,)
+    return (f"{variable}_{re.sub(r'[^A-Za-z0-9]', '_', name).upper()}", variable)
+
+
+def _config(
+    values: dict, where: str, environ: Mapping[str, str], *, name: str = ""
+) -> CatalogConfig:
     for key in values:
         if key in _MOVED:
             raise CatalogConfigError(f"[{where}] {key}: {_MOVED[key]}")
@@ -270,9 +291,11 @@ def _config(values: dict, where: str, environ: Mapping[str, str]) -> CatalogConf
     except TypeError as e:
         raise CatalogConfigError(f"[{where}]: {e}") from None
     for key, variable in _SECRETS.items():
-        value = environ.get(variable)
-        if value:
-            setattr(config, key, value)
+        for candidate in secret_variables(variable, name):
+            value = environ.get(candidate)
+            if value:
+                setattr(config, key, value)
+                break
     return config
 
 
@@ -288,4 +311,5 @@ __all__ = [
     "load_catalogs",
     "open_catalog",
     "read_catalogs",
+    "secret_variables",
 ]

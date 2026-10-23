@@ -17,7 +17,14 @@ class ConfigError(Exception):
 
 def build():
     """The app, from the environment. Raises if anything essential is absent."""
-    from ..config import CatalogConfigError, CatalogMissing, host_catalog, open_catalog
+    from ..config import (
+        DEFAULT_CATALOG,
+        CatalogConfigError,
+        CatalogMissing,
+        host_catalog,
+        open_catalog,
+        secret_variables,
+    )
     from .server import create_app
 
     # Opened by the same code the CLI uses. docs/adr/0019
@@ -26,9 +33,14 @@ def build():
     except CatalogConfigError as e:
         raise ConfigError(str(e)) from None
     if not config.blob_secret:
+        # The flat [catalog] goes by the default name but reads no suffix
+        own, *shared = secret_variables(
+            "STRATA_BLOB_SECRET", "" if name == DEFAULT_CATALOG else name
+        )
+        also = f", and neither is ${shared[0]}" if shared else ""
         raise ConfigError(
-            "$STRATA_BLOB_SECRET is not set. URLs are signed with it, and it must "
-            "match what the labeller signs with, or nothing a reviewer opens will load."
+            f"${own} is not set{also}. URLs are signed with it, and it must match "
+            f"what the labeller signs with, or nothing a reviewer opens will load."
         )
     try:
         catalog = open_catalog(config)

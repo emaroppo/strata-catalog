@@ -9,6 +9,7 @@ rather than guessed, and the environment cannot move a host to another
 catalog behind the file's back.
 """
 
+import os
 import re
 
 import pytest
@@ -33,15 +34,12 @@ def _write(tmp_path, body: str):
 
 @pytest.fixture(autouse=True)
 def _clean_environment(monkeypatch):
-    for name in (
-        "STRATA_CATALOG_URL",
-        "STRATA_S3_ENDPOINT",
-        "STRATA_S3_BUCKET",
-        "STRATA_S3_ACCESS_KEY",
-        "STRATA_S3_SECRET_KEY",
-        "STRATA_BLOB_SECRET",
-    ):
+    for name in ("STRATA_CATALOG_URL", "STRATA_S3_ENDPOINT", "STRATA_S3_BUCKET"):
         monkeypatch.delenv(name, raising=False)
+    # And every catalog's own, which a shell that sourced the secrets has
+    for name in list(os.environ):
+        if name.startswith(("STRATA_S3_ACCESS_KEY", "STRATA_S3_SECRET_KEY", "STRATA_BLOB_SECRET")):
+            monkeypatch.delenv(name)
 
 
 # ----------------------------------------------------------------------
@@ -252,6 +250,43 @@ root = "text"
     for name in ("images", "text"):
         assert catalogs.named(name).s3_access_key == "key"
         assert catalogs.named(name).blob_secret == "secret"
+
+
+def test_a_catalog_reads_its_own_credentials_first(tmp_path, monkeypatch):
+    """Two catalogs on one host are two keys and two secrets, neither able to
+    read or sign for the other; the unsuffixed ones are for a catalog with
+    none of its own."""
+    monkeypatch.setenv("STRATA_S3_ACCESS_KEY", "shared key")
+    monkeypatch.setenv("STRATA_BLOB_SECRET", "shared secret")
+    monkeypatch.setenv("STRATA_S3_ACCESS_KEY_ALT", "alt key")
+    monkeypatch.setenv("STRATA_BLOB_SECRET_ALT", "alt secret")
+    path = _write(
+        tmp_path,
+        """
+[catalog.main]
+root = "main"
+
+[catalog.alt]
+root = "alt"
+""",
+    )
+    catalogs = load_catalogs(path)
+    alt, main = catalogs.named("alt"), catalogs.named("main")
+    assert (alt.s3_access_key, alt.blob_secret) == ("alt key", "alt secret")
+    assert (main.s3_access_key, main.blob_secret) == ("shared key", "shared secret")
+
+
+def test_a_catalogs_own_variable_is_named_like_a_hosts_token(tmp_path, monkeypatch):
+    monkeypatch.setenv("STRATA_S3_SECRET_KEY_ALT_CATALOG", "its own")
+    path = _write(tmp_path, '[catalog.alt-catalog]\nroot = "p"\n')
+    assert load_catalogs(path).named("alt-catalog").s3_secret_key == "its own"
+
+
+def test_a_flat_catalog_reads_only_the_shared_credentials(tmp_path, monkeypatch):
+    """It has no name to suffix; the one it goes by is a placeholder."""
+    monkeypatch.setenv("STRATA_BLOB_SECRET_DEFAULT", "not this")
+    config = load_catalogs(_write(tmp_path, '[catalog]\nroot = "x"\n')).named()
+    assert config.blob_secret == ""
 
 
 def test_the_environment_cannot_move_a_host_to_another_catalog(tmp_path, monkeypatch):

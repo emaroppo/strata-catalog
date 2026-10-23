@@ -96,8 +96,8 @@ class SignedUrls:
         if not self.secret:
             raise SigningError(
                 "Serving blobs over HTTP needs a signing secret, or the URLs "
-                "authorise nothing. Set $STRATA_BLOB_SECRET to the same value "
-                "the server was started with."
+                "authorise nothing. Set $STRATA_BLOB_SECRET_<NAME> for this catalog, "
+                "or $STRATA_BLOB_SECRET, to the same value the server was started with."
             )
 
     def url_for(self, sample) -> str:

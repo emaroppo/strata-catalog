@@ -6,6 +6,8 @@ is not — so the failures worth testing are the ones that would otherwise be
 silent.
 """
 
+import os
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -23,6 +25,9 @@ def env(tmp_path, monkeypatch):
     config.write_text(f'[catalog]\nroot = "{tmp_path / "catalog"}"\n')
     for name in ("STRATA_CATALOG_URL", "STRATA_S3_ENDPOINT", "STRATA_S3_BUCKET"):
         monkeypatch.delenv(name, raising=False)
+    for name in list(os.environ):
+        if name.startswith("STRATA_BLOB_SECRET"):
+            monkeypatch.delenv(name)
 
     def _set(**overrides):
         values = {"STRATA_CONFIG": str(config), "STRATA_BLOB_SECRET": SECRET, **overrides}
@@ -93,3 +98,30 @@ def test_the_environment_does_not_choose_the_catalog(env, monkeypatch, tmp_path)
     monkeypatch.setenv("STRATA_CATALOG_URL", f"sqlite:///{tmp_path / 'elsewhere.db'}")
     served = TestClient(build()).get("/healthz").json()["catalog"]
     assert served["id"] == Catalog.local(tmp_path / "catalog").id
+
+
+def _two_catalogs(config, tmp_path, served: str):
+    Catalog.local(tmp_path / "alt")
+    config.write_text(f"""
+[catalog]
+default = "{served}"
+
+[catalog.main]
+root = "{tmp_path / "catalog"}"
+
+[catalog.alt]
+root = "{tmp_path / "alt"}"
+""")
+
+
+def test_a_named_catalog_is_served_with_its_own_secret(env, tmp_path):
+    """An alt catalog's server needs only its own secret, so the shared one
+    can belong to another catalog's server."""
+    _two_catalogs(env(STRATA_BLOB_SECRET=None, STRATA_BLOB_SECRET_ALT=SECRET), tmp_path, "alt")
+    assert TestClient(build()).get("/healthz").json()["catalog"]["name"] == "alt"
+
+
+def test_no_secret_names_both_places_it_was_looked_for(env, tmp_path):
+    _two_catalogs(env(STRATA_BLOB_SECRET=None), tmp_path, "alt")
+    with pytest.raises(ConfigError, match=r"STRATA_BLOB_SECRET_ALT.*STRATA_BLOB_SECRET\b"):
+        build()

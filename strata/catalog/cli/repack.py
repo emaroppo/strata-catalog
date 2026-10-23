@@ -15,8 +15,9 @@ def _repack(args) -> int:
         raise Refused(
             "No object storage configured for this catalog. Set s3_endpoint and s3_bucket in "
             "its [catalog] table, with the credentials in $STRATA_S3_ACCESS_KEY and "
-            "$STRATA_S3_SECRET_KEY — this packs blobs into a bucket, so there is nowhere to "
-            "put them otherwise."
+            "$STRATA_S3_SECRET_KEY (or the same suffixed with the catalog's name, "
+            "_ALT for [catalog.alt]) — this packs blobs into a bucket, so there "
+            "is nowhere to put them otherwise."
         )
     catalog, _ = _open(args)
     # This catalog's bucket, not the host default's: with --catalog naming
