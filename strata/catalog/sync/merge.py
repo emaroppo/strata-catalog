@@ -1,6 +1,7 @@
 """Folding one catalog's answers back into another.
 
-Only annotations move. An answer the target lacks is copied; the same
+Annotations move, and lists of checksums with them (``docs/adr/0050``).
+Nothing else does. An answer the target lacks is copied; the same
 answer is nothing; a different answer of equal standing is a conflict the
 target keeps its own side of and records; an answer that outranks what the
 target holds replaces or confirms it, and one that is outranked is left
@@ -48,6 +49,8 @@ class MergeReport:
     unknown_samples: list[str] = field(default_factory=list)
     #: Label sets present in the source and not in the target, by name.
     unknown_label_sets: list[str] = field(default_factory=list)
+    #: List versions the target did not hold, by name@version. docs/adr/0050
+    lists: list[str] = field(default_factory=list)
 
     @property
     def total(self) -> int:
@@ -85,6 +88,8 @@ class MergeReport:
             out.append(f"{len(self.unknown_samples)} for samples not in the target")
         if self.unknown_label_sets:
             out.append("label sets not in the target: " + ", ".join(self.unknown_label_sets))
+        if self.lists:
+            out.append("lists copied: " + ", ".join(self.lists))
         return out
 
 
@@ -110,6 +115,7 @@ def merge_annotations(
         )
 
     report = MergeReport()
+    _merge_lists(source, target, report, dry_run)
     for name, source_set_id in _label_sets(source):
         try:
             target_set_id, schema = target.label_sets.get(name)
@@ -200,6 +206,32 @@ def _merge_one(
             target.conflicts.record(
                 sample.id, target_set_id, kept=theirs, other=value, other_origin=origin
             )
+
+
+def _merge_lists(source: Catalog, target: Catalog, report: MergeReport, dry_run: bool) -> None:
+    """Every list version the target lacks, copied; one it holds otherwise, refused.
+
+    Refused before anything is written, as a raw name held with other bytes
+    is: a name and version mean one set. See ``docs/adr/0050``.
+    """
+    held = {row.ref: row for row in target.lists.every()}
+    arriving = source.lists.every()
+    clashes = [
+        row.ref for row in arriving if row.ref in held and held[row.ref].digest != row.digest
+    ]
+    if clashes:
+        raise MergeError(
+            f"The target holds list(s) {', '.join(clashes)} with other checksums. A "
+            f"name and version mean one set; nothing was merged."
+        )
+    new = [row for row in arriving if row.ref not in held]
+    report.lists = [row.ref for row in new]
+    if dry_run or not new:
+        return
+    with target.engine.begin() as conn:
+        for row in new:
+            _, members = source.lists.get(row.name, row.version)
+            target.lists.add(conn, row.name, row.version, row.digest, members)
 
 
 def _label_sets(catalog: Catalog) -> list[tuple[str, int]]:

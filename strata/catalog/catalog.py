@@ -5,6 +5,7 @@ backend stay implementation details. See ``docs/adr/0021``.
 """
 
 import hashlib
+import json
 import uuid
 from collections.abc import Callable, Iterable, Sequence
 from datetime import UTC, datetime
@@ -30,6 +31,7 @@ from .index.annotations import Annotations
 from .index.conflicts import Conflicts
 from .index.datasets import Datasets
 from .index.label_sets import LabelSets
+from .index.lists import Lists
 from .index.raw import Raw
 from .index.runs import Runs
 from .index.samples import Samples
@@ -41,11 +43,23 @@ from .rows import (
     CatalogError,
     CatalogMissing,
 )
+from .selection import Selection, SelectionSpec, default_spec, lock, run_selection, watermark
 from .storage.blobs import BlobBackend, LocalBackend, Location, blob_path, checksum_of
 from .versions.features import FeatureError, FeatureSpec
 from .versions.files import fetch_into, materialised_name, write_out
 from .versions.given import GivenSplit
 from .versions.split import assign
+
+
+def _rejections(counts: dict) -> str:
+    said = [
+        f"{entry['rejected']:,} rejected by {json.dumps(entry['condition'], sort_keys=True)}"
+        for entry in counts.get("rejected", [])
+    ]
+    said += [
+        f"{n['removed']:,} removed by list {ref}" for ref, n in counts.get("lists", {}).items()
+    ]
+    return "; ".join(said) + "." if said else ""
 
 
 def _canonical_source(
@@ -93,6 +107,7 @@ class Catalog:
         self.datasets = Datasets(engine)
         self.raw = Raw(engine)
         self.runs = Runs(engine)
+        self.lists = Lists(engine)
 
     @classmethod
     def local(cls, root: Path) -> "Catalog":
@@ -300,7 +315,7 @@ class Catalog:
         val_ratio: float = 0.2,
         holdout_ratio: float = 0.0,
         seed: int = 42,
-        query: dict | None = None,
+        spec: SelectionSpec | None = None,
         group_by: str | None = None,
         inherit: bool = True,
         given: GivenSplit | None = None,
@@ -322,19 +337,45 @@ class Catalog:
         call's grouping and seed, and the version records that its sides
         start here. A warm start never reaches back past such a version.
         See ``docs/adr/0024``.
+
+        ``spec`` selects the members, and the version records it with the
+        watermark it ran at. Without one, ``collections`` stands for the
+        spec that says what a freeze always did: every sample there with a
+        current answer in the label set. Members named outright as
+        ``sample_ids`` record no spec, and cannot be verified. While the
+        selection reads, writers wait. See ``docs/adr/0050``.
         """
-        if sample_ids is None:
-            if collections is None:
-                raise CatalogError(
-                    "Give either the samples to freeze or the collections to "
-                    "draw them from; defaulting to the whole catalog would "
-                    "quietly train on another job's data."
-                )
-            sample_ids = [s.id for s in self.samples.labelled(label_set_id, collections)]
-        if not sample_ids:
-            raise CatalogError(f"No labelled samples for label set {label_set_id}")
+        if sample_ids is not None and spec is not None:
+            raise CatalogError("Give the samples to freeze or a spec to select them, not both.")
+        if sample_ids is None and spec is None and collections is None:
+            raise CatalogError(
+                "Give either the samples to freeze or the collections to "
+                "draw them from; defaulting to the whole catalog would "
+                "quietly train on another job's data."
+            )
 
         with self.engine.begin() as conn:
+            chosen: Selection | None = None
+            if sample_ids is None:
+                lock(conn)
+                label_set = self.label_sets.name_of(conn, label_set_id)
+                if spec is None:
+                    spec = default_spec(conn, label_set, label_set_id, collections)
+                elif spec.select.label_set != label_set:
+                    raise CatalogError(
+                        f"The selection draws answers from {spec.select.label_set!r}, "
+                        f"and this freeze is over {label_set!r}."
+                    )
+                chosen = run_selection(conn, spec, watermark(conn))
+                sample_ids = chosen.members
+                if not sample_ids:
+                    raise CatalogError(
+                        f"The selection chose nothing: {chosen.counts['candidates']:,} "
+                        f"candidate(s), none passed. {_rejections(chosen.counts)}"
+                    )
+            if not sample_ids:
+                raise CatalogError(f"No labelled samples for label set {label_set_id}")
+
             digest = answers.digest(conn, label_set_id, sample_ids)
             existing = self.datasets.identical(
                 conn,
@@ -347,6 +388,7 @@ class Catalog:
                 inherit,
                 seed,
                 given.model_dump() if given is not None else None,
+                spec_hash=None if spec is None else spec.spec_hash,
             )
             if existing is not None:
                 # A version describes a selection, not an attempt at one. A
@@ -385,7 +427,10 @@ class Catalog:
                 name=name,
                 version=version,
                 label_set_id=label_set_id,
-                query=query,
+                spec=None if spec is None else spec.canonical(),
+                spec_hash=None if spec is None else spec.spec_hash,
+                watermark=None if chosen is None else chosen.watermark,
+                selection=None if chosen is None else chosen.counts,
                 digest=digest,
                 val_ratio=val_ratio,
                 holdout_ratio=holdout_ratio,

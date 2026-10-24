@@ -129,13 +129,17 @@ class Datasets:
         inherit: bool = True,
         seed: int | None = None,
         given_split: dict | None = None,
+        spec_hash: str | None = None,
     ) -> int | None:
         """The latest version of ``name``, if it froze exactly this.
 
         Exactly this: the same members, the same answers about them, the
         same ratios asked for, the same grouping respected, the same split
-        given — and, for a freeze that re-splits, a latest version that
-        re-split itself from the same seed. See ``docs/adr/0024``.
+        given, the same spec — and, for a freeze that re-splits, a latest
+        version that re-split itself from the same seed. See
+        ``docs/adr/0024``. Two specs that choose the same members today
+        are two selections, and differ once more is labelled. See
+        ``docs/adr/0050``.
         """
         latest = conn.execute(
             select(
@@ -148,6 +152,7 @@ class Datasets:
                 t.dataset.c.sides_from_version,
                 t.dataset.c.seed,
                 t.dataset.c.given_split,
+                t.dataset.c.spec_hash,
             )
             .where(t.dataset.c.name == name)
             .order_by(t.dataset.c.version.desc())
@@ -165,6 +170,8 @@ class Datasets:
         if latest.group_by != group_by:
             return None
         if (latest.given_split or None) != (given_split or None):
+            return None
+        if latest.spec_hash != spec_hash:
             return None
         if not inherit and (latest.sides_from_version != latest.version or latest.seed != seed):
             return None
@@ -236,7 +243,10 @@ class Datasets:
         name: str,
         version: int,
         label_set_id: int,
-        query: dict | None,
+        spec: dict | None,
+        spec_hash: str | None,
+        watermark: dict | None,
+        selection: dict | None,
         digest: str,
         val_ratio: float,
         holdout_ratio: float,
@@ -253,7 +263,10 @@ class Datasets:
                 name=name,
                 version=version,
                 label_set_id=label_set_id,
-                query=query,
+                spec=spec,
+                spec_hash=spec_hash,
+                watermark=watermark,
+                selection=selection,
                 annotation_digest=digest,
                 val_ratio=val_ratio,
                 val_ratio_achieved=achieved.val,

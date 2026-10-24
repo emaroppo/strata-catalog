@@ -7,6 +7,7 @@ from pathlib import Path
 from ..config import CatalogConfigError
 from ._shared import CONFIG, Refused
 from .answers import _export_answers, _import_answers
+from .datasets import _dataset_verify, _lists_ls, _lists_put, _lists_show
 from .inspect import _list, _probe, _stats, _types
 from .raw import _ingest, _prepare, _raw_ls, _runs, _verify
 from .remove import _remove
@@ -123,6 +124,28 @@ def _parser() -> argparse.ArgumentParser:
     verify.add_argument("--deep", action="store_true", help="Also hash every blob it wrote")
     verify.set_defaults(run=_verify)
 
+    dataset = commands.add_parser("dataset", help="Dataset versions").add_subparsers(
+        dest="dataset", required=True
+    )
+    check = dataset.add_parser(
+        "verify", help="Run a version's spec again at its watermark, and compare its members"
+    )
+    check.add_argument("version", metavar="NAME@VERSION", help="Which version: enron-sft@3")
+    check.set_defaults(run=_dataset_verify)
+
+    # Not "list", which lists the catalogs this host is configured for
+    lists = commands.add_parser(
+        "lists", help="Named, versioned sets of checksums a selection spec can name"
+    ).add_subparsers(dest="lists", required=True)
+    put = lists.add_parser("put", help="Store a set; the same set again is its version")
+    put.add_argument("name", help="The list's name, without a version")
+    put.add_argument("checksums", type=Path, help="Checksums, one a line; - reads stdin")
+    put.set_defaults(run=_lists_put)
+    show = lists.add_parser("show", help="A version's checksums, one a line")
+    show.add_argument("version", metavar="NAME@VERSION")
+    show.set_defaults(run=_lists_show)
+    lists.add_parser("ls", help="Every list version").set_defaults(run=_lists_ls)
+
     remove = commands.add_parser(
         "remove", help="Tombstone samples — bad data — and their annotations with them"
     )
@@ -130,8 +153,9 @@ def _parser() -> argparse.ArgumentParser:
         "--collection", action="append", metavar="PATH", help="Look in this collection"
     )
     remove.add_argument(
-        "--where", action="append", metavar="KEY=VALUE", help="Metadata that must match"
-    )
+        "--where", action="append", metavar="KEY=VALUE",
+        help="Metadata that must match; the value is JSON where it parses, so 2000 is a number",
+    )  # fmt: skip
     remove.add_argument("--checksum", action="append", metavar="SHA256", help="A sample outright")
     remove.add_argument("--dry-run", action="store_true", help="Report what would go")
     remove.set_defaults(run=_remove)

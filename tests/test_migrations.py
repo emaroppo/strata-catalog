@@ -290,3 +290,75 @@ def test_a_label_sets_task_is_rewritten_to_label_type(url, monkeypatch):
     command.upgrade(_config(url), "head")
     command.upgrade(_config(url), "head")
     assert stored()["label_type"] == "span"
+
+
+def test_the_class_index_is_rebuilt_for_every_answer_superseded_or_not(url, monkeypatch):
+    """Record 0050: classes are kept per annotation row, so a replay can read the past."""
+    import json
+
+    from sqlalchemy import text
+
+    from strata.contracts import ClassificationSchema
+
+    monkeypatch.setenv("STRATA_CATALOG_URL", url)
+    command.upgrade(_config(url), "c4a81e6d29f5")
+    schema = ClassificationSchema(classes=["cat", "dog"]).model_dump_json()
+    engine = create_engine(url)
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                "INSERT INTO sample (id, checksum, location, offset, length, media, subtype) "
+                "VALUES (1, 'a', 'x', 0, 1, 'image', 'plain'), "
+                "(2, 'b', 'y', 0, 1, 'image', 'plain')"
+            )
+        )
+        conn.execute(
+            text("INSERT INTO sample_collection (sample_id, collection) VALUES (1, 'p'), (2, 'p')")
+        )
+        conn.execute(
+            text("INSERT INTO label_set (id, name, schema) VALUES (1, 'l', :s)"), {"s": schema}
+        )
+        for i, (sample, value, superseded) in enumerate(
+            [(1, ["cat"], "2026-01-01"), (1, ["dog"], None), (2, None, None)], start=1
+        ):
+            conn.execute(
+                text(
+                    "INSERT INTO annotation (id, sample_id, label_set_id, state, source, value, "
+                    "superseded_at) VALUES (:i, :s, 1, :state, 'human', :v, :sup)"
+                ),
+                {
+                    "i": i,
+                    "s": sample,
+                    "state": "annotated" if value else "skipped",
+                    "v": json.dumps({"kind": "choices", "values": value}) if value else None,
+                    "sup": superseded,
+                },
+            )
+        conn.execute(
+            text(
+                "INSERT INTO annotation_class (sample_id, label_set_id, class_name) "
+                "VALUES (1, 1, 'dog')"
+            )
+        )
+
+    command.upgrade(_config(url), "head")
+
+    with engine.connect() as conn:
+        classes = conn.execute(text("SELECT annotation_id, class_name FROM annotation_class")).all()
+        memberships = conn.execute(
+            text("SELECT id, sample_id, collection, added_at FROM sample_collection ORDER BY id")
+        ).all()
+    assert sorted(classes) == [(1, "cat"), (2, "dog")]
+    assert [tuple(m) for m in memberships] == [(1, 1, "p", None), (2, 2, "p", None)]
+
+    # Walked back, the index holds the current answers' classes again
+    command.downgrade(_config(url), "c4a81e6d29f5")
+    with engine.connect() as conn:
+        classes = conn.execute(
+            text("SELECT sample_id, label_set_id, class_name FROM annotation_class")
+        ).all()
+        memberships = conn.execute(
+            text("SELECT sample_id, collection FROM sample_collection")
+        ).all()
+    assert classes == [(1, 1, "dog")]
+    assert sorted(memberships) == [(1, "p"), (2, "p")]

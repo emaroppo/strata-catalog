@@ -212,3 +212,28 @@ def test_a_drawn_manifest_is_still_a_manifest(built, context):
     payload = json.loads((record.directory / MANIFEST_NAME).read_text())
     assert payload["format"] == _manifest(built.directory).format
     assert {s["split"] for s in payload["samples"]} <= {"train", "val", "holdout"}
+
+
+def test_dataset_takes_a_selection_spec_by_path_and_stores_its_content(context, tmp_path):
+    from sqlalchemy import select
+
+    from strata.catalog.index import tables as t
+
+    path = tmp_path / "frames.toml"
+    path.write_text(
+        '[select]\ntypes = ["image"]\nlabel_set = "presence"\n\n'
+        '[select.where]\nkey = "video"\nop = "in"\nvalue = ["vid0", "vid1", "vid2"]\n'
+    )
+    record = dataset(_request(collections=[], spec=path), context)
+    assert record.samples == 12
+    with context.catalog.engine.connect() as conn:
+        stored = conn.execute(
+            select(t.dataset.c.spec).where(t.dataset.c.id == record.dataset_id)
+        ).scalar_one()
+    assert stored["select"]["where"]["value"] == ["vid0", "vid1", "vid2"]
+    assert "frames.toml" not in json.dumps(stored)
+
+
+def test_dataset_with_neither_a_spec_nor_collections_is_refused(context):
+    with pytest.raises(CatalogError, match="selection spec or the collections"):
+        dataset(_request(collections=[]), context)

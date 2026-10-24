@@ -20,6 +20,7 @@ from strata.contracts import MANIFEST_NAME, Manifest
 
 from .catalog import Catalog
 from .rows import CatalogError
+from .selection import SelectionSpec
 from .versions.features import FeatureSpec
 from .versions.files import link_or_copy
 from .versions.given import GivenSplit
@@ -65,7 +66,13 @@ class DatasetRequest(Strict):
 
     name: str
     label_set: str
-    collections: list[str]
+    #: Where to draw from when no spec is given; a spec names its own.
+    collections: list[str] = Field(default_factory=list)
+    #: A selection spec, by path: which types, collections, answers,
+    #: conditions and lists the version draws. Its content is stored, never
+    #: the path. None freezes every sample in ``collections`` with a
+    #: current answer. See docs/adr/0050.
+    spec: Path | None = None
     val_ratio: float = 0.2
     holdout_ratio: float = 0.0
     seed: int = 42
@@ -113,8 +120,16 @@ def dataset(request: DatasetRequest, context: Context) -> DatasetRecord:
         ) from exc
     if request.version is not None:
         return _pinned(request, context, label_set_id, request.version)
-    labelled = catalog.samples.labelled(label_set_id, request.collections)
-    if not labelled:
+    spec = None
+    if request.spec is not None:
+        spec = SelectionSpec.read(request.spec)
+    elif not request.collections:
+        raise CatalogError(
+            "The dataset stage needs a selection spec or the collections to draw "
+            "from; defaulting to the whole catalog would quietly train on another "
+            "job's data."
+        )
+    elif not catalog.samples.labelled(label_set_id, request.collections):
         raise CatalogError(
             f"Nothing is labelled for {request.label_set!r} in "
             f"{', '.join(request.collections)}, so there is nothing to train on."
@@ -122,7 +137,8 @@ def dataset(request: DatasetRequest, context: Context) -> DatasetRecord:
     dataset_id = catalog.create_dataset(
         request.name,
         label_set_id,
-        collections=request.collections,
+        collections=request.collections or None,
+        spec=spec,
         val_ratio=request.val_ratio,
         holdout_ratio=request.holdout_ratio,
         seed=request.seed,
@@ -131,9 +147,10 @@ def dataset(request: DatasetRequest, context: Context) -> DatasetRecord:
         given=request.given,
     )
     ref = catalog.datasets.named(dataset_id)
+    members = catalog.datasets.members(dataset_id, label_set_id)
     given = 0
     if request.given is not None:
-        given = len(request.given.sides_for({s.id: s.metadata or {} for s in labelled}))
+        given = len(request.given.sides_for({s.id: s.metadata or {} for s in members}))
     return DatasetRecord(
         dataset_id=dataset_id,
         name=ref.name,
@@ -141,7 +158,7 @@ def dataset(request: DatasetRequest, context: Context) -> DatasetRecord:
         annotation_digest=ref.annotation_digest,
         catalog_id=catalog.id,
         label_set_id=label_set_id,
-        samples=len(labelled),
+        samples=len(members),
         given=given,
         groups_cut=catalog.datasets.groups_cut(dataset_id, label_set_id, request.group_by),
     )

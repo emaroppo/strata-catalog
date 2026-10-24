@@ -158,8 +158,14 @@ sample = Table(
 sample_collection = Table(
     "sample_collection",
     metadata,
-    Column("sample_id", ForeignKey("sample.id", ondelete="CASCADE"), primary_key=True),
-    Column("collection", String(255), primary_key=True),
+    # Added and never replaced, so a sample's collections at any point are
+    # the rows below an id: what a freeze's watermark covers. docs/adr/0050
+    Column("id", Integer, primary_key=True),
+    Column("sample_id", ForeignKey("sample.id", ondelete="CASCADE"), nullable=False),
+    Column("collection", String(255), nullable=False),
+    # For reading. Null for a membership older than the column.
+    Column("added_at", DateTime, server_default=func.now()),
+    UniqueConstraint("sample_id", "collection", name="uq_sample_collection"),
     Index("ix_sample_collection_name", "collection"),
 )
 
@@ -235,15 +241,70 @@ annotation = Table(
 
 
 #: Derived from ``annotation.value`` on every write, through the indexing
-#: contract in strata.contracts. See docs/adr/0039.
+#: contract in strata.contracts. Keyed by the row it was derived from and
+#: kept for every row, so what a superseded answer asserted stays readable.
+#: The current classes are the current row's. See docs/adr/0039 and
+#: docs/adr/0050.
 annotation_class = Table(
     "annotation_class",
     metadata,
-    Column("sample_id", Integer, nullable=False),
-    Column("label_set_id", Integer, nullable=False),
-    Column("class_name", String(255), nullable=False),
-    UniqueConstraint("sample_id", "label_set_id", "class_name"),
-    Index("ix_annotation_class_lookup", "label_set_id", "class_name"),
+    Column("annotation_id", ForeignKey("annotation.id", ondelete="CASCADE"), primary_key=True),
+    Column("class_name", String(255), primary_key=True),
+    Index("ix_annotation_class_name", "class_name"),
+)
+
+
+#: What an event records: a sample tombstoned, a skip withdrawn with
+#: nothing after it, a sample's description changed in place, and an
+#: answer that arrived already superseded, as history carried from another
+#: catalog, so was never the answer here.
+TOMBSTONED, WITHDRAWN, DESCRIBED, ARRIVED = "tombstoned", "withdrawn", "described", "arrived"
+EVENT_KINDS = (TOMBSTONED, WITHDRAWN, DESCRIBED, ARRIVED)
+
+#: The changes made to a row in place rather than by appending one, each
+#: appended here as well. With them, every change a freeze's replay needs
+#: is a row with an id under its watermark. ``before`` is what a
+#: description was until this event changed it. See docs/adr/0050.
+event = Table(
+    "event",
+    metadata,
+    Column("id", Integer, primary_key=True),
+    Column("kind", String(16), nullable=False),
+    Column("sample_id", ForeignKey("sample.id", ondelete="CASCADE"), nullable=False),
+    # The skip withdrawn, or the answer that arrived superseded.
+    Column("annotation_id", ForeignKey("annotation.id", ondelete="CASCADE"), nullable=True),
+    Column("before", JSON, nullable=True),
+    # For reading; a replay goes by the id.
+    Column("at", DateTime, server_default=func.now()),
+    Index("ix_event_sample", "sample_id"),
+)
+
+
+#: A set of checksums with a name and a version, which a selection spec
+#: includes or excludes: what a script chose, where a condition on one
+#: sample cannot say it. A version never changes; a different set under the
+#: same name is the next version. Checksums rather than sample ids, since an
+#: id means nothing outside its catalog. See docs/adr/0050.
+list_version = Table(
+    "list_version",
+    metadata,
+    Column("id", Integer, primary_key=True),
+    Column("name", String(255), nullable=False),
+    Column("version", Integer, nullable=False),
+    # Over the sorted checksums, so a copy holding the same name and
+    # version can be told to hold the same set.
+    Column("digest", String(64), nullable=False),
+    Column("size", Integer, nullable=False),
+    Column("created_at", DateTime, server_default=func.now()),
+    UniqueConstraint("name", "version", name="uq_list_version"),
+)
+
+
+list_member = Table(
+    "list_member",
+    metadata,
+    Column("list_id", ForeignKey("list_version.id", ondelete="CASCADE"), primary_key=True),
+    Column("checksum", String(64), primary_key=True),
 )
 
 
@@ -256,10 +317,18 @@ dataset = Table(
     # A dataset is samples *and their annotations against one label set*.
     # docs/adr/0024
     Column("label_set_id", ForeignKey("label_set.id"), nullable=False),
-    # What selected the members, kept for provenance rather than replayed:
-    # re-running it later would return something else, which is the point of
-    # materialising in the first place.
-    Column("query", JSON, nullable=True),
+    # The selection spec that chose the members, canonical, and its hash.
+    # Run again at the watermark, it gives the members back; a round still
+    # trains on the rows. Null for a version frozen before specs were
+    # recorded, or from samples a caller named. docs/adr/0050
+    Column("spec", JSON, nullable=True),
+    Column("spec_hash", String(64), nullable=True),
+    # How far the catalog had got when the freeze read it: the highest id
+    # of each appended table it read.
+    Column("watermark", JSON, nullable=True),
+    # What the selection counted: candidates by collection and type, what
+    # each condition and list removed, which keys were missing.
+    Column("selection", JSON, nullable=True),
     # The answers this version froze, as a digest over its members'
     # annotations: a version is samples *and* what was said about them.
     # Null means frozen before this column existed — unknown, and unknown

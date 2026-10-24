@@ -25,11 +25,13 @@ from .canonical import CanonicalError, canonical_form
 from .catalog import Catalog
 from .intake import Admission, IntakeError, admit
 from .rows import EVERYTHING, AnnotateReport, CatalogError, CatalogMissing, DatasetRef, SampleRow
+from .selection import SelectionSpec
 from .storage.blobs import BlobBackend, LocalBackend, Location, blob_path, checksum_of
 from .storage.repack import RepackError, RepackReport, repack_blobs
 from .storage.signing import SignedUrls, SigningError, suffix_of
 from .sync.copy import CopyError, CopyReport, copy_index
 from .sync.merge import MergeError, MergeReport, merge_annotations
+from .verify import DatasetVerifyReport, verify_dataset
 from .versions.given import GivenSplit
 from .versions.materialised import Materialised, ensure_materialised
 from .versions.split import HOLDOUT, TRAIN, VAL, Achieved, SplitError, assign
@@ -63,6 +65,7 @@ __all__ = [
     "CopyError",
     "CopyReport",
     "DatasetRef",
+    "DatasetVerifyReport",
     "GivenSplit",
     "IntakeError",
     "LocalBackend",
@@ -73,6 +76,7 @@ __all__ = [
     "RepackError",
     "RepackReport",
     "SampleRow",
+    "SelectionSpec",
     "SignedUrls",
     "SigningError",
     "SplitError",
@@ -86,4 +90,5 @@ __all__ = [
     "merge_annotations",
     "repack_blobs",
     "suffix_of",
+    "verify_dataset",
 ]

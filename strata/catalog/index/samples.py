@@ -12,6 +12,7 @@ from sqlalchemy import and_, func, insert, select, update
 from sqlalchemy.engine import Engine
 
 from ..rows import SAMPLE_COLUMNS, SampleRow, chunks, current, live, sample_rows, scoped
+from ..selection import Compare, compares
 from ..storage.blobs import Location
 from . import tables as t
 
@@ -53,13 +54,30 @@ class Samples:
             )
         ).inserted_primary_key[0]
 
-    def describe(self, conn, sample_id: int, *, subtype: str, metadata: dict | None) -> None:
+    def describe(
+        self, conn, sample_id: int, *, subtype: str | None = None, metadata: dict | None
+    ) -> None:
         """Bring a known sample's description up to date.
 
         Updated rather than left alone; a dataset already built is
         undisturbed, since membership is materialised into
-        ``dataset_member``. See ``docs/adr/0023``.
+        ``dataset_member``. See ``docs/adr/0023``. A change in place, so
+        what it replaced is an event, for a freeze's replay to read back.
+        Nothing changed is nothing recorded. See ``docs/adr/0050``.
         """
+        before = conn.execute(
+            select(t.sample.c.subtype, t.sample.c.metadata).where(t.sample.c.id == sample_id)
+        ).one()
+        subtype = before.subtype if subtype is None else subtype
+        if (subtype, metadata) == (before.subtype, before.metadata):
+            return
+        conn.execute(
+            insert(t.event).values(
+                kind=t.DESCRIBED,
+                sample_id=sample_id,
+                before={"subtype": before.subtype, "metadata": before.metadata},
+            )
+        )
         conn.execute(
             update(t.sample)
             .where(t.sample.c.id == sample_id)
@@ -182,36 +200,47 @@ class Samples:
         Every reader takes live samples only, so a removed sample leaves
         the queue, the labelled set and any version frozen from here on;
         its rows and its history stay. A version already frozen keeps its
-        members. Returns how many were live and are not now. See
-        ``docs/adr/0002``.
+        members. Returns how many were live and are not now. Each is an
+        event as well. See ``docs/adr/0002`` and ``docs/adr/0050``.
         """
         gone = 0
         with self.engine.begin() as conn:
             for chunk in chunks(list(sample_ids)):
-                gone += conn.execute(
-                    update(t.sample)
-                    .where(and_(t.sample.c.id.in_(chunk), t.sample.c.deleted_at.is_(None)))
-                    .values(deleted_at=func.now())
-                ).rowcount
+                alive = list(
+                    conn.execute(
+                        select(t.sample.c.id).where(
+                            and_(t.sample.c.id.in_(chunk), t.sample.c.deleted_at.is_(None))
+                        )
+                    ).scalars()
+                )
+                if not alive:
+                    continue
+                conn.execute(
+                    update(t.sample).where(t.sample.c.id.in_(alive)).values(deleted_at=func.now())
+                )
+                conn.execute(
+                    insert(t.event), [{"kind": t.TOMBSTONED, "sample_id": i} for i in alive]
+                )
+                gone += len(alive)
         return gone
 
-    def matching(self, collections, where: dict[str, str] | None = None) -> list[SampleRow]:
+    def matching(self, collections, where: dict[str, object] | None = None) -> list[SampleRow]:
         """Live samples in ``collections`` whose metadata has every key of ``where`` at its value.
 
-        Compared as strings, since a value typed at a command line is one.
-        The metadata is filtered here rather than in SQL. See
-        ``docs/adr/0021``.
+        Compared with their types, as a selection spec compares them, by the
+        same code: ``2000`` matches the number and not the string. The
+        metadata is filtered here rather than in SQL. See ``docs/adr/0021``
+        and ``docs/adr/0050``.
         """
         stmt = select(*SAMPLE_COLUMNS).where(live())
         with self.engine.connect() as conn:
             rows = sample_rows(conn, scoped(stmt, collections))
         if not where:
             return rows
-        return [
-            row
-            for row in rows
-            if all(str((row.metadata or {}).get(k)) == v for k, v in where.items())
+        conditions = [
+            Compare.model_validate({"key": k, "op": "==", "value": v}) for k, v in where.items()
         ]
+        return [row for row in rows if all(compares(c, row.metadata) for c in conditions)]
 
     def unreviewed(self, label_set_id: int, collections) -> list[SampleRow]:
         """Samples whose current answer arrived with the corpus and nobody has confirmed.
@@ -243,13 +272,25 @@ class Samples:
         )
 
     def with_class(self, label_set_id: int, class_name: str, collections) -> list[SampleRow]:
-        """Every sample asserting a class: the join the index exists for. See ``docs/adr/0039``."""
-        return self._joined(
-            t.annotation_class,
-            t.annotation_class.c.label_set_id == label_set_id,
-            t.annotation_class.c.class_name == class_name,
-            collections=collections,
+        """Every sample whose current answer asserts a class: the join the index exists for.
+
+        See ``docs/adr/0039``.
+        """
+        stmt = (
+            select(*SAMPLE_COLUMNS)
+            .join(t.annotation, t.annotation.c.sample_id == t.sample.c.id)
+            .join(t.annotation_class, t.annotation_class.c.annotation_id == t.annotation.c.id)
+            .where(
+                and_(
+                    live(),
+                    t.annotation.c.label_set_id == label_set_id,
+                    current(),
+                    t.annotation_class.c.class_name == class_name,
+                )
+            )
         )
+        with self.engine.connect() as conn:
+            return sample_rows(conn, scoped(stmt, collections))
 
     def _joined(self, table, *predicates, collections) -> list[SampleRow]:
         """Live samples with a row in ``table`` meeting ``predicates``, in scope."""

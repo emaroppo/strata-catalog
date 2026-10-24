@@ -6,6 +6,9 @@ deep, that each blob behind it still hashes to its checksum. A training
 run can then show that the preparation behind its data is the one it
 trained against, without either store reading the other. See
 ``docs/adr/0045``.
+
+A dataset version is checked the same way: its spec run again at its
+watermark gives its members back. See ``docs/adr/0050``.
 """
 
 import hashlib
@@ -15,7 +18,7 @@ from sqlalchemy import func, select
 
 from .index import tables as t
 from .index.runs import IMPORT, INGEST, PREPARE, files_digest
-from .rows import chunks, live
+from .rows import CatalogError, chunks, live
 from .storage.blobs import Location
 
 
@@ -171,3 +174,80 @@ def _deep(catalog, conn, run, report: VerifyReport) -> None:
         f"{len(wanted) - len(wrong):,} of {len(wanted):,} blob(s) hash to their checksum"
         + (f"; wrong: {', '.join(c[:12] for c in wrong[:5])}" if wrong else ""),
     )
+
+
+@dataclass
+class DatasetVerifyReport:
+    """Whether a version's members are exactly what its spec selects at its watermark."""
+
+    name: str
+    version: int
+    checks: list[Check] = field(default_factory=list)
+
+    @property
+    def ok(self) -> bool:
+        return bool(self.checks) and all(check.ok for check in self.checks)
+
+    def add(self, name: str, ok: bool, detail: str) -> None:
+        self.checks.append(Check(name, ok, detail))
+
+
+def verify_dataset(catalog, name: str, version: int) -> DatasetVerifyReport:
+    """Run a version's spec again at its watermark, and compare the members.
+
+    Reproducibility rests on the rows; this answers whether the rows are
+    what the spec chose. A version frozen before specs were recorded, or
+    from samples named outright, has nothing to run, and says so. See
+    ``docs/adr/0050``.
+    """
+    from .selection import SelectionSpec, lock, run_selection
+
+    report = DatasetVerifyReport(name=name, version=version)
+    with catalog.engine.begin() as conn:
+        row = conn.execute(
+            select(
+                t.dataset.c.id, t.dataset.c.spec, t.dataset.c.spec_hash, t.dataset.c.watermark,
+                t.dataset.c.selection,
+            ).where(t.dataset.c.name == name, t.dataset.c.version == version)
+        ).first()  # fmt: skip
+        if row is None:
+            raise CatalogError(f"No version {version} of dataset {name!r} in this catalog.")
+        if row.spec is None or row.watermark is None:
+            raise CatalogError(
+                f"{name}@{version} records no selection spec: it was frozen before "
+                f"versions recorded one, or from samples named outright. Its members "
+                f"stand as rows, and there is nothing to run again."
+            )
+        spec = SelectionSpec.stored(row.spec)
+        report.add(
+            "spec",
+            spec.spec_hash == row.spec_hash,
+            f"hash {spec.spec_hash[:12]}"
+            + ("" if spec.spec_hash == row.spec_hash else f", recorded {row.spec_hash[:12]}"),
+        )
+        # Under the freeze's lock, so a change in place cannot land between
+        # reading a row and reading the event that dates it
+        lock(conn)
+        again = run_selection(conn, spec, row.watermark)
+        members = set(
+            conn.execute(
+                select(t.dataset_member.c.sample_id).where(t.dataset_member.c.dataset_id == row.id)
+            ).scalars()
+        )
+    selected = set(again.members)
+    extra, missing = sorted(selected - members), sorted(members - selected)
+    report.add(
+        "members",
+        not extra and not missing,
+        f"{len(selected):,} selected, {len(members):,} member(s)"
+        + (f"; selected and not members: {extra[:10]}" if extra else "")
+        + (f"; members not selected: {missing[:10]}" if missing else ""),
+    )
+    recorded = row.selection or {}
+    report.add(
+        "counts",
+        again.counts == recorded,
+        "the counts the freeze recorded"
+        + (" match" if again.counts == recorded else " differ from this run's"),
+    )
+    return report

@@ -111,6 +111,7 @@ def prepare(
         counts = Counts()
         touched: dict[int, dict] = {}
         new_samples = 0
+        created: set[int] = set()
         stored: dict[str, Location] = {}
         try:
             with TemporaryDirectory(prefix="strata-prepare-") as scratch:
@@ -154,6 +155,7 @@ def prepare(
                             metadata=None,
                         )
                         new_samples += 1
+                        created.add(sample_id)
                     touched[sample_id] = facts
                     _origin(conn, sample_id, run_id, result.input, occurrence)
         except ChainError as e:
@@ -162,7 +164,7 @@ def prepare(
 
         catalog.samples.collect(conn, sorted(touched), [output.collection])
         for sample_id, facts in touched.items():
-            _combine(conn, sample_id, facts)
+            _combine(catalog, conn, sample_id, facts, new=sample_id in created)
 
         record = {
             **counts.as_record(),
@@ -359,10 +361,12 @@ def _origin(conn, sample_id: int, run_id: str, input_checksum: str, facts: dict)
         )
 
 
-def _combine(conn, sample_id: int, facts: dict) -> None:
+def _combine(catalog, conn, sample_id: int, facts: dict, new: bool) -> None:
     """A sample's metadata: its bytes' facts, then each origin's, first value kept.
 
-    A stopgap rule for origins that disagree. docs/adr/0049
+    A stopgap rule for origins that disagree. docs/adr/0049. A sample this
+    run made has no description yet to replace; any other is described,
+    which records what it replaces. docs/adr/0050
     """
     combined = dict(facts)
     for (metadata,) in conn.execute(
@@ -370,6 +374,9 @@ def _combine(conn, sample_id: int, facts: dict) -> None:
     ):
         for key, value in (metadata or {}).items():
             combined.setdefault(key, value)
-    conn.execute(
-        update(t.sample).where(t.sample.c.id == sample_id, live()).values(metadata=combined or None)
-    )
+    if new:
+        conn.execute(
+            update(t.sample).where(t.sample.c.id == sample_id).values(metadata=combined or None)
+        )
+    elif conn.execute(select(t.sample.c.id).where(t.sample.c.id == sample_id, live())).first():
+        catalog.samples.describe(conn, sample_id, metadata=combined or None)

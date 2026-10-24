@@ -313,12 +313,12 @@ def _one(catalog, conn, schema, label_set_id, sample_id, rows, remap, origin, ru
 
     if not now:
         # Only history: the answer was withdrawn. The past is still the past.
-        _history(conn, sample_id, label_set_id, history, run_id, present, report)
+        _history(conn, schema, sample_id, label_set_id, history, run_id, present, report)
         return
     incoming = now[-1]
     if _key(incoming) in present:
         report.already += 1
-        _history(conn, sample_id, label_set_id, history, run_id, present, report)
+        _history(conn, schema, sample_id, label_set_id, history, run_id, present, report)
         return
 
     here = conn.execute(
@@ -366,29 +366,33 @@ def _one(catalog, conn, schema, label_set_id, sample_id, rows, remap, origin, ru
     if verdict in ("agreed", "outranked"):
         return
 
-    _history(conn, sample_id, label_set_id, history, run_id, present, report)
+    _history(conn, schema, sample_id, label_set_id, history, run_id, present, report)
     value = None if incoming.state == t.SKIPPED else VALUE.validate_python(incoming.value)
     if value is not None:
         schema.validate_value(value)
-    catalog.annotations._write(
+    written = catalog.annotations._write(
         conn, sample_id, label_set_id, state=incoming.state, value=incoming.value,
         source=incoming.source, batch=incoming.batch, run_id=run_id,
         created_at=incoming.created_at,
     )  # fmt: skip
     # Settled, whichever way it went, as a person's answer settles it
     conflicts.clear(conn, sample_id, label_set_id)
-    classes = set() if value is None else schema.classes_asserted(value)
-    catalog.annotations._reindex_classes(conn, sample_id, label_set_id, classes)
+    if written is not None and value is not None:
+        catalog.annotations._index_classes(conn, written, schema.classes_asserted(value))
     report.rows += 1
 
 
-def _history(conn, sample_id, label_set_id, rows, run_id, present, report) -> None:
-    """Rows that were replaced, written as replaced, unless already there."""
+def _history(conn, schema, sample_id, label_set_id, rows, run_id, present, report) -> None:
+    """Rows that were replaced, written as replaced, unless already there.
+
+    Each is an event as well: a row that arrived superseded was never the
+    answer here, which its id alone would not say. See ``docs/adr/0050``.
+    """
     for row in rows:
         if _key(row) in present:
             report.already += 1
             continue
-        conn.execute(
+        written = conn.execute(
             insert(t.annotation).values(
                 sample_id=sample_id,
                 label_set_id=label_set_id,
@@ -400,7 +404,17 @@ def _history(conn, sample_id, label_set_id, rows, run_id, present, report) -> No
                 created_at=row.created_at,
                 superseded_at=row.superseded_at,
             )
+        ).inserted_primary_key[0]
+        conn.execute(
+            insert(t.event).values(kind=t.ARRIVED, sample_id=sample_id, annotation_id=written)
         )
+        if row.state == t.ANNOTATED and row.value is not None:
+            asserted = schema.classes_asserted(VALUE.validate_python(row.value))
+            if asserted:
+                conn.execute(
+                    insert(t.annotation_class),
+                    [{"annotation_id": written, "class_name": c} for c in sorted(asserted)],
+                )
         present.add(_key(row))
         report.rows += 1
         report.history += 1

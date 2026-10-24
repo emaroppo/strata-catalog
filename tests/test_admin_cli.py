@@ -198,3 +198,29 @@ def test_merge_reports_before_it_writes(stocked, config, tmp_path, capsys):
 def test_repack_needs_a_bucket(stocked, config, capsys):
     assert main(["--config", str(config), "repack", "--dry-run"]) == 1
     assert "No object storage configured" in capsys.readouterr().err
+
+
+def test_lists_put_show_and_ls(stocked, config, capsys, tmp_path):
+    checksums = sorted(s.checksum for s in stocked.samples.matching("*"))[:2]
+    listed = tmp_path / "dups.txt"
+    listed.write_text("\n".join(checksums) + "\n")
+    code, out = run(capsys, "--config", str(config), "lists", "put", "dups", str(listed))
+    assert code == 0 and "dups@1: 2 checksum(s), stored" in out
+    code, out = run(capsys, "--config", str(config), "lists", "put", "dups", str(listed))
+    assert "dups@1" in out and "already held" in out
+    _code, out = run(capsys, "--config", str(config), "lists", "show", "dups@1")
+    assert out.split() == checksums
+    _code, out = run(capsys, "--config", str(config), "lists", "ls")
+    assert out.startswith("dups@1")
+    code = main(["--config", str(config), "lists", "show", "dups"])
+    assert code == 1 and "names no version" in capsys.readouterr().err
+
+
+def test_dataset_verify_runs_the_spec_again(stocked, config, capsys):
+    label_set, _ = stocked.label_sets.get("presence")
+    stocked.create_dataset("d", label_set, collections=["photos"])
+    code, out = run(capsys, "--config", str(config), "dataset", "verify", "d@1")
+    assert code == 0 and out.rstrip().endswith("Holds.")
+    stocked.create_dataset("named", label_set, sample_ids=[1, 2])
+    code = main(["--config", str(config), "dataset", "verify", "named@1"])
+    assert code == 1 and "records no selection spec" in capsys.readouterr().err

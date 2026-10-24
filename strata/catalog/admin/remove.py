@@ -19,7 +19,8 @@ class RemoveReport(Strict):
     removed: int
     #: The selection, as the caller stated it.
     collections: list[str]
-    where: dict[str, str]
+    #: Compared with their types: 2000 is a number. docs/adr/0050
+    where: dict[str, bool | int | float | str]
     checksums: int
 
 
@@ -27,7 +28,7 @@ def remove(
     catalog: Catalog,
     *,
     collections=None,
-    where: dict[str, str] | None = None,
+    where: dict | None = None,
     checksums: list[str] | None = None,
     dry_run: bool = False,
 ) -> RemoveReport:

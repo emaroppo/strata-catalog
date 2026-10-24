@@ -86,6 +86,36 @@ is assigned a side, `train`, `val` or `holdout`, and the next version
 inherits every side its predecessor decided. A version frozen with
 `group_by` naming a metadata key keeps that key's values on one side, and
 records which key; without one every sample is its own group.
+A version records the **selection spec** that chose it: its sample types,
+optionally its collections, the label set whose answers count, conditions
+on metadata and on labels grouped with `all`, `any` and `not`, and lists
+of checksums to include or exclude. It records a watermark too, how far
+the catalog had got, and `dataset verify` runs the spec again there and
+compares the members. A freeze with no spec records the one that says
+what it did: every sample in its collections with a current answer.
+
+```toml
+[select]
+types       = ["email"]                  # required; a type covers its subtypes
+collections = ["phishnet/enron/single"]  # optional
+label_set   = "emails"
+sources     = ["human"]                  # which answers count; omitted, any
+
+[select.where]
+all = [
+  { key = "html_tags",  op = "==", value = 0 },
+  { key = "word_count", op = "<=", value = 2000 },
+  { not = { label_set = "qc", asserts = "reject" } },
+]
+
+[select.lists]
+exclude = ["enron-near-duplicates@2"]
+```
+
+The format names no metadata key. A key a named type declares is checked
+against its type; one nobody declares has to occur on some candidate, so
+a misspelt key is refused rather than matching nothing.
+
 Materialising writes a self-contained directory: files named by checksum
 and a manifest carrying labels, sides and each sample's metadata, so a
 model needs no database and a split can be drawn again under another key.
@@ -152,6 +182,9 @@ nothing is refused rather than falling back.
 | `raw ls [COLLECTION]` | a collection's names, one a line, or every collection counted |
 | `runs` | what wrote to the catalog, and what each counted |
 | `verify --run ID` | check a run still holds; `--deep` hashes every blob it wrote |
+| `dataset verify NAME@VERSION` | run a version's spec again at its watermark and compare the members |
+| `lists put NAME FILE` | store a set of checksums; a different set is the next version |
+| `lists show NAME@VERSION` / `lists ls` | a version's checksums, one a line; every version |
 
 Every command takes `--json` and `--catalog NAME`; `copy`, `merge` and
 `repack` report what they would do and write nothing until `--apply`.
@@ -221,7 +254,8 @@ STRATA_WRITE_KEY=strata-write ./new-catalog.sh alt    # a catalog: database, buc
 Three stage functions in `strata.catalog.stages`, `dataset`, `materialise`
 and `split`, are what an experiment file sequences and what the labeller
 calls one at a time. Each takes a request and a context and returns a
-record naming what it made.
+record naming what it made. `dataset` takes a selection spec by `spec`, a
+path, and stores its content.
 
 ## Extending it
 

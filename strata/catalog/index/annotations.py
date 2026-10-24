@@ -3,9 +3,9 @@
 Append-only. A write never changes a row: it stamps the current one as
 superseded and adds a new one. Writes honour :data:`tables.AUTHORITY`: a
 write never replaces an answer from a source that outranks it. Unlabelled
-is the absence of a current row. The class index follows the current row
-through the indexing contract in :mod:`strata.contracts`. See
-``docs/adr/0027``. Disputes live in :mod:`conflicts`; the reads a version
+is the absence of a current row. Each row's classes are indexed through
+the indexing contract in :mod:`strata.contracts`, and kept with the row.
+See ``docs/adr/0027`` and ``docs/adr/0050``. Disputes live in :mod:`conflicts`; the reads a version
 or a feature makes over answers live in :mod:`answers`.
 """
 
@@ -100,12 +100,12 @@ class Annotations:
                 source=source,
                 batch=batch,
             )
-            if not written:
+            if written is None:
                 return False
             # Someone has looked again, which is what a conflict was asking
             # for. Whichever way they went, it is settled.
             conflicts.clear(conn, sample_id, label_set_id)
-            self._reindex_classes(conn, sample_id, label_set_id, schema.classes_asserted(value))
+            self._index_classes(conn, written, schema.classes_asserted(value))
         return True
 
     def skip(
@@ -118,7 +118,7 @@ class Annotations:
         terms as :meth:`annotate`.
         """
         with self.engine.begin() as conn:
-            if not self._write(
+            written = self._write(
                 conn,
                 sample_id,
                 label_set_id,
@@ -126,10 +126,8 @@ class Annotations:
                 value=None,
                 source=source,
                 batch=batch,
-            ):
-                return False
-            self._reindex_classes(conn, sample_id, label_set_id, set())
-        return True
+            )
+        return written is not None
 
     def annotate_many(
         self,
@@ -151,7 +149,7 @@ class Annotations:
         with self.engine.begin() as conn:
             for sample_id, value in items:
                 if value is None:
-                    if self._write(
+                    written = self._write(
                         conn,
                         sample_id,
                         label_set_id,
@@ -159,14 +157,14 @@ class Annotations:
                         value=None,
                         source=source,
                         batch=batch,
-                    ):
-                        self._reindex_classes(conn, sample_id, label_set_id, set())
+                    )
+                    if written is not None:
                         skipped += 1
                     else:
                         kept += 1
                 else:
                     schema.validate_value(value)
-                    if self._write(
+                    written = self._write(
                         conn,
                         sample_id,
                         label_set_id,
@@ -174,10 +172,9 @@ class Annotations:
                         value=json.loads(value.model_dump_json()),
                         source=source,
                         batch=batch,
-                    ):
-                        self._reindex_classes(
-                            conn, sample_id, label_set_id, schema.classes_asserted(value)
-                        )
+                    )
+                    if written is not None:
+                        self._index_classes(conn, written, schema.classes_asserted(value))
                         annotated += 1
                     else:
                         kept += 1
@@ -189,24 +186,36 @@ class Annotations:
         """Return skipped samples to the queue; returns how many moved.
 
         Stamps the skip as superseded with nothing after it; the skip stays
-        in the history. Anything annotated is left alone. See
-        ``docs/adr/0027``.
+        in the history. Anything annotated is left alone. A change in place,
+        so it is an event as well. See ``docs/adr/0027`` and
+        ``docs/adr/0050``.
         """
         moved = 0
         with self.engine.begin() as conn:
             for sample_id in sample_ids:
-                where = and_(
-                    t.annotation.c.sample_id == sample_id,
-                    t.annotation.c.label_set_id == label_set_id,
-                    t.annotation.c.state == t.SKIPPED,
-                    current(),
+                skip = conn.execute(
+                    select(t.annotation.c.id).where(
+                        and_(
+                            t.annotation.c.sample_id == sample_id,
+                            t.annotation.c.label_set_id == label_set_id,
+                            t.annotation.c.state == t.SKIPPED,
+                            current(),
+                        )
+                    )
+                ).scalar_one_or_none()
+                if skip is None:
+                    continue
+                conn.execute(
+                    update(t.annotation)
+                    .where(t.annotation.c.id == skip)
+                    .values(superseded_at=func.now())
                 )
-                stamped = conn.execute(
-                    update(t.annotation).where(where).values(superseded_at=func.now())
-                ).rowcount
-                if stamped:
-                    self._reindex_classes(conn, sample_id, label_set_id, set())
-                    moved += 1
+                conn.execute(
+                    insert(t.event).values(
+                        kind=t.WITHDRAWN, sample_id=sample_id, annotation_id=skip
+                    )
+                )
+                moved += 1
         return moved
 
     def _write(
@@ -221,14 +230,15 @@ class Annotations:
         batch,
         run_id: str | None = None,
         created_at: datetime | None = None,
-    ) -> bool:
+    ) -> int | None:
         """Append one answer, superseding the current one unless it outranks ``source``.
 
         ``run_id`` names the import or judge run writing it (record 0048).
         ``created_at`` keeps the time an answer carried from another catalog
         was first given; a new answer takes the database's.
 
-        Returns whether it wrote. See :data:`tables.AUTHORITY`: an import
+        Returns the new row's id, or None if it wrote nothing. See
+        :data:`tables.AUTHORITY`: an import
         landing on a sample a person already answered leaves the answer
         alone rather than replacing it with the guess it may have corrected.
         """
@@ -248,7 +258,7 @@ class Annotations:
         ).first()
         if existing is not None:
             if t.AUTHORITY.get(existing.source, 0) > t.AUTHORITY[source]:
-                return False
+                return None
             conn.execute(
                 update(t.annotation)
                 .where(t.annotation.c.id == existing.id)
@@ -256,7 +266,7 @@ class Annotations:
             )
             if batch is None:
                 batch = existing.batch
-        conn.execute(
+        return conn.execute(
             insert(t.annotation).values(
                 sample_id=sample_id,
                 label_set_id=label_set_id,
@@ -267,23 +277,14 @@ class Annotations:
                 run_id=run_id,
                 **({} if created_at is None else {"created_at": created_at}),
             )
-        )
-        return True
+        ).inserted_primary_key[0]
 
-    def _reindex_classes(self, conn, sample_id, label_set_id, classes: set[str]) -> None:
-        conn.execute(
-            t.annotation_class.delete().where(
-                and_(
-                    t.annotation_class.c.sample_id == sample_id,
-                    t.annotation_class.c.label_set_id == label_set_id,
-                )
-            )
-        )
-        for name in sorted(classes):
+    def _index_classes(self, conn, annotation_id: int, classes: set[str]) -> None:
+        """The classes one row asserts, kept with that row. See ``docs/adr/0050``."""
+        if classes:
             conn.execute(
-                insert(t.annotation_class).values(
-                    sample_id=sample_id, label_set_id=label_set_id, class_name=name
-                )
+                insert(t.annotation_class),
+                [{"annotation_id": annotation_id, "class_name": name} for name in sorted(classes)],
             )
 
     # -- reading ----------------------------------------------------------

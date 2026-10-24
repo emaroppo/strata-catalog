@@ -27,6 +27,11 @@ ORDER = (
     t.annotation,
     t.annotation_class,
     t.annotation_conflict,
+    # Ids kept, so a version's watermark means the same in the copy and it
+    # can be verified there. docs/adr/0050
+    t.event,
+    t.list_version,
+    t.list_member,
     t.dataset,
     t.dataset_member,
 )
@@ -88,7 +93,17 @@ def _reset_sequences(target) -> None:
     if target.engine.dialect.name != "postgresql":
         return
     with target.engine.begin() as conn:
-        for table in (t.raw, t.sample, t.origin, t.label_set, t.annotation, t.dataset):
+        for table in (
+            t.raw,
+            t.sample,
+            t.sample_collection,
+            t.origin,
+            t.label_set,
+            t.annotation,
+            t.event,
+            t.list_version,
+            t.dataset,
+        ):
             conn.execute(
                 text(
                     "SELECT setval("

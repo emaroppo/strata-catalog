@@ -48,6 +48,15 @@ class LabelSets:
             raise CatalogError(f"No label set with id {label_set_id}")
         return label_set_id, SCHEMA.validate_python(row.schema)
 
+    def name_of(self, conn, label_set_id: int) -> str:
+        """A label set's name, within a caller's transaction."""
+        name = conn.execute(
+            select(t.label_set.c.name).where(t.label_set.c.id == label_set_id)
+        ).scalar_one_or_none()
+        if name is None:
+            raise CatalogError(f"No label set with id {label_set_id}")
+        return name
+
     def set_classes(self, label_set_id: int, schema: AnySchema) -> None:
         """Replace a label set's schema.
 

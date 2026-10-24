@@ -6,13 +6,14 @@ from ._shared import Refused, _emit, _open
 def _remove(args) -> int:
     from ..admin import remove
     from ..rows import CatalogError
+    from ..selection import typed
 
     where = {}
     for pair in args.where or ():
         key, sep, value = pair.partition("=")
         if not sep or not key:
             raise Refused(f"--where takes key=value, got {pair!r}")
-        where[key] = value
+        where[key] = typed(value)
 
     catalog, _ = _open(args)
     try:
