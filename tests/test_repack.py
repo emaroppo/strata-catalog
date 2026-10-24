@@ -226,6 +226,25 @@ def test_verification_catches_a_backend_ignoring_range(stocked, store):
     assert report.failures
 
 
+def test_every_row_over_one_blob_moves_with_it(stocked, store):
+    # Two types over the same bytes are two rows over one blob: one member
+    # is packed, and both rows name it. docs/adr/0052
+    catalog, contents = stocked
+    [first, *_] = catalog.samples.matching("*")
+    with catalog.engine.begin() as conn:
+        catalog.samples.add(
+            conn, first.checksum, first.location, media="image", subtype="frames", metadata=None
+        )
+
+    report = repack_blobs(catalog, S3Backend(store, bucket="b"))
+
+    assert report.ok and report.samples == 13
+    assert report.bytes == sum(len(b) for b in contents.values())
+    moved = [row for row in locations(catalog) if row.checksum == first.checksum]
+    assert len(moved) == 2 and len({(r.location, r.offset, r.length) for r in moved}) == 1
+    assert moved[0].location.startswith("shards/")
+
+
 def test_a_dry_run_writes_nothing(stocked, store):
     catalog, _ = stocked
     report = repack_blobs(catalog, S3Backend(store, bucket="b"), dry_run=True)

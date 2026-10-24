@@ -136,8 +136,12 @@ def prepare(
                         raise CatalogError(f"Input {result.input}: {e}") from None
                     occurrence = {key: recorded[key] for key in result.facts if key in recorded}
 
-                    sample_id = catalog.samples.find(conn, checksum)
+                    sample_id = catalog.samples.find(
+                        conn, checksum, media=sample_cls.media, subtype=sample_cls.subtype()
+                    )
                     if sample_id is None:
+                        # Bytes held as another type are a new sample of
+                        # this one, over the same blob. docs/adr/0052
                         location = stored.get(checksum) or catalog.raw.stored(conn, [checksum]).get(
                             checksum
                         )

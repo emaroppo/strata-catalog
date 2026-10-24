@@ -139,7 +139,7 @@ def test_remove_tombstones_what_a_selection_names(stocked, config, capsys):
     bad = [s.id for s in stocked.samples.unlabelled(label_set, EVERYTHING)]
     with stocked.engine.begin() as conn:
         for sample_id in bad:
-            stocked.samples.describe(conn, sample_id, subtype="plain", metadata={"quality": "bad"})
+            stocked.samples.describe(conn, sample_id, metadata={"quality": "bad"})
 
     code, out = run(
         capsys, "--config", str(config), "remove", "--where", "quality=bad", "--dry-run"
@@ -211,9 +211,24 @@ def test_lists_put_show_and_ls(stocked, config, capsys, tmp_path):
     _code, out = run(capsys, "--config", str(config), "lists", "show", "dups@1")
     assert out.split() == checksums
     _code, out = run(capsys, "--config", str(config), "lists", "ls")
-    assert out.startswith("dups@1")
+    assert out.startswith("dups@1") and "untyped" in out
     code = main(["--config", str(config), "lists", "show", "dups"])
     assert code == 1 and "names no version" in capsys.readouterr().err
+
+
+def test_lists_put_records_the_type_its_members_are(stocked, config, capsys, tmp_path):
+    checksums = sorted(s.checksum for s in stocked.samples.matching("*"))[:2]
+    listed = tmp_path / "dups.txt"
+    listed.write_text("\n".join(checksums) + "\n")
+    put = ["--config", str(config), "lists", "put", "dups", str(listed)]
+    run(capsys, *put)
+    # The same set with its type stated says more than the untyped version
+    code, out = run(capsys, *put, "--type", "image/plain")
+    assert code == 0 and "dups@2: 2 checksum(s) of image/plain, stored" in out
+    _code, out = run(capsys, "--config", str(config), "lists", "ls")
+    assert "image/plain" in out.splitlines()[1]
+    code = main(["--config", str(config), "lists", "put", "x", str(listed), "--type", "image"])
+    assert code == 1 and "not a sample type" in capsys.readouterr().err
 
 
 def test_dataset_verify_runs_the_spec_again(stocked, config, capsys):

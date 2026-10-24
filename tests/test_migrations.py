@@ -362,3 +362,69 @@ def test_the_class_index_is_rebuilt_for_every_answer_superseded_or_not(url, monk
         ).all()
     assert classes == [(1, 1, "dog")]
     assert sorted(memberships) == [(1, "p"), (2, "p")]
+
+
+def test_a_list_takes_the_one_type_its_catalogued_members_are(url, monkeypatch):
+    """Record 0052: the checksum stops being unique, and a list version says its type."""
+    from sqlalchemy import text
+    from sqlalchemy.exc import IntegrityError
+
+    monkeypatch.setenv("STRATA_CATALOG_URL", url)
+    command.upgrade(_config(url), "e7b2c9a4d103")
+    a, b, c, unknown = ("a" * 64, "b" * 64, "c" * 64, "f" * 64)
+    engine = create_engine(url)
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                "INSERT INTO sample (id, checksum, location, offset, length, media, subtype, "
+                "deleted_at) VALUES (1, :a, 'x', 0, 1, 'text', 'email', NULL), "
+                "(2, :b, 'y', 0, 1, 'text', 'email', '2026-01-01'), "
+                "(3, :c, 'z', 0, 1, 'text', 'sft/x', NULL)"
+            ),
+            {"a": a, "b": b, "c": c},
+        )
+        lists = {1: [a, b, unknown], 2: [a, c], 3: [unknown], 4: []}
+        for list_id, members in lists.items():
+            conn.execute(
+                text(
+                    "INSERT INTO list_version (id, name, version, digest, size) "
+                    "VALUES (:i, :n, 1, 'd', :s)"
+                ),
+                {"i": list_id, "n": f"l{list_id}", "s": len(members)},
+            )
+            for checksum in members:
+                conn.execute(
+                    text("INSERT INTO list_member (list_id, checksum) VALUES (:i, :c)"),
+                    {"i": list_id, "c": checksum},
+                )
+
+    command.upgrade(_config(url), "head")
+
+    with engine.connect() as conn:
+        typed = dict(
+            conn.execute(text("SELECT id, media || '/' || subtype FROM list_version"))
+            .tuples()
+            .all()
+        )
+    # Every catalogued member one type, a tombstoned one included; members of
+    # two types; none catalogued; none at all
+    assert typed == {1: "text/email", 2: None, 3: None, 4: None}
+
+    insert = text(
+        "INSERT INTO sample (checksum, location, offset, length, media, subtype) "
+        "VALUES (:a, 'x', 0, 1, 'text', :subtype)"
+    )
+    with engine.begin() as conn:
+        conn.execute(insert, {"a": a, "subtype": "generated/x"})
+    with pytest.raises(IntegrityError), engine.begin() as conn:
+        conn.execute(insert, {"a": a, "subtype": "email"})
+
+    # Back past it only once no two samples share a checksum
+    with pytest.raises(RuntimeError, match="more than one type"):
+        command.downgrade(_config(url), "e7b2c9a4d103")
+    with engine.begin() as conn:
+        conn.execute(text("DELETE FROM sample WHERE subtype = 'generated/x'"))
+    command.downgrade(_config(url), "e7b2c9a4d103")
+    with pytest.raises(IntegrityError), engine.begin() as conn:
+        conn.execute(insert, {"a": a, "subtype": "generated/x"})
+    command.upgrade(_config(url), "head")

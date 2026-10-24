@@ -439,23 +439,33 @@ def test_an_unknown_dataset_is_an_error(catalog, tmp_path):
 
 
 def test_re_ingesting_backfills_a_grouping(catalog, files, label_set):
-    # A project that ingested as plain images and then corrected its type
-    # re-runs, and the metadata the type records has to follow, or the
-    # mistake means a rebuild
+    # A project that ingested without the metadata its type records re-runs,
+    # and the metadata has to follow, or the mistake means a rebuild
     paths = files(3)
-    catalog.ingest(paths, media="image")
+    catalog.ingest(paths, media="image", subtype="frames")
     assert all(not s.metadata for s in catalog.samples.unlabelled(label_set, EVERYTHING))
 
     catalog.ingest(paths, media="image", subtype="frames", metadata={"video": "vid1"})
     rows = catalog.samples.unlabelled(label_set, EVERYTHING)
-    assert {s.metadata["video"] for s in rows} == {"vid1"}
+    assert len(rows) == 3 and {s.metadata["video"] for s in rows} == {"vid1"}
 
 
-def test_re_ingesting_updates_the_subtype(catalog, files, label_set):
+def test_re_ingesting_as_another_type_makes_a_second_sample(catalog, files, label_set):
+    # Retyping the row would turn one sample into another, with its answers
+    # and collections. docs/adr/0052
     paths = files(2)
-    catalog.ingest(paths, media="image")
-    catalog.ingest(paths, media="image", subtype="frames", metadata={"video": "vid1"})
-    assert {s.subtype for s in catalog.samples.unlabelled(label_set, EVERYTHING)} == {"frames"}
+    plain = catalog.ingest(paths, media="image", collections=["photos"])
+    catalog.annotations.annotate(plain[0], label_set, Choices(values=["cat"]))
+    frames = catalog.ingest(
+        paths, media="image", subtype="frames", metadata={"video": "vid1"}, collections=["video"]
+    )
+
+    assert set(frames).isdisjoint(plain)
+    assert {s.subtype for s in catalog.samples.matching(["photos"])} == {"plain"}
+    assert {s.subtype for s in catalog.samples.matching(["video"])} == {"frames"}
+    assert catalog.annotations.annotation_of(plain[0], label_set) == Choices(values=["cat"])
+    assert catalog.annotations.annotation_of(frames[0], label_set) is None
+    assert all(s.metadata is None for s in catalog.samples.matching(["photos"]))
 
 
 def test_re_ingesting_does_not_duplicate(catalog, files):
@@ -482,7 +492,7 @@ def test_regrouping_cannot_disturb_a_dataset_already_built(catalog, files, label
 
     # Membership is materialised, so a later regroup is invisible to a
     # version that already exists
-    catalog.ingest(paths, media="image", subtype="frames", metadata={"video": "vid1"})
+    catalog.ingest(paths, media="image", metadata={"video": "vid1"})
     after = {s.id: s.split for s in _manifest(first).samples}
     assert after == before
 

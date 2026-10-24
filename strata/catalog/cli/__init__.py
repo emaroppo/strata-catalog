@@ -140,6 +140,7 @@ def _parser() -> argparse.ArgumentParser:
     put = lists.add_parser("put", help="Store a set; the same set again is its version")
     put.add_argument("name", help="The list's name, without a version")
     put.add_argument("checksums", type=Path, help="Checksums, one a line; - reads stdin")
+    put.add_argument("--type", metavar="TYPE", help="The sample type every member is: text/email")
     put.set_defaults(run=_lists_put)
     show = lists.add_parser("show", help="A version's checksums, one a line")
     show.add_argument("version", metavar="NAME@VERSION")
@@ -156,7 +157,13 @@ def _parser() -> argparse.ArgumentParser:
         "--where", action="append", metavar="KEY=VALUE",
         help="Metadata that must match; the value is JSON where it parses, so 2000 is a number",
     )  # fmt: skip
-    remove.add_argument("--checksum", action="append", metavar="SHA256", help="A sample outright")
+    remove.add_argument(
+        "--checksum", action="append", metavar="SHA256",
+        help="A sample outright; with --type where several types hold the bytes",
+    )  # fmt: skip
+    remove.add_argument(
+        "--type", action="append", metavar="TYPE", help="Only samples of this type: text/email"
+    )
     remove.add_argument("--dry-run", action="store_true", help="Report what would go")
     remove.set_defaults(run=_remove)
     return parser

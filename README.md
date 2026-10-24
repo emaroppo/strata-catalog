@@ -61,7 +61,11 @@ nothing; a different one says which run it continues.
 **A type per sample, and types inherit.** The types are defined in
 `strata-contracts`: `image`, `text` and `frames` are built in; a plugin adds
 `satellite` by subclassing `Image`, or `email` by subclassing `Text`, and
-everything that accepts the parent accepts it.
+everything that accepts the parent accepts it. A sample is its bytes and
+its type: the same bytes as the same type are one sample however often
+they arrive, and as another type a second sample over the one stored
+blob, with its own collections, metadata and answers. A split keeps the
+two on one side.
 
 **Canonical form is the catalog's**, per media, since it decides what a
 checksum addresses. Text is stored one way, UTF-8, LF, NFC, no BOM, so two
@@ -183,7 +187,7 @@ nothing is refused rather than falling back.
 | `runs` | what wrote to the catalog, and what each counted |
 | `verify --run ID` | check a run still holds; `--deep` hashes every blob it wrote |
 | `dataset verify NAME@VERSION` | run a version's spec again at its watermark and compare the members |
-| `lists put NAME FILE` | store a set of checksums; a different set is the next version |
+| `lists put NAME FILE` | store a set of checksums, `--type TYPE` the one its members are; a different set is the next version |
 | `lists show NAME@VERSION` / `lists ls` | a version's checksums, one a line; every version |
 
 Every command takes `--json` and `--catalog NAME`; `copy`, `merge` and

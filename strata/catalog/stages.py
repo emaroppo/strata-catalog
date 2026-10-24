@@ -315,6 +315,8 @@ def split(request: SplitRequest, context: Context) -> SplitRecord:
         val_ratio=request.val_ratio,
         holdout_ratio=request.holdout_ratio,
         seed=request.seed,
+        # Two types' rows over one checksum stay together. docs/adr/0052
+        checksums={i: sample.checksum for i, sample in enumerate(manifest.samples)},
     )
     del achieved  # recomputed from the sides by apply_sides, the same way
     # Beside the version, named for the draw. docs/adr/0024

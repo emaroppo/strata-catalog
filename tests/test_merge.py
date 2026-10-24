@@ -162,6 +162,46 @@ def test_an_answer_for_a_sample_the_target_lacks_is_reported(tmp_path):
     assert report.copied == 0
 
 
+def test_an_answer_lands_on_the_sample_of_its_type(tmp_path):
+    # The same bytes as two types are two samples, each with its own
+    # answers. docs/adr/0052
+    main, ids = _catalog(tmp_path, "main")
+    frames = main.ingest(sorted((tmp_path / "raw-main").iterdir()), media="image", subtype="frames")
+    main.label_sets.create("demo", ClassificationSchema(classes=["cat", "dog"]))
+    laptop = Catalog.local(tmp_path / "laptop")
+    copy_index(main, laptop)
+    laptop_set, _ = laptop.label_sets.get("demo")
+    laptop.annotations.annotate(frames[0], laptop_set, Choices(values=["dog"]))
+
+    report = merge_annotations(laptop, main)
+
+    main_set, _ = main.label_sets.get("demo")
+    assert report.copied == 1 and report.unknown_samples == []
+    assert main.annotations.annotation_of(frames[0], main_set) == Choices(values=["dog"])
+    assert main.annotations.annotation_of(ids[0], main_set) is None
+
+
+def test_an_answer_for_a_type_the_target_lacks_is_reported_though_it_has_the_bytes(tmp_path):
+    main, ids = _catalog(tmp_path, "main")
+    main.label_sets.create("demo", ClassificationSchema(classes=["cat", "dog"]))
+    laptop = Catalog.local(tmp_path / "laptop")
+    copy_index(main, laptop)
+
+    # The same files made frames offline: bytes the main catalog holds, as
+    # a sample it has never seen
+    [frame, *_] = laptop.ingest(
+        sorted((tmp_path / "raw-main").iterdir()), media="image", subtype="frames"
+    )
+    laptop_set, _ = laptop.label_sets.get("demo")
+    laptop.annotations.annotate(frame, laptop_set, Choices(values=["dog"]))
+
+    report = merge_annotations(laptop, main)
+
+    main_set, _ = main.label_sets.get("demo")
+    assert len(report.unknown_samples) == 1 and report.copied == 0
+    assert main.annotations.annotation_of(ids[0], main_set) is None
+
+
 # ----------------------------------------------------------------------
 # States that are not a plain answer
 # ----------------------------------------------------------------------

@@ -16,8 +16,15 @@ different answer of equal standing the target keeps its own and the
 dispute is recorded, as a merge does (record 0009). An answer's history is
 written only with the answer.
 
+**A sample is its bytes and its type** (record 0052). Each sample in the
+file carries its type, and lands only on the target's sample of that type
+and checksum; one the target lacks is unmatched, as unknown bytes are. A
+file exported before samples carried a type lands where one live sample
+has the bytes, and is unmatched where several types hold them.
+
 **A sample whose bytes changed** is paired to its successor by a pairs
-file (old checksum, new checksum). Its spans are carried through an
+file (old checksum, new checksum). The successor is the sample of the
+same type at the new checksum. Its spans are carried through an
 alignment of the two texts, and only those that still slice to their own
 text are kept. The rest are counted, never stored askew.
 
@@ -67,6 +74,9 @@ class ExportedSample(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     checksum: str
+    #: ``text/email``. None in a file exported before a sample's type was
+    #: half its identity. docs/adr/0052
+    type: str | None = None
     #: The sample's text, for a span label set: what a remap aligns
     #: against when the sample's bytes changed in the target.
     text: str | None = None
@@ -102,6 +112,9 @@ class ImportReport:
     matched: int = 0
     paired: int = 0
     unmatched: int = 0
+    #: Of the unmatched, those carrying no type whose bytes several types
+    #: hold here, so which sample they meant is unknown. docs/adr/0052
+    ambiguous: int = 0
     #: Current answers: copied where the target had none or a skip, replacing
     #: or confirming one the target ranked lower, agreeing, outranked, in
     #: dispute, or a skip landing where the target had an answer.
@@ -144,6 +157,8 @@ def export_answers(catalog, label_set: str, sources: Iterable[str] = ()) -> Answ
         select(
             t.sample.c.id,
             t.sample.c.checksum,
+            t.sample.c.media,
+            t.sample.c.subtype,
             t.sample.c.location,
             t.sample.c.offset,
             t.sample.c.length,
@@ -171,7 +186,7 @@ def export_answers(catalog, label_set: str, sources: Iterable[str] = ()) -> Answ
                     data = catalog.blobs.get(Location(row.location, row.offset, row.length))
                     text = data.decode("utf-8")
                 sample = by_sample[row.id] = ExportedSample(
-                    checksum=row.checksum, text=text, rows=[]
+                    checksum=row.checksum, type=f"{row.media}/{row.subtype}", text=text, rows=[]
                 )
             sample.rows.append(
                 ExportedRow(
@@ -281,19 +296,28 @@ def _import(catalog, answers, *, into, pairs, dry_run, on_sample) -> "ImportRepo
         for done, sample in enumerate(answers.samples, 1):
             checksum = sample.checksum
             remap = None
-            if checksum in targets:
+            target = _target(targets, checksum, sample.type)
+            if target is None and checksum in pairs:
+                paired = _target(targets, pairs[checksum], sample.type)
+                if paired is not None:
+                    target, checksum = paired, pairs[checksum]
+                    report.paired += 1
+                    remap = (
+                        _Remap(sample.text, _text_of(catalog, conn, target, checksum))
+                        if spans
+                        else None
+                    )
+            elif target is not None:
                 report.matched += 1
-            elif checksum in pairs and pairs[checksum] in targets:
-                report.paired += 1
-                checksum = pairs[checksum]
-                remap = _Remap(sample.text, _text_of(catalog, conn, checksum)) if spans else None
-            else:
+            if target is None:
                 report.unmatched += 1
+                if sample.type is None and len(targets.get(checksum, {})) > 1:
+                    report.ambiguous += 1
                 report.unmatched_checksums.append(sample.checksum)
                 continue
             landed.append(checksum)
             _one(
-                catalog, conn, schema, label_set_id, targets[checksum], sample.rows,
+                catalog, conn, schema, label_set_id, target, sample.rows,
                 remap, answers.catalog_id, run_id, report,
             )  # fmt: skip
             if on_sample is not None:
@@ -515,22 +539,32 @@ def _label_set(conn, name: str, schema: dict) -> int:
     return row.id
 
 
-def _live_ids(conn, checksums: set[str]) -> dict[str, int]:
-    found: dict[str, int] = {}
+def _live_ids(conn, checksums: set[str]) -> dict[str, dict[str, int]]:
+    """Each checksum's live samples: their ids by type."""
+    found: dict[str, dict[str, int]] = {}
     for chunk in chunks(sorted(checksums)):
         for row in conn.execute(
-            select(t.sample.c.id, t.sample.c.checksum).where(
+            select(t.sample.c.id, t.sample.c.checksum, t.sample.c.media, t.sample.c.subtype).where(
                 and_(live(), t.sample.c.checksum.in_(chunk))
             )
         ):
-            found[row.checksum] = row.id
+            found.setdefault(row.checksum, {})[f"{row.media}/{row.subtype}"] = row.id
     return found
 
 
-def _text_of(catalog, conn, checksum: str) -> str:
+def _target(targets: dict[str, dict[str, int]], checksum: str, type_: str | None) -> int | None:
+    """The sample an answer lands on: of its type, or, untyped, the one with its bytes."""
+    held = targets.get(checksum, {})
+    if type_ is not None:
+        return held.get(type_)
+    # Exported before a type was part of a reference. docs/adr/0052
+    return next(iter(held.values())) if len(held) == 1 else None
+
+
+def _text_of(catalog, conn, sample_id: int, checksum: str) -> str:
     row = conn.execute(
         select(t.sample.c.location, t.sample.c.offset, t.sample.c.length).where(
-            and_(live(), t.sample.c.checksum == checksum)
+            t.sample.c.id == sample_id
         )
     ).one()
     data = catalog.blobs.get(Location(row.location, row.offset, row.length))

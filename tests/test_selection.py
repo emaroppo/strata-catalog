@@ -336,6 +336,49 @@ def test_a_list_excludes_or_includes_by_checksum(catalog, mail):
     assert counts["lists"] == {"dups@1": {"removed": 1}}
 
 
+def _masked(catalog, mail) -> int:
+    """The first message again as text/mail/masked, which the mail type covers, answered."""
+    [masked] = catalog.ingest(
+        [mail.root / "m0.txt"], media="text", subtype="mail/masked", collections=[COLLECTION]
+    )
+    catalog.annotations.annotate(masked, mail.emails, Choices(values=["ham"]))
+    return masked
+
+
+def test_a_typed_list_holds_the_sample_of_its_type_only(catalog, mail):
+    # The same bytes as two types are two samples; a list names one. docs/adr/0052
+    masked = _masked(catalog, mail)
+    row, _ = catalog.lists.put(
+        "picked", _checksums(catalog, [mail.ids[0], mail.ids[4]]), "text/mail"
+    )
+    assert row.type == "text/mail"
+
+    picked = catalog.create_dataset("p", mail.emails, spec=spec(lists={"include": ["picked@1"]}))
+    dropped = catalog.create_dataset("d", mail.emails, spec=spec(lists={"exclude": ["picked@1"]}))
+    assert members(catalog, picked) == {mail.ids[0], mail.ids[4]}
+    assert masked in members(catalog, dropped) and mail.ids[0] not in members(catalog, dropped)
+
+
+def test_an_untyped_list_holds_every_sample_with_its_bytes(catalog, mail):
+    masked = _masked(catalog, mail)
+    catalog.lists.put("picked", _checksums(catalog, [mail.ids[0], mail.ids[4]]))
+    picked = catalog.create_dataset("p", mail.emails, spec=spec(lists={"include": ["picked@1"]}))
+    assert members(catalog, picked) == {mail.ids[0], masked, mail.ids[4]}
+
+
+def test_the_same_set_with_a_type_is_the_next_version(catalog, mail):
+    checksums = _checksums(catalog, mail.ids[:2])
+    untyped, _ = catalog.lists.put("dups", checksums)
+    typed, new = catalog.lists.put("dups", checksums, "text/mail")
+    again, again_new = catalog.lists.put("dups", checksums, "text/mail")
+    unsaid, unsaid_new = catalog.lists.put("dups", checksums)
+    assert (untyped.version, untyped.type) == (1, None)
+    assert (typed.version, typed.type, new) == (2, "text/mail", True)
+    assert (again.version, again_new, unsaid.version, unsaid_new) == (2, False, 2, False)
+    with pytest.raises(CatalogError, match="not a sample type"):
+        catalog.lists.put("dups", checksums, "mail")
+
+
 def test_a_list_the_catalog_lacks_is_refused(catalog, mail):
     with pytest.raises(CatalogError, match="dups@1"):
         catalog.create_dataset("d", mail.emails, spec=spec(lists={"exclude": ["dups@1"]}))
@@ -480,6 +523,20 @@ def test_a_merge_carries_lists_and_refuses_one_held_otherwise(catalog, mail, tmp
     copy.lists.put("other", _checksums(catalog, [mail.ids[1]]))
     catalog.lists.put("other", _checksums(catalog, [mail.ids[2]]))
     with pytest.raises(MergeError, match="other@1"):
+        merge_annotations(copy, catalog)
+
+
+def test_a_merge_carries_a_lists_type_and_refuses_another(catalog, mail, tmp_path):
+    copy = Catalog.create(f"sqlite:///{tmp_path / 'copy.db'}", catalog.blobs)
+    copy_index(catalog, copy)
+    checksums = _checksums(catalog, [mail.ids[0]])
+    copy.lists.put("typed", checksums, "text/mail")
+    merge_annotations(copy, catalog)
+    assert catalog.lists.get("typed", 1)[0].type == "text/mail"
+
+    copy.lists.put("other", checksums, "text/mail")
+    catalog.lists.put("other", checksums, "text/mail/masked")
+    with pytest.raises(MergeError, match="another type"):
         merge_annotations(copy, catalog)
 
 

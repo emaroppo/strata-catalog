@@ -36,10 +36,18 @@ class Samples:
 
     # -- within a caller's transaction ----------------------------------
 
-    def find(self, conn, checksum: str) -> int | None:
-        """The id for these bytes, if they are catalogued."""
+    def find(self, conn, checksum: str, *, media: str, subtype: str) -> int | None:
+        """The id for these bytes as this type, if they are catalogued so.
+
+        The same bytes as another type are another sample. See
+        ``docs/adr/0052``.
+        """
         return conn.execute(
-            select(t.sample.c.id).where(t.sample.c.checksum == checksum)
+            select(t.sample.c.id).where(
+                t.sample.c.checksum == checksum,
+                t.sample.c.media == media,
+                t.sample.c.subtype == subtype,
+            )
         ).scalar_one_or_none()
 
     def add(
@@ -65,33 +73,31 @@ class Samples:
             )
         ).inserted_primary_key[0]
 
-    def describe(
-        self, conn, sample_id: int, *, subtype: str | None = None, metadata: dict | None
-    ) -> None:
-        """Bring a known sample's description up to date.
+    def describe(self, conn, sample_id: int, *, metadata: dict | None) -> None:
+        """Bring a known sample's metadata up to date.
 
         Updated rather than left alone; a dataset already built is
         undisturbed, since membership is materialised into
-        ``dataset_member``. See ``docs/adr/0023``. A change in place, so
-        what it replaced is an event, for a freeze's replay to read back.
-        Nothing changed is nothing recorded. See ``docs/adr/0050``.
+        ``dataset_member``. See ``docs/adr/0023``. Never its type: with the
+        checksum, the type is which sample this is, and the same bytes as
+        another type are another sample. See ``docs/adr/0052``. A change in
+        place, so what it replaced is an event, for a freeze's replay to
+        read back. Nothing changed is nothing recorded. See
+        ``docs/adr/0050``.
         """
         before = conn.execute(
             select(t.sample.c.subtype, t.sample.c.metadata).where(t.sample.c.id == sample_id)
         ).one()
-        subtype = before.subtype if subtype is None else subtype
-        if (subtype, metadata) == (before.subtype, before.metadata):
+        if metadata == before.metadata:
             return
         # The sample, then the event: the order a freeze locks them in
-        conn.execute(
-            update(t.sample)
-            .where(t.sample.c.id == sample_id)
-            .values(subtype=subtype, metadata=metadata)
-        )
+        conn.execute(update(t.sample).where(t.sample.c.id == sample_id).values(metadata=metadata))
         conn.execute(
             insert(t.event).values(
                 kind=t.DESCRIBED,
                 sample_id=sample_id,
+                # The subtype as well, unchanged, as events written while
+                # describing could retype a sample carry it
                 before={"subtype": before.subtype, "metadata": before.metadata},
             )
         )
@@ -150,6 +156,33 @@ class Samples:
             ).all()
             found.update(dict(rows))
         return found
+
+    def identities(self, conn, sample_ids: Sequence[int]) -> dict[int, tuple[str, str]]:
+        """Each sample's checksum and type, ``text/email``, by id. See ``docs/adr/0052``."""
+        found: dict[int, tuple[str, str]] = {}
+        for chunk in chunks(list(sample_ids)):
+            for row in conn.execute(
+                select(
+                    t.sample.c.id, t.sample.c.checksum, t.sample.c.media, t.sample.c.subtype
+                ).where(t.sample.c.id.in_(chunk))
+            ):
+                found[row.id] = (row.checksum, f"{row.media}/{row.subtype}")
+        return found
+
+    def locate(self, checksum: str) -> Location | None:
+        """Where the bytes of a live sample with this checksum are, of whatever type.
+
+        One copy per checksum, which every row over it names, so any row
+        will do: what reads the bytes alone needs no type. See
+        ``docs/adr/0052``.
+        """
+        with self.engine.connect() as conn:
+            row = conn.execute(
+                select(t.sample.c.location, t.sample.c.offset, t.sample.c.length)
+                .where(and_(live(), t.sample.c.checksum == checksum))
+                .limit(1)
+            ).first()
+        return None if row is None else Location(row.location, row.offset, row.length)
 
     def located(self, conn, checksums: Sequence[str]) -> list:
         """Checksum, location and metadata for the live samples among ``checksums``."""

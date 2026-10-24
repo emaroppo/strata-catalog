@@ -342,6 +342,10 @@ class Candidate:
     metadata: dict
     collections: tuple[str, ...]
 
+    @property
+    def type(self) -> str:
+        return f"{self.media}/{self.subtype}"
+
 
 @dataclass(frozen=True)
 class Answer:
@@ -516,17 +520,17 @@ def run_selection(conn, spec: SelectionSpec, mark: dict[str, int]) -> Selection:
     removed: dict[str, int] = {}
     selected = passed
     for ref in chosen.lists.include:
-        removed[ref] = sum(1 for c in passed if c.checksum not in lists[ref])
-        selected = [c for c in selected if c.checksum in lists[ref]]
+        removed[ref] = sum(1 for c in passed if not lists[ref].holds(c.checksum, c.type))
+        selected = [c for c in selected if lists[ref].holds(c.checksum, c.type)]
     for ref in chosen.lists.exclude:
-        removed[ref] = sum(1 for c in passed if c.checksum in lists[ref])
-        selected = [c for c in selected if c.checksum not in lists[ref]]
+        removed[ref] = sum(1 for c in passed if lists[ref].holds(c.checksum, c.type))
+        selected = [c for c in selected if not lists[ref].holds(c.checksum, c.type)]
 
     top = where.all if isinstance(where, All) else ([where] if where is not None else [])
     counts = {
         "candidates": len(pool),
         "by_collection": _by_collection(pool, chosen.collections),
-        "by_type": dict(sorted(Counter(f"{c.media}/{c.subtype}" for c in pool).items())),
+        "by_type": dict(sorted(Counter(c.type for c in pool).items())),
         "selected": len(selected),
         # Each by itself, against every candidate
         "rejected": [
@@ -737,18 +741,39 @@ def _classes(conn, annotation_ids: list[int]) -> dict[int, set[str]]:
     return found
 
 
-def list_members(conn, ref: str) -> set[str]:
-    """The checksums a list version holds, by ``name@version``."""
+@dataclass(frozen=True)
+class ListMembers:
+    """A list version's checksums, and the one type they are where it records one."""
+
+    checksums: frozenset[str]
+    #: ``text/email``. None for a list put without a type.
+    type: str | None = None
+
+    def holds(self, checksum: str, type_: str) -> bool:
+        """Whether the sample with these bytes and this type is a member.
+
+        A typed list matches on both. An untyped one matches on the checksum
+        alone, so where two types hold its bytes it holds both samples.
+        That is right for a split, which has to keep the two on one side
+        anyway, and a selection names its types besides. See
+        ``docs/adr/0052``.
+        """
+        return checksum in self.checksums and (self.type is None or self.type == type_)
+
+
+def list_members(conn, ref: str) -> ListMembers:
+    """The checksums a list version holds, and its type, by ``name@version``."""
     name, version = parse_ref(ref)
-    list_id = conn.execute(
-        select(t.list_version.c.id).where(
+    row = conn.execute(
+        select(t.list_version.c.id, t.list_version.c.media, t.list_version.c.subtype).where(
             and_(t.list_version.c.name == name, t.list_version.c.version == version)
         )
-    ).scalar_one_or_none()
-    if list_id is None:
+    ).first()
+    if row is None:
         raise CatalogError(f"This catalog holds no list {ref}.")
-    return set(
-        conn.execute(
-            select(t.list_member.c.checksum).where(t.list_member.c.list_id == list_id)
-        ).scalars()
+    checksums = conn.execute(
+        select(t.list_member.c.checksum).where(t.list_member.c.list_id == row.id)
+    ).scalars()
+    return ListMembers(
+        frozenset(checksums), None if row.media is None else f"{row.media}/{row.subtype}"
     )

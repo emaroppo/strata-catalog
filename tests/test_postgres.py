@@ -438,3 +438,100 @@ def test_describing_a_known_sample_and_a_freeze_both_finish(catalog, files):
     for thread in threads:
         thread.join(60)
     assert errors == []
+
+
+# ----------------------------------------------------------------------
+# A sample is its bytes and its type. docs/adr/0052
+# ----------------------------------------------------------------------
+
+
+def test_the_same_bytes_as_two_types_are_two_samples_and_one_side(catalog, files, tmp_path):
+    from strata.contracts import Choices, ClassificationSchema, Manifest
+
+    paths = files(6)
+    plain = catalog.ingest(paths, media="image")
+    frames = catalog.ingest(paths, media="image", subtype="frames")
+    assert set(plain).isdisjoint(frames)
+    assert catalog.ingest(paths, media="image", subtype="frames") == frames
+
+    label_set = catalog.label_sets.create("p", ClassificationSchema(classes=["cat"]))
+    catalog.annotations.annotate_many(label_set, [(i, Choices(values=["cat"])) for i in plain])
+    catalog.annotations.annotate_many(label_set, [(i, Choices(values=["cat"])) for i in frames])
+    dataset_id = catalog.create_dataset("d", label_set, collections=[EVERYTHING], val_ratio=0.3)
+    out = catalog.materialise(dataset_id, tmp_path / "d")
+    manifest = Manifest.model_validate_json((out / "manifest.json").read_text())
+    sides: dict[str, set[str]] = {}
+    for sample in manifest.samples:
+        sides.setdefault(sample.checksum, set()).add(sample.split)
+    assert len(manifest.samples) == 12 and all(len(s) == 1 for s in sides.values())
+
+
+def test_the_identity_migration_runs_on_postgres(tmp_path, monkeypatch):
+    from alembic import command
+    from alembic.config import Config
+    from sqlalchemy import create_engine, text
+    from sqlalchemy.exc import IntegrityError
+
+    from strata.catalog.index.schema_version import MIGRATIONS
+
+    name = f"t{uuid.uuid4().hex[:12]}"
+    admin = create_engine(URL)
+    with admin.begin() as conn:
+        conn.execute(text(f'CREATE SCHEMA "{name}"'))
+    url = f"{URL}?options=-csearch_path%3D{name}"
+    monkeypatch.setenv("STRATA_CATALOG_URL", url)
+    config = Config()
+    config.set_main_option("script_location", str(MIGRATIONS))
+    engine = create_engine(url)
+    try:
+        command.upgrade(config, "e7b2c9a4d103")
+        a, b = "a" * 64, "b" * 64
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    'INSERT INTO sample (id, checksum, location, "offset", length, media, subtype) '
+                    "VALUES (1, :a, 'x', 0, 1, 'text', 'email'), (2, :b, 'y', 0, 1, 'text', 'sft')"
+                ),
+                {"a": a, "b": b},
+            )
+            conn.execute(
+                text(
+                    "INSERT INTO list_version (id, name, version, digest, size) "
+                    "VALUES (1, 'one', 1, 'd', 1), (2, 'two', 1, 'd', 2)"
+                )
+            )
+            conn.execute(
+                text(
+                    "INSERT INTO list_member (list_id, checksum) VALUES (1, :a), (2, :a), (2, :b)"
+                ),
+                {"a": a, "b": b},
+            )
+
+        command.upgrade(config, "head")
+
+        with engine.connect() as conn:
+            typed = conn.execute(
+                text("SELECT id, media, subtype FROM list_version ORDER BY id")
+            ).all()
+        assert [tuple(row) for row in typed] == [(1, "text", "email"), (2, None, None)]
+        insert = text(
+            'INSERT INTO sample (checksum, location, "offset", length, media, subtype) '
+            "VALUES (:a, 'x', 0, 1, 'text', :subtype)"
+        )
+        with engine.begin() as conn:
+            conn.execute(text("SELECT setval(pg_get_serial_sequence('sample', 'id'), 2)"))
+            conn.execute(insert, {"a": a, "subtype": "generated"})
+        with pytest.raises(IntegrityError), engine.begin() as conn:
+            conn.execute(insert, {"a": a, "subtype": "email"})
+
+        with pytest.raises(RuntimeError, match="more than one type"):
+            command.downgrade(config, "e7b2c9a4d103")
+        with engine.begin() as conn:
+            conn.execute(text("DELETE FROM sample WHERE subtype = 'generated'"))
+        command.downgrade(config, "e7b2c9a4d103")
+        command.upgrade(config, "head")
+    finally:
+        engine.dispose()
+        with admin.begin() as conn:
+            conn.execute(text(f'DROP SCHEMA "{name}" CASCADE'))
+        admin.dispose()

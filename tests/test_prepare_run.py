@@ -177,6 +177,21 @@ def test_a_run_writes_a_sample_per_body_and_an_origin_per_input(catalog, tmp_pat
     assert verify_run(catalog, report.run_id, deep=True).ok
 
 
+def test_an_output_whose_bytes_another_type_holds_is_a_sample_of_its_own(catalog, tmp_path):
+    # The same bytes as two types are two samples over one blob. docs/adr/0052
+    (tmp_path / "plain.txt").write_bytes(b"hello there")
+    [plain] = catalog.ingest(
+        [tmp_path / "plain.txt"], media="text", metadata={"kept": True}, collections=["loose"]
+    )
+    report = prepare(catalog, load_chain(_spec(tmp_path, "headers")), _all(catalog))
+
+    assert report.counts["new_samples"] == report.counts["samples"]
+    [loose] = catalog.samples.matching(["loose"])
+    note = catalog.samples.by_checksum(loose.checksum, "text/note")
+    assert (loose.id, loose.type, loose.metadata) == (plain, "text/plain", {"kept": True})
+    assert note is not None and note.id != plain and note.location == loose.location
+
+
 def test_samples_land_in_the_specs_collection_as_its_type(catalog, tmp_path):
     prepare(catalog, load_chain(_spec(tmp_path, "headers", "paragraphs")), _all(catalog))
     with catalog.engine.connect() as conn:

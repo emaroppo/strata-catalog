@@ -97,20 +97,20 @@ def create_app(
             # catalog. docs/adr/0013
             raise HTTPException(status_code=403, detail=str(e)) from None
 
-        sample = catalog.samples.by_checksum(checksum)
-        if sample is None:
+        # The bytes alone, so any live row over them will do, of any type.
+        # docs/adr/0052
+        location = catalog.samples.locate(checksum)
+        if location is None:
             raise HTTPException(status_code=404, detail="No such blob.")
 
         try:
-            body = catalog.blobs.get(sample.location)
+            body = catalog.blobs.get(location)
         except Exception as e:
             # The index knew the sample and storage would not give it up: a
             # 502, distinct from 404. docs/adr/0013
             raise HTTPException(
                 status_code=502,
-                detail=(
-                    f"Storage did not return {sample.location.container} — {type(e).__name__}: {e}"
-                ),
+                detail=f"Storage did not return {location.container} — {type(e).__name__}: {e}",
             ) from None
         return Response(
             content=body,

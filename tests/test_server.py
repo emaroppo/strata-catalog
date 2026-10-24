@@ -246,6 +246,14 @@ def test_a_url_the_catalog_issues_is_one_its_server_serves(client, stocked, chec
     assert response.headers["ETag"] == f'"{checksums[0]}"'
 
 
+def test_bytes_two_types_hold_are_served_by_checksum_alone(client, stocked, files, checksums):
+    # The server reads bytes, and any row over them will do. docs/adr/0052
+    stocked.ingest(files(3), media="image", subtype="frames")
+    response = client.get(signed(checksums[0]))
+    assert response.status_code == 200
+    assert response.content.startswith(b"contents of img")
+
+
 def test_a_url_reads_back_to_its_checksum(stocked, checksums):
     sample = stocked.samples.by_checksum(checksums[0])
     url = SignedUrls("http://minipc:8081", SECRET).url_for(sample)

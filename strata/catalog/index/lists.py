@@ -4,6 +4,10 @@ What a script chose, where a condition on one sample cannot say it:
 near-duplicates to drop, a hand-picked set. A version never changes; a
 different set under the same name is the next version, and the same set
 again is the version that holds it. See ``docs/adr/0050``.
+
+A version records the one type its members are, where it was put with
+one, so each member names a sample outright: the same bytes can be two
+samples. See ``docs/adr/0052``.
 """
 
 from collections.abc import Iterable
@@ -13,7 +17,7 @@ from datetime import datetime
 from sqlalchemy import and_, insert, select
 from sqlalchemy.engine import Engine
 
-from ..rows import CatalogError, chunks
+from ..rows import CatalogError, chunks, split_type
 from . import tables as t
 from .runs import files_digest
 
@@ -25,6 +29,8 @@ class ListRow:
     size: int
     digest: str
     created_at: datetime | None
+    #: ``text/email``, or None for a list put without a type.
+    type: str | None = None
 
     @property
     def ref(self) -> str:
@@ -49,14 +55,20 @@ class Lists:
     def __init__(self, engine: Engine):
         self.engine = engine
 
-    def put(self, name: str, checksums: Iterable[str]) -> tuple[ListRow, bool]:
+    def put(
+        self, name: str, checksums: Iterable[str], type: str | None = None
+    ) -> tuple[ListRow, bool]:
         """Store a set under ``name``: the version holding it, and whether it is new.
 
-        The same set as the latest version is that version. Anything else is
+        The same set as the latest version is that version, unless this
+        names a type and the latest is of another or none. Anything else is
         the next one. A checksum need not be a sample here: a list says what
-        a script chose, and a sample can arrive after it.
+        a script chose, and a sample can arrive after it. ``type`` is
+        ``text/email``, the type of every member. See ``docs/adr/0052``.
         """
         check_name(name)
+        if type is not None:
+            split_type(type)
         wanted = sorted(set(checksums))
         bad = [c for c in wanted if len(c) != 64 or any(ch not in "0123456789abcdef" for ch in c)]
         if bad:
@@ -64,16 +76,30 @@ class Lists:
         digest = list_digest(wanted)
         with self.engine.begin() as conn:
             latest = self._latest(conn, name)
-            if latest is not None and latest.digest == digest:
+            if latest is not None and latest.digest == digest and type in (None, latest.type):
                 return latest, False
             version = 1 if latest is None else latest.version + 1
-            return self.add(conn, name, version, digest, wanted), True
+            return self.add(conn, name, version, digest, wanted, type), True
 
-    def add(self, conn, name: str, version: int, digest: str, checksums: list[str]) -> ListRow:
+    def add(
+        self,
+        conn,
+        name: str,
+        version: int,
+        digest: str,
+        checksums: list[str],
+        type: str | None = None,
+    ) -> ListRow:
         """Write one version as given, within a caller's transaction."""
+        media, subtype = (None, None) if type is None else split_type(type)
         list_id = conn.execute(
             insert(t.list_version).values(
-                name=name, version=version, digest=digest, size=len(checksums)
+                name=name,
+                version=version,
+                digest=digest,
+                size=len(checksums),
+                media=media,
+                subtype=subtype,
             )
         ).inserted_primary_key[0]
         for chunk in chunks([{"list_id": list_id, "checksum": c} for c in checksums]):
@@ -116,4 +142,11 @@ class Lists:
 
 
 def _row(row) -> ListRow:
-    return ListRow(row.name, row.version, row.size, row.digest, row.created_at)
+    return ListRow(
+        row.name,
+        row.version,
+        row.size,
+        row.digest,
+        row.created_at,
+        None if row.media is None else f"{row.media}/{row.subtype}",
+    )

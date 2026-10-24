@@ -93,6 +93,8 @@ class Datasets:
                 select(
                     t.sample.c.id,
                     t.sample.c.checksum,
+                    t.sample.c.media,
+                    t.sample.c.subtype,
                     t.sample.c.location,
                     t.sample.c.offset,
                     t.sample.c.length,
@@ -113,6 +115,7 @@ class Datasets:
                     ),
                 )
                 .where(t.dataset_member.c.dataset_id == dataset_id)
+                .order_by(t.sample.c.id)
             ).all()
 
     # -- within a caller's transaction ----------------------------------

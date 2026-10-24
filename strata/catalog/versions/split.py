@@ -4,10 +4,13 @@ Three sides: ``train`` and ``val`` are what a round uses, ``holdout`` never
 reaches a model and is drawn first. A new version inherits every side its
 predecessor decided. A standalone sample is a group of one. See
 ``docs/adr/0003``.
+
+Samples with the same bytes are one group, always, joined with whatever
+groups a key makes. See ``docs/adr/0052``.
 """
 
 import random
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from typing import NamedTuple
 
 TRAIN, VAL, HOLDOUT = "train", "val", "holdout"
@@ -32,6 +35,7 @@ def assign(
     holdout_ratio: float = 0.0,
     seed: int = 42,
     given: dict[int, str] | None = None,
+    checksums: Mapping[int, str] | None = None,
 ) -> tuple[dict[int, str], Achieved]:
     """Decide a side per sample id, and report the ratios actually reached.
 
@@ -44,6 +48,12 @@ def assign(
 
     The achieved ratios are returned because grouping can make a target
     unreachable (the fallback below). See ``docs/adr/0024``.
+
+    ``checksums`` maps sample id to checksum. Samples sharing one are one
+    group, and groups they span are joined: the same bytes under two types
+    never sit on both sides, whatever ``members`` says. Not a key a version
+    opts into, so a caller that has the checksums passes them. See
+    ``docs/adr/0052``.
     """
     if not members:
         return {}, Achieved(0.0, 0.0)
@@ -65,6 +75,8 @@ def assign(
         # or two samples could collide with a real group's name
         key = f"g:{group_id}" if group_id is not None else f"s:{sample_id}"
         groups.setdefault(key, []).append(sample_id)
+    if checksums:
+        groups = _joined(groups, checksums)
 
     undecided: list[str] = []
 
@@ -110,6 +122,39 @@ def assign(
 
     _refuse_a_one_sided_split(assigned, len(groups) + len(given))
     return assigned, Achieved(counts[VAL] / total, counts[HOLDOUT] / total)
+
+
+def _joined(groups: dict[str, list[int]], checksums: Mapping[int, str]) -> dict[str, list[int]]:
+    """``groups`` with every two that hold the same bytes made one.
+
+    A joined group keeps the key of its earliest part, and the order the
+    parts came in, so where no bytes are shared nothing moves and the draw
+    is the one it always was. See ``docs/adr/0052``.
+    """
+    order = {key: n for n, key in enumerate(groups)}
+    parent = {key: key for key in groups}
+
+    def root(key: str) -> str:
+        while parent[key] != key:
+            parent[key] = parent[parent[key]]
+            key = parent[key]
+        return key
+
+    first: dict[str, str] = {}
+    for key, ids in groups.items():
+        for sample_id in ids:
+            checksum = checksums.get(sample_id)
+            if checksum is None:
+                continue
+            a, b = root(first.setdefault(checksum, key)), root(key)
+            if a != b:
+                early, late = sorted((a, b), key=order.__getitem__)
+                parent[late] = early
+
+    joined: dict[str, list[int]] = {}
+    for key, ids in groups.items():
+        joined.setdefault(root(key), []).extend(ids)
+    return joined
 
 
 def _fill(

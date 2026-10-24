@@ -22,6 +22,7 @@ def _remove(args) -> int:
             collections=args.collection or None,
             where=where,
             checksums=args.checksum or None,
+            types=args.type or None,
             dry_run=args.dry_run,
         )
     except CatalogError as e:

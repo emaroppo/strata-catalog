@@ -6,6 +6,9 @@ answer is nothing; a different answer of equal standing is a conflict the
 target keeps its own side of and records; an answer that outranks what the
 target holds replaces or confirms it, and one that is outranked is left
 out (``tables.AUTHORITY``). See ``docs/adr/0009``.
+
+An answer is matched to the target's sample by checksum and type, since
+the same bytes can be two samples (``docs/adr/0052``).
 """
 
 from __future__ import annotations
@@ -45,7 +48,8 @@ class MergeReport:
     #: Arriving answers left alone because what the target holds outranks
     #: them — an import landing where a person already answered.
     outranked: int = 0
-    #: Source answers whose sample is not in the target, by checksum.
+    #: Source answers whose sample, its checksum and type, is not in the
+    #: target, by checksum.
     unknown_samples: list[str] = field(default_factory=list)
     #: Label sets present in the source and not in the target, by name.
     unknown_label_sets: list[str] = field(default_factory=list)
@@ -125,13 +129,14 @@ def merge_annotations(
             continue
 
         rows = _answers(source, source_set_id)
-        for done, (checksum, state, value, answered_by) in enumerate(rows, start=1):
+        for done, (checksum, type_, state, value, answered_by) in enumerate(rows, start=1):
             _merge_one(
                 target,
                 target_set_id,
                 schema,
                 source.id,
                 checksum,
+                type_,
                 state,
                 value,
                 answered_by,
@@ -144,13 +149,13 @@ def merge_annotations(
 
 
 def _merge_one(
-    target, target_set_id, schema, origin, checksum, state, raw, answered_by, report, dry_run
+    target, target_set_id, schema, origin, checksum, type_, state, raw, answered_by, report, dry_run
 ) -> None:
-    sample = target.samples.by_checksum(checksum)
+    sample = target.samples.by_checksum(checksum, type_)
     if sample is None:
-        # By content, so a file renamed on the laptop still finds its
-        # sample; unknown bytes were ingested there and never here.
-        # docs/adr/0001
+        # By content and type, so a file renamed on the laptop still finds
+        # its sample; unknown bytes, or bytes made another type, were
+        # ingested there and never here. docs/adr/0001, docs/adr/0052
         report.unknown_samples.append(checksum)
         return
 
@@ -216,13 +221,11 @@ def _merge_lists(source: Catalog, target: Catalog, report: MergeReport, dry_run:
     """
     held = {row.ref: row for row in target.lists.every()}
     arriving = source.lists.every()
-    clashes = [
-        row.ref for row in arriving if row.ref in held and held[row.ref].digest != row.digest
-    ]
+    clashes = [row.ref for row in arriving if row.ref in held and _clash(held[row.ref], row)]
     if clashes:
         raise MergeError(
-            f"The target holds list(s) {', '.join(clashes)} with other checksums. A "
-            f"name and version mean one set; nothing was merged."
+            f"The target holds list(s) {', '.join(clashes)} with other checksums or of "
+            f"another type. A name and version mean one set; nothing was merged."
         )
     new = [row for row in arriving if row.ref not in held]
     report.lists = [row.ref for row in new]
@@ -231,7 +234,19 @@ def _merge_lists(source: Catalog, target: Catalog, report: MergeReport, dry_run:
     with target.engine.begin() as conn:
         for row in new:
             _, members = source.lists.get(row.name, row.version)
-            target.lists.add(conn, row.name, row.version, row.digest, members)
+            target.lists.add(conn, row.name, row.version, row.digest, members, row.type)
+
+
+def _clash(held, arriving) -> bool:
+    """Two versions under one ref that say different things.
+
+    A type one side does not record is not a contradiction: a copy
+    migrated apart may have typed a list the other could not. See
+    ``docs/adr/0052``.
+    """
+    if held.digest != arriving.digest:
+        return True
+    return None not in (held.type, arriving.type) and held.type != arriving.type
 
 
 def _label_sets(catalog: Catalog) -> list[tuple[str, int]]:
@@ -241,17 +256,19 @@ def _label_sets(catalog: Catalog) -> list[tuple[str, int]]:
         ]
 
 
-def _answers(catalog: Catalog, label_set_id: int) -> list[tuple[str, str, dict | None, str]]:
-    """Every answer in a label set, keyed by content rather than by id, each with its source.
+def _answers(catalog: Catalog, label_set_id: int) -> list[tuple[str, str, str, dict | None, str]]:
+    """Every answer in a label set, keyed by content and type rather than by id, with its source.
 
-    See ``docs/adr/0001`` and ``docs/adr/0009``.
+    See ``docs/adr/0001``, ``docs/adr/0009`` and ``docs/adr/0052``.
     """
     with catalog.engine.connect() as conn:
         return [
-            (row.checksum, row.state, row.value, row.source)
+            (row.checksum, f"{row.media}/{row.subtype}", row.state, row.value, row.source)
             for row in conn.execute(
                 select(
                     t.sample.c.checksum,
+                    t.sample.c.media,
+                    t.sample.c.subtype,
                     t.annotation.c.state,
                     t.annotation.c.value,
                     t.annotation.c.source,

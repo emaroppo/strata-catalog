@@ -66,6 +66,11 @@ def _import_answers(args) -> int:
             f"  {r.rows:,} row(s) written, {r.history:,} of them history; "
             f"{r.already:,} already here"
         )
+        if r.ambiguous:
+            yield (
+                f"  {r.ambiguous:,} of the unmatched name no type, and several types hold "
+                f"their bytes here: export them again with this release"
+            )
         if r.paired:
             yield f"  spans remapped: {r.spans_carried:,} carried, {r.spans_lost:,} lost"
 

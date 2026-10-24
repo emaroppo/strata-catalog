@@ -209,16 +209,18 @@ class Catalog:
     ) -> list[int]:
         """Register files, storing their bytes and returning their sample ids.
 
-        Idempotent on content: a file whose bytes are already catalogued
-        returns the existing id rather than a duplicate, which is what makes
-        re-running ingest over a growing directory safe.
+        Idempotent on content and type: a file whose bytes are already
+        catalogued as this type returns the existing id rather than a
+        duplicate, which is what makes re-running ingest over a growing
+        directory safe. The same bytes as another type are a second sample
+        over the stored blob, and the first is left as it was. See
+        ``docs/adr/0052``.
 
         ``metadata`` applies to the whole batch; ``metadata_for`` supplies it
         per file. A grouping is a metadata key like any other, respected
         only by a version frozen with ``group_by`` naming it. A known sample
-        has its ``subtype`` and ``metadata`` brought up to date rather than
-        left alone; a dataset already built is undisturbed. See
-        ``docs/adr/0023``.
+        has its ``metadata`` brought up to date rather than left alone; a
+        dataset already built is undisturbed. See ``docs/adr/0023``.
 
         ``collections`` says where these samples came from, as paths. They
         are added rather than replaced. See ``docs/adr/0022``.
@@ -243,10 +245,11 @@ class Catalog:
                 if canonicalise is not None:
                     source, entry = _canonical_source(path, canonicalise, Path(scratch), entry)
                 checksum = checksum_of(source)
-                known = self.samples.find(conn, checksum)
+                known = self.samples.find(conn, checksum, media=media, subtype=subtype)
                 if known is None:
-                    # A raw file's blob, if one holds these bytes: one copy
-                    # per checksum. docs/adr/0045
+                    # The blob of another type's sample or of a raw file, if
+                    # one holds these bytes: one copy per checksum.
+                    # docs/adr/0045, docs/adr/0052
                     location = self.raw.stored(conn, [checksum]).get(checksum)
                     if location is None:
                         location = self.blobs.put(source, checksum)
@@ -259,7 +262,7 @@ class Catalog:
                         metadata=entry,
                     )
                 else:
-                    self.samples.describe(conn, known, subtype=subtype, metadata=entry)
+                    self.samples.describe(conn, known, metadata=entry)
                 ids.append(known)
                 if on_sample is not None:
                     on_sample(path)
@@ -347,6 +350,10 @@ class Catalog:
         start here. A warm start never reaches back past such a version.
         See ``docs/adr/0024``.
 
+        Samples with the same bytes, which two types make, are always one
+        group, with ``group_by`` or without, and a given side reaches all of
+        them. See ``docs/adr/0052``.
+
         ``spec`` selects the members, and the version records it with the
         watermark it ran at. Without one, ``collections`` stands for the
         spec that says what a freeze always did: every sample there with a
@@ -429,6 +436,8 @@ class Catalog:
                 holdout_ratio=holdout_ratio,
                 seed=seed,
                 given=fixed,
+                # The same bytes are one group, whatever the key. docs/adr/0052
+                checksums=self.samples.checksums(conn, sample_ids),
             )
 
             dataset_id = self.datasets.freeze(
@@ -458,10 +467,12 @@ class Catalog:
             return self._given_sides(conn, given, list(sample_ids))
 
     def _given_sides(self, conn, given: GivenSplit, sample_ids: Sequence[int]) -> dict[int, str]:
+        # Every member's bytes and type, lists or not: a side reaches every
+        # sample with the bytes of one it names. docs/adr/0052
         try:
             return given.sides_for(
                 self.samples.metadata(conn, sample_ids),
-                self.samples.checksums(conn, sample_ids) if given.refs else None,
+                self.samples.identities(conn, sample_ids),
                 {ref: list_members(conn, ref) for ref in given.refs},
             )
         except ValueError as e:
@@ -490,6 +501,8 @@ class Catalog:
         with self.engine.connect() as conn:
             rows = self.samples.located(conn, checksums)
         for row in rows:
+            if row.checksum in paths:
+                continue  # another type's row over the same blob. docs/adr/0052
             suffix = Path((row.metadata or {}).get("source_path") or "").suffix.lower()
             target = cache / blob_path(row.checksum, suffix)
             paths[row.checksum] = target
@@ -548,11 +561,15 @@ class Catalog:
 
         wanted: dict[Location, Path] = {}
         relatives: dict[int, str] = {}
+        # One file per checksum: two types' rows over the same bytes share
+        # it, named after the first. docs/adr/0052
+        named: dict[str, str] = {}
         for row in rows:
-            relatives[row.id] = f"{FILES_DIR}/{materialised_name(row)}"
+            name = named.setdefault(row.checksum, materialised_name(row))
+            relatives[row.id] = f"{FILES_DIR}/{name}"
             target = dest / relatives[row.id]
             if not target.exists():
-                wanted[Location(row.location, row.offset, row.length)] = target
+                wanted.setdefault(Location(row.location, row.offset, row.length), target)
         write_out(self.blobs, wanted, on_progress, cache)
 
         resolved = self._resolve_features(features, [row.id for row in rows])
@@ -564,6 +581,7 @@ class Catalog:
                 ManifestSample(
                     id=row.id,
                     checksum=row.checksum,
+                    type=f"{row.media}/{row.subtype}",
                     path=relative,
                     metadata=dict(row.metadata or {}),
                     split=row.side,

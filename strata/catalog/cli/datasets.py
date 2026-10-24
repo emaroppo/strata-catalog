@@ -42,13 +42,14 @@ def _lists_put(args) -> int:
     catalog, _ = _open(args)
     checksums = [line.strip() for line in _lines(args.checksums) if line.strip()]
     try:
-        row, new = catalog.lists.put(args.name, checksums)
+        row, new = catalog.lists.put(args.name, checksums, args.type)
     except CatalogError as e:
         raise Refused(str(e)) from None
 
     def render(_):
         said = "stored" if new else "already held, unchanged"
-        yield f"{row.ref}: {row.size:,} checksum(s), {said}"
+        of = f" of {row.type}" if row.type else ""
+        yield f"{row.ref}: {row.size:,} checksum(s){of}, {said}"
 
     _emit(args, {**asdict(row), "ref": row.ref, "new": new}, render)
     return 0
@@ -80,7 +81,7 @@ def _lists_ls(args) -> int:
         if not rows:
             yield "No lists yet."
         for row in rows:
-            yield f"{row.ref:<40} {row.size:>9,}  {row.digest[:12]}"
+            yield f"{row.ref:<40} {row.size:>9,}  {row.digest[:12]}  {row.type or 'untyped'}"
 
     _emit(args, [{**asdict(row), "ref": row.ref} for row in rows], render)
     return 0

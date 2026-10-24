@@ -11,13 +11,17 @@ carried over, has no key on the samples to read. Lists say it instead:
 each list, by ``name@version``, puts its members on a side. A list is
 fixed once stored, so the version means what it meant when frozen. See
 ``docs/adr/0051``.
+
+Samples with the same bytes take one side, whichever of them the key or a
+list names, and a split that names two sides for them is refused. See
+``docs/adr/0052``.
 """
 
 from collections.abc import Mapping
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from ..selection import parse_ref
+from ..selection import ListMembers, parse_ref
 from .split import HOLDOUT, VAL
 
 
@@ -87,14 +91,15 @@ class GivenSplit(BaseModel):
     def sides_for(
         self,
         metadata: Mapping[int, Mapping],
-        checksums: Mapping[int, str] | None = None,
-        lists: Mapping[str, set[str]] | None = None,
+        samples: Mapping[int, tuple[str, str]] | None = None,
+        lists: Mapping[str, ListMembers] | None = None,
     ) -> dict[int, str]:
         """The side of every sample the key or a list puts on one.
 
-        ``checksums`` maps each sample id to its checksum, and ``lists`` each
-        of :attr:`refs` to its members; both are needed only when lists are
-        named. A sample put on two sides is refused.
+        ``samples`` maps each sample id to its checksum and type, and
+        ``lists`` each of :attr:`refs` to its members; lists need both.
+        With ``samples``, a side reaches every sample with the same bytes.
+        A sample put on two sides is refused, and so are the same bytes.
         """
         sides: dict[int, str] = {}
         if self.key:
@@ -107,30 +112,60 @@ class GivenSplit(BaseModel):
                     sides[sample_id] = HOLDOUT
                 elif name in self.val:
                     sides[sample_id] = VAL
-        if not self.refs:
-            return sides
-        checksums, lists = checksums or {}, lists or {}
-        listed: dict[str, str] = {}
-        for side, refs in ((HOLDOUT, self.holdout_lists), (VAL, self.val_lists)):
-            for ref in refs:
-                for checksum in lists[ref]:
-                    if listed.setdefault(checksum, side) != side:
-                        raise ValueError(
-                            f"Sample {checksum[:12]} is listed as both {listed[checksum]} "
-                            f"and {side}."
-                        )
-        clash = 0
-        for sample_id, checksum in checksums.items():
-            side = listed.get(checksum)
-            if side is None:
-                continue
-            clash += sides.get(sample_id, side) != side
-            sides[sample_id] = side
-        if clash:
-            raise ValueError(
-                f"{clash} sample(s) are put on one side by {self.key!r} and on another by a list."
-            )
-        return sides
+        samples, lists = samples or {}, lists or {}
+        if self.refs:
+            # By bytes, whatever the lists' types: the same bytes on two
+            # sides is a leak. docs/adr/0052
+            listed: dict[str, str] = {}
+            for side, refs in ((HOLDOUT, self.holdout_lists), (VAL, self.val_lists)):
+                for ref in refs:
+                    for checksum in lists[ref].checksums:
+                        if listed.setdefault(checksum, side) != side:
+                            raise ValueError(
+                                f"Sample {checksum[:12]} is listed as both {listed[checksum]} "
+                                f"and {side}."
+                            )
+            clash = 0
+            for sample_id, (checksum, type_) in samples.items():
+                side = listed.get(checksum)
+                refs = self.holdout_lists if side == HOLDOUT else self.val_lists
+                if side is None or not any(lists[ref].holds(checksum, type_) for ref in refs):
+                    continue
+                clash += sides.get(sample_id, side) != side
+                sides[sample_id] = side
+            if clash:
+                raise ValueError(
+                    f"{clash} sample(s) are put on one side by {self.key!r} and on another "
+                    f"by a list."
+                )
+        return _by_bytes(sides, samples)
+
+
+def _by_bytes(sides: dict[int, str], samples: Mapping[int, tuple[str, str]]) -> dict[int, str]:
+    """``sides`` reaching every sample with the bytes of one it names, or refused.
+
+    Two types over one checksum are two samples, and one side. See
+    ``docs/adr/0052``.
+    """
+    held: dict[str, str] = {}
+    torn: set[str] = set()
+    for sample_id, side in sides.items():
+        if sample_id not in samples:
+            continue
+        checksum = samples[sample_id][0]
+        if held.setdefault(checksum, side) != side:
+            torn.add(checksum)
+    if torn:
+        named = ", ".join(sorted(c[:12] for c in torn)[:5])
+        raise ValueError(
+            f"{len(torn)} checksum(s) are held by samples of two types put on two sides: "
+            f"{named}. The same bytes cannot be on both sides of a split."
+        )
+    joined = dict(sides)
+    for sample_id, (checksum, _) in samples.items():
+        if checksum in held:
+            joined[sample_id] = held[checksum]
+    return joined
 
 
 __all__ = ["GivenSplit"]

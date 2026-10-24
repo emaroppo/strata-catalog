@@ -135,9 +135,10 @@ sample = Table(
     Column("location", Text, nullable=False),
     Column("offset", Integer, nullable=False, default=0),
     Column("length", Integer, nullable=False),
-    # sha256 of the bytes. Unique, so ingesting the same file twice under
-    # two names is one sample rather than two.
-    Column("checksum", String(64), nullable=False, unique=True),
+    # sha256 of the bytes. With the type, a sample's identity: the same
+    # file ingested twice under two names as one type is one sample, and
+    # the same bytes as two types are two, over one blob. docs/adr/0052
+    Column("checksum", String(64), nullable=False),
     Column("media", String(32), nullable=False),
     Column("subtype", String(32), nullable=False, default="plain"),
     # Subtype-specific and deliberately unconstrained: frame index, capture
@@ -147,6 +148,8 @@ sample = Table(
     Column("ingested_at", DateTime, server_default=func.now()),
     # Removal is a tombstone rather than a delete. docs/adr/0002
     Column("deleted_at", DateTime, nullable=True),
+    # Its index leads with the checksum, so it is the lookup by bytes too
+    UniqueConstraint("checksum", "media", "subtype", name="uq_sample_identity"),
     Index("ix_sample_subtype", "media", "subtype"),
 )
 
@@ -284,7 +287,8 @@ event = Table(
 #: includes or excludes: what a script chose, where a condition on one
 #: sample cannot say it. A version never changes; a different set under the
 #: same name is the next version. Checksums rather than sample ids, since an
-#: id means nothing outside its catalog. See docs/adr/0050.
+#: id means nothing outside its catalog, and with them the type, since the
+#: same bytes can be two samples. See docs/adr/0050 and docs/adr/0052.
 list_version = Table(
     "list_version",
     metadata,
@@ -295,6 +299,11 @@ list_version = Table(
     # version can be told to hold the same set.
     Column("digest", String(64), nullable=False),
     Column("size", Integer, nullable=False),
+    # The one type its members are, so each names a sample outright. Null
+    # for a list put without one, which matches on the checksum alone.
+    # docs/adr/0052
+    Column("media", String(32), nullable=True),
+    Column("subtype", String(32), nullable=True),
     Column("created_at", DateTime, server_default=func.now()),
     UniqueConstraint("name", "version", name="uq_list_version"),
 )

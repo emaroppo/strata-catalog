@@ -76,6 +76,26 @@ def test_a_null_group_cannot_collide_with_a_real_one():
     assert len(assigned) == 3
 
 
+def test_samples_with_the_same_bytes_are_one_group_whatever_the_key():
+    # Two types over one checksum, each in a group of its own under the key:
+    # the bytes join the groups, chains of them included. docs/adr/0052
+    members: dict[int, str | None] = {i: f"g{i}" for i in range(40)}
+    checksums = {i: f"c{i // 2}" for i in range(40)}
+    members[1] = members[2] = "shared"  # 0 and 1 by bytes, 1 and 2 by key, 2 and 3 by bytes
+    for seed in range(10):
+        assigned, _ = assign(members, val_ratio=0.3, seed=seed, checksums=checksums)
+        for i in range(0, 40, 2):
+            assert assigned[i] == assigned[i + 1]
+        assert len({assigned[i] for i in range(4)}) == 1
+
+
+def test_bytes_nobody_shares_leave_the_draw_as_it_was():
+    members = {i: f"vid{i // 3}" if i % 2 else None for i in range(30)}
+    checksums = {i: f"c{i}" for i in range(30)}
+    for seed in range(5):
+        assert assign(members, seed=seed, checksums=checksums) == assign(members, seed=seed)
+
+
 def test_overshoot_is_capped_at_half_a_group():
     # Six groups of 10, target 20: takes two and stops rather than running
     # to 30
