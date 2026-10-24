@@ -206,7 +206,7 @@ def test_a_freeze_selects_by_the_spec_and_records_it(catalog, mail):
     with catalog.engine.connect() as conn:
         row = conn.execute(select(t.dataset).where(t.dataset.c.id == dataset_id)).one()
     assert row.spec == chosen.canonical() and row.spec_hash == chosen.spec_hash
-    assert set(row.watermark) == {"sample", "sample_collection", "annotation", "event"}
+    assert set(row.watermark) == {"sample", "sample_collection", "annotation", "event", "origin"}
     counts = row.selection
     assert counts["candidates"] == 5 and counts["selected"] == 2
     assert counts["by_collection"] == {COLLECTION: 5}

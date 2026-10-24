@@ -1,6 +1,7 @@
 """Commands for dataset versions and the lists their specs name. See ``docs/adr/0050``."""
 
 from dataclasses import asdict
+from pathlib import Path
 
 from ._shared import Refused, _emit, _open
 from .raw import _lines
@@ -34,6 +35,38 @@ def _dataset_verify(args) -> int:
 
     _emit(args, {**asdict(report), "ok": report.ok}, render)
     return 0 if report.ok else 1
+
+
+def _dataset_freeze(args) -> int:
+    from ..rows import CatalogError
+    from ..stages import Context, DatasetRequest, dataset
+
+    catalog, config = _open(args)
+    try:
+        record = dataset(
+            DatasetRequest(
+                name=args.name,
+                label_set=args.label_set,
+                collections=args.collection or [],
+                spec=args.spec,
+                val_ratio=args.val_ratio,
+                holdout_ratio=args.holdout_ratio,
+                seed=args.seed,
+                group_by=args.group_by,
+                inherit=not args.no_inherit,
+                disagreeing_inputs=args.disagreeing_inputs,
+            ),
+            # Not read by a freeze: only materialising writes there
+            Context(catalog, Path(config.root) / "datasets"),
+        )
+    except CatalogError as e:
+        raise Refused(str(e)) from None
+
+    def render(r):
+        yield f"{r.name}@{r.version}: {r.samples:,} sample(s), dataset id {r.dataset_id}"
+
+    _emit(args, record, render)
+    return 0
 
 
 def _lists_put(args) -> int:

@@ -62,9 +62,10 @@ catalog_identity = Table(
 )
 
 
-#: Something that wrote to the catalog: an ingest, a prepare, an import, a
-#: judge or a backfill. Minted as modelling's runs are, a timestamp and a
-#: host token, so either store can name the other's. See docs/adr/0045.
+#: Something that wrote to the catalog: an ingest, a prepare, a derive, a
+#: generate, an import, a judge or a backfill. Minted as modelling's runs
+#: are, a timestamp and a host token, so either store can name the other's.
+#: See docs/adr/0045 and docs/adr/0053.
 run = Table(
     "run",
     metadata,
@@ -190,11 +191,70 @@ origin = Table(
     Column("run_id", ForeignKey("run.id"), nullable=False),
     Column("input_kind", String(8), nullable=False),
     Column("input", String(64), nullable=False),
+    # A sample input's type, ``text/email``: with the checksum, which sample
+    # it was. Null for a raw file, which has none. docs/adr/0052
+    Column("input_type", String(65), nullable=True),
+    # The part of a generation the input filled, as the model names it
+    # (``text``, ``content``, ``style``), and which one it was where several
+    # fill a part in order. Null for an input with no parts: whatever
+    # ingest, prepare and derive runs write. docs/adr/0053
+    Column("role", String(64), nullable=True),
+    Column("position", Integer, nullable=True),
     Column("metadata", JSON, nullable=True),
     Column("recorded_at", DateTime, server_default=func.now()),
-    UniqueConstraint("sample_id", "run_id", "input_kind", "input", name="uq_origin_hop"),
     Index("ix_origin_input", "input"),
     Index("ix_origin_run", "run_id"),
+)
+
+#: One hop is one row. Over the nullable columns as they read, since two
+#: nulls are distinct to a unique constraint and a raw input's hop would
+#: stop being unique; one sample can fill two roles in one run.
+#: docs/adr/0053
+Index(
+    "uq_origin_hop",
+    origin.c.sample_id,
+    origin.c.run_id,
+    origin.c.input_kind,
+    origin.c.input,
+    func.coalesce(origin.c.input_type, ""),
+    func.coalesce(origin.c.role, ""),
+    unique=True,
+)
+
+
+#: What made a generated sample, besides the samples it was given: one row
+#: per generation that produced it, in the generate run that committed it.
+#: The template, system prompt and settings are digests of what the run's
+#: spec holds in full, so a sample leads back to the exact text and
+#: settings, variant by variant. ``values`` are what was filled into the
+#: template. See docs/adr/0053 and docs/adr/0054.
+generation = Table(
+    "generation",
+    metadata,
+    Column("id", Integer, primary_key=True),
+    Column("sample_id", ForeignKey("sample.id", ondelete="CASCADE"), nullable=False),
+    Column("run_id", ForeignKey("run.id"), nullable=False),
+    # The model run that generated it, as its own store names it, and the
+    # checkpoint, by name and digest. Null where no training run made the
+    # model, as for a base model used as it ships.
+    Column("model_host", String(255), nullable=True),
+    Column("model_run", String(64), nullable=True),
+    Column("checkpoint", String(255), nullable=True),
+    Column("checkpoint_digest", String(64), nullable=True),
+    # Each over the canonical JSON of what the run's spec holds. Null where
+    # the generation used none.
+    Column("template_digest", String(64), nullable=True),
+    Column("system_digest", String(64), nullable=True),
+    Column("settings_digest", String(64), nullable=True),
+    Column("values", JSON, nullable=True),
+    # The stored samples a value was copied out of, each by checksum, type
+    # and metadata field. The model was given the value, not the sample, so
+    # these are not origins.
+    Column("copied_from", JSON, nullable=True),
+    Column("seed", Integer, nullable=True),
+    Column("recorded_at", DateTime, server_default=func.now()),
+    Index("ix_generation_sample", "sample_id"),
+    Index("ix_generation_run", "run_id"),
 )
 
 
@@ -365,6 +425,11 @@ dataset = Table(
     # key, and which of its values were held out or validation. Null when
     # every side was drawn. See versions/given.py.
     Column("given_split", JSON, nullable=True),
+    # What a freeze over a fine-tuning type did with a sample whose origins
+    # disagree on its input: ``drop`` or ``first``. Part of the version's
+    # identity, as a given split is. Null for a version with no such type
+    # among its candidates, where it means nothing. docs/adr/0053
+    Column("disagreeing_inputs", String(8), nullable=True),
     Column("created_at", DateTime, server_default=func.now()),
     UniqueConstraint("name", "version"),
 )

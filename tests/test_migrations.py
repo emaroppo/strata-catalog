@@ -40,6 +40,9 @@ def _upgrade(url: str, monkeypatch) -> None:
     command.upgrade(_config(url), "head")
 
 
+# The origin's uniqueness is an index over expressions, which neither side
+# of the diff can reflect on SQLite; the record 0053 test below covers it.
+@pytest.mark.filterwarnings("ignore:.*expression-based index")
 def test_the_chain_produces_the_schema_the_code_expects(url, monkeypatch):
     _upgrade(url, monkeypatch)
     engine = create_engine(url)
@@ -427,4 +430,70 @@ def test_a_list_takes_the_one_type_its_catalogued_members_are(url, monkeypatch):
     command.downgrade(_config(url), "e7b2c9a4d103")
     with pytest.raises(IntegrityError), engine.begin() as conn:
         conn.execute(insert, {"a": a, "subtype": "generated/x"})
+    command.upgrade(_config(url), "head")
+
+
+def test_an_origin_gains_a_type_and_a_role_and_versions_an_option(url, monkeypatch):
+    """Record 0053: existing rows read as they did, and one hop stays one row."""
+    from sqlalchemy import text
+    from sqlalchemy.exc import IntegrityError
+
+    monkeypatch.setenv("STRATA_CATALOG_URL", url)
+    command.upgrade(_config(url), "e83c65fe4277")
+    a, raw = "a" * 64, "b" * 64
+    engine = create_engine(url)
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                "INSERT INTO run (id, kind, producer, started_at) "
+                "VALUES ('r1', 'prepare', 'p', '2026-10-24')"
+            )
+        )
+        conn.execute(
+            text(
+                "INSERT INTO sample (id, checksum, location, offset, length, media, subtype) "
+                "VALUES (1, :a, 'x', 0, 1, 'text', 'email')"
+            ),
+            {"a": a},
+        )
+        conn.execute(
+            text(
+                "INSERT INTO origin (sample_id, run_id, input_kind, input, metadata) "
+                "VALUES (1, 'r1', 'raw', :raw, '{\"folder\": \"inbox\"}')"
+            ),
+            {"raw": raw},
+        )
+
+    command.upgrade(_config(url), "head")
+
+    with engine.connect() as conn:
+        row = conn.execute(
+            text("SELECT input, input_type, role, position, metadata FROM origin")
+        ).one()
+        assert tuple(row)[:4] == (raw, None, None, None)
+        assert conn.execute(text("SELECT COUNT(*) FROM generation")).scalar_one() == 0
+    hop = text(
+        "INSERT INTO origin (sample_id, run_id, input_kind, input, input_type, role) "
+        "VALUES (1, 'r1', :kind, :input, :type, :role)"
+    )
+    with pytest.raises(IntegrityError), engine.begin() as conn:
+        conn.execute(hop, {"kind": "raw", "input": raw, "type": None, "role": None})
+    with engine.begin() as conn:
+        conn.execute(hop, {"kind": "sample", "input": a, "type": "text/email", "role": "text"})
+        conn.execute(hop, {"kind": "sample", "input": a, "type": "text/email", "role": "style"})
+
+    # Back past it only once no two origins differ in the role or type alone
+    with pytest.raises(RuntimeError, match="role or the input's type"):
+        command.downgrade(_config(url), "e83c65fe4277")
+    with engine.begin() as conn:
+        conn.execute(text("DELETE FROM origin WHERE role = 'style'"))
+    command.downgrade(_config(url), "e83c65fe4277")
+    with pytest.raises(IntegrityError), engine.begin() as conn:
+        conn.execute(
+            text(
+                "INSERT INTO origin (sample_id, run_id, input_kind, input) "
+                "VALUES (1, 'r1', 'raw', :raw)"
+            ),
+            {"raw": raw},
+        )
     command.upgrade(_config(url), "head")

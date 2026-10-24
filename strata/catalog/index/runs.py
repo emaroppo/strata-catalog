@@ -1,10 +1,13 @@
 """Runs: whatever wrote to the catalog, beside what it wrote.
 
-An ingest, a prepare, an import, a judge or a backfill. A run is opened
-and closed inside the transaction that writes its rows, so a run that
-failed leaves nothing behind, and one that wrote nothing new is still
-recorded with its counts. Training runs are modelling's (record 0005);
+An ingest, a prepare, a derive, a generate, an import, a judge or a
+backfill. A run is opened and closed inside the transaction that writes
+its rows, so a run that failed leaves nothing behind, and one that wrote
+nothing new is still recorded with its counts. Training runs are modelling's (record 0005);
 these are the catalog's. See ``docs/adr/0045``.
+
+A derive and a generate run are made outside the catalog and committed to
+it with their lineage declared. See ``docs/adr/0053``.
 """
 
 import hashlib
@@ -19,7 +22,8 @@ from ..rows import CatalogError, RunRow, chunks
 from . import tables as t
 
 INGEST, PREPARE, IMPORT, JUDGE, BACKFILL = "ingest", "prepare", "import", "judge", "backfill"
-KINDS = (INGEST, PREPARE, IMPORT, JUDGE, BACKFILL)
+DERIVE, GENERATE = "derive", "generate"
+KINDS = (INGEST, PREPARE, DERIVE, GENERATE, IMPORT, JUDGE, BACKFILL)
 
 
 def host_token(name: str | None = None) -> str:

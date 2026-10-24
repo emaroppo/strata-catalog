@@ -37,6 +37,7 @@ from .index.raw import Raw
 from .index.runs import Runs
 from .index.samples import Samples
 from .index.schema_version import MIGRATIONS
+from .purposes import refuse_stored_generated
 from .rows import (
     EVERYTHING,
     SCHEMA,
@@ -56,6 +57,7 @@ from .storage.blobs import BlobBackend, LocalBackend, Location, blob_path, check
 from .versions.features import FeatureError, FeatureSpec
 from .versions.files import fetch_into, materialised_name, write_out
 from .versions.given import GivenSplit
+from .versions.inputs import DROP, INPUT, check_option, first_inputs, settle
 from .versions.split import assign
 
 
@@ -233,7 +235,11 @@ class Catalog:
 
         The whole batch is one transaction; ``on_sample`` is how a caller
         reports progress without breaking that up. See ``docs/adr/0032``.
+
+        Generated media is refused: it arrives only through a generate run.
+        See ``docs/adr/0053``.
         """
+        refuse_stored_generated(media, subtype, "An ingest")
         ids: list[int] = []
         with TemporaryDirectory(prefix="strata-canonical-") as scratch, self.engine.begin() as conn:
             claim(conn)
@@ -314,6 +320,84 @@ class Catalog:
 
         return ingest_raw(self, root, collection, files, on_file)
 
+    def commit_derived(
+        self,
+        outputs,
+        *,
+        sample_type: str,
+        collections: Iterable[str],
+        producer: str,
+        spec: dict,
+        code: dict | None = None,
+        left_out: dict[str, int] | None = None,
+    ):
+        """Samples made outside the catalog from samples it holds, as one derive run.
+
+        Each output names the samples it was made from, by checksum and type,
+        and the facts of each occurrence. Every input has to exist, and the
+        type's metadata contract has to hold for each origin; otherwise
+        nothing is written. ``left_out`` counts, per reason, what the
+        producer made nothing from. See :mod:`strata.catalog.commit_run` and
+        ``docs/adr/0053``.
+        """
+        from .commit_run import commit
+        from .index.runs import DERIVE
+
+        return commit(
+            self,
+            DERIVE,
+            outputs,
+            sample_type=sample_type,
+            collections=collections,
+            producer=producer,
+            spec=spec,
+            code=code,
+            left_out=left_out,
+        )
+
+    def commit_generated(
+        self,
+        outputs,
+        *,
+        sample_type: str,
+        collections: Iterable[str],
+        producer: str,
+        spec: dict,
+        code: dict | None = None,
+        left_out: dict[str, int] | None = None,
+    ):
+        """A model's outputs, as one generate run, each with a record of what made it.
+
+        The type has to be generated media. Each output names the samples
+        the model was given, by role, and its generation record names the
+        template, system prompt and settings by the digest of what ``spec``
+        holds in full. See :mod:`strata.catalog.commit_run` and
+        ``docs/adr/0053``.
+        """
+        from .commit_run import commit
+        from .index.runs import GENERATE
+
+        return commit(
+            self,
+            GENERATE,
+            outputs,
+            sample_type=sample_type,
+            collections=collections,
+            producer=producer,
+            spec=spec,
+            code=code,
+            left_out=left_out,
+        )
+
+    def commit_directory(self, root: Path):
+        """The derive or generate run a directory describes, committed whole or not at all.
+
+        See :mod:`strata.catalog.commit_run` for the directory's layout.
+        """
+        from .commit_run import commit_directory
+
+        return commit_directory(self, root)
+
     # ------------------------------------------------------------------
     # Datasets
     # ------------------------------------------------------------------
@@ -331,6 +415,7 @@ class Catalog:
         group_by: str | None = None,
         inherit: bool = True,
         given: GivenSplit | None = None,
+        disagreeing_inputs: str = DROP,
     ) -> int:
         """Freeze a selection into a new version, inheriting the previous split.
 
@@ -360,7 +445,14 @@ class Catalog:
         current answer in the label set. Members named outright as
         ``sample_ids`` record no spec, and cannot be verified. While the
         selection reads, writers wait. See ``docs/adr/0050``.
+
+        A fine-tuning example carries one input, so where a member's origins
+        disagree on it ``disagreeing_inputs`` decides: ``drop`` leaves it out,
+        ``first`` keeps its first origin's input. Either is counted, and
+        recorded on a version with such members as part of its identity.
+        See :mod:`strata.catalog.versions.inputs` and ``docs/adr/0053``.
         """
+        check_option(disagreeing_inputs)
         if sample_ids is not None and spec is not None:
             raise CatalogError("Give the samples to freeze or a spec to select them, not both.")
         if sample_ids is None and spec is None and collections is None:
@@ -391,6 +483,22 @@ class Catalog:
                     )
             if not sample_ids:
                 raise CatalogError(f"No labelled samples for label set {label_set_id}")
+            settled = settle(
+                conn,
+                sample_ids,
+                disagreeing_inputs,
+                None if chosen is None else chosen.watermark["origin"],
+            )
+            if not settled.members:
+                raise CatalogError(
+                    f"Every one of the {len(sample_ids):,} sample(s) selected has origins "
+                    f"that disagree on its input, and disagreeing inputs are left out. "
+                    f"Freeze with disagreeing_inputs='first' to keep each first input."
+                )
+            sample_ids = settled.members
+            counts = None if chosen is None else chosen.counts
+            if settled.option is not None:
+                counts = {**(counts or {}), "inputs": settled.counts}
 
             digest = answers.digest(conn, label_set_id, sample_ids)
             existing = self.datasets.identical(
@@ -405,6 +513,7 @@ class Catalog:
                 seed,
                 given.record() if given is not None else None,
                 spec_hash=None if spec is None else spec.spec_hash,
+                disagreeing_inputs=settled.option,
             )
             if existing is not None:
                 # A version describes a selection, not an attempt at one. A
@@ -448,7 +557,7 @@ class Catalog:
                 spec=None if spec is None else spec.canonical(),
                 spec_hash=None if spec is None else spec.spec_hash,
                 watermark=None if chosen is None else chosen.watermark,
-                selection=None if chosen is None else chosen.counts,
+                selection=counts,
                 digest=digest,
                 val_ratio=val_ratio,
                 holdout_ratio=holdout_ratio,
@@ -458,6 +567,7 @@ class Catalog:
                 sides_from_version=origin,
                 seed=seed,
                 given_split=given.record() if given is not None else None,
+                disagreeing_inputs=settled.option,
             )
         return dataset_id
 
@@ -545,6 +655,11 @@ class Catalog:
         without one. A sample missing a declared feature is written with it
         absent — counted and reported by the caller rather than filled in,
         since a zero is an answer and "not known" is not.
+
+        A fine-tuning example's input is written as its features, its first
+        origin's, which is the one a freeze kept. The project declares none
+        of them, and one it declares under an input's name is refused. See
+        ``docs/adr/0053`` and ``docs/adr/0054``.
         """
         dest = Path(dest)
         files = dest / FILES_DIR
@@ -558,6 +673,16 @@ class Catalog:
         disputed = self._disputed_features(features, [row.id for row in rows])
         left_out = [row.checksum for row in rows if row.id in disputed]
         rows = [row for row in rows if row.id not in disputed]
+
+        with self.engine.connect() as conn:
+            inputs, fields = first_inputs(conn, [row.id for row in rows])
+        clash = sorted({spec.name for spec in features or ()} & set(fields))
+        if clash:
+            raise CatalogError(
+                f"Feature(s) {', '.join(clash)} are declared, and are the input of the "
+                f"fine-tuning samples in this version, which it writes itself. Drop the "
+                f"declaration(s)."
+            )
 
         wanted: dict[Location, Path] = {}
         relatives: dict[int, str] = {}
@@ -585,7 +710,7 @@ class Catalog:
                     path=relative,
                     metadata=dict(row.metadata or {}),
                     split=row.side,
-                    features=resolved.get(row.id, {}),
+                    features={**inputs.get(row.id, {}), **resolved.get(row.id, {})},
                     source=row.source,
                     batch=row.batch,
                     # Reviewed is derived from the source. docs/adr/0027
@@ -612,7 +737,10 @@ class Catalog:
             group_by=info.group_by,
             sides_from_version=info.sides_from_version,
             given_split=info.given_split,
-            features=[spec.as_dict() for spec in features or ()],
+            features=[
+                *(spec.as_dict() for spec in features or ()),
+                *({"name": name, "source": INPUT, "ref": name} for name in fields),
+            ],
             samples=samples,
             disputed=left_out,
         )

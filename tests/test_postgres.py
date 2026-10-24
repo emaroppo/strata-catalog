@@ -535,3 +535,125 @@ def test_the_identity_migration_runs_on_postgres(tmp_path, monkeypatch):
         with admin.begin() as conn:
             conn.execute(text(f'DROP SCHEMA "{name}" CASCADE'))
         admin.dispose()
+
+
+# ----------------------------------------------------------------------
+# Generated media and fine-tuning examples. docs/adr/0053
+# ----------------------------------------------------------------------
+
+
+def test_the_origin_migration_runs_on_postgres(tmp_path, monkeypatch):
+    from alembic import command
+    from alembic.config import Config
+    from sqlalchemy import create_engine, text
+    from sqlalchemy.exc import IntegrityError
+
+    from strata.catalog.index.schema_version import MIGRATIONS
+
+    name = f"t{uuid.uuid4().hex[:12]}"
+    admin = create_engine(URL)
+    with admin.begin() as conn:
+        conn.execute(text(f'CREATE SCHEMA "{name}"'))
+    url = f"{URL}?options=-csearch_path%3D{name}"
+    monkeypatch.setenv("STRATA_CATALOG_URL", url)
+    config = Config()
+    config.set_main_option("script_location", str(MIGRATIONS))
+    engine = create_engine(url)
+    try:
+        command.upgrade(config, "e83c65fe4277")
+        a, raw = "a" * 64, "b" * 64
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    "INSERT INTO run (id, kind, producer, started_at) "
+                    "VALUES ('r1', 'prepare', 'p', now())"
+                )
+            )
+            conn.execute(
+                text(
+                    'INSERT INTO sample (id, checksum, location, "offset", length, media, subtype) '
+                    "VALUES (1, :a, 'x', 0, 1, 'text', 'email')"
+                ),
+                {"a": a},
+            )
+            conn.execute(
+                text(
+                    "INSERT INTO origin (sample_id, run_id, input_kind, input) "
+                    "VALUES (1, 'r1', 'raw', :raw)"
+                ),
+                {"raw": raw},
+            )
+
+        command.upgrade(config, "head")
+
+        hop = text(
+            "INSERT INTO origin (sample_id, run_id, input_kind, input, input_type, role) "
+            "VALUES (1, 'r1', :kind, :input, :type, :role)"
+        )
+        with pytest.raises(IntegrityError), engine.begin() as conn:
+            conn.execute(hop, {"kind": "raw", "input": raw, "type": None, "role": None})
+        with engine.begin() as conn:
+            conn.execute(text("SELECT setval(pg_get_serial_sequence('origin', 'id'), 10)"))
+            conn.execute(hop, {"kind": "sample", "input": a, "type": "text/email", "role": "x"})
+            conn.execute(hop, {"kind": "sample", "input": a, "type": "text/email", "role": "y"})
+
+        with pytest.raises(RuntimeError, match="role or the input's type"):
+            command.downgrade(config, "e83c65fe4277")
+        with engine.begin() as conn:
+            conn.execute(text("DELETE FROM origin WHERE role = 'y'"))
+        command.downgrade(config, "e83c65fe4277")
+        command.upgrade(config, "head")
+    finally:
+        engine.dispose()
+        with admin.begin() as conn:
+            conn.execute(text(f'DROP SCHEMA "{name}" CASCADE'))
+        admin.dispose()
+
+
+def test_a_generate_and_a_derive_run_commit_on_postgres(catalog, tmp_path):
+    from sqlalchemy import func, select
+
+    from strata.catalog.commit_run import Generation, InputSample, Output
+    from strata.catalog.index import tables as t
+    from strata.common.canonical import content_hash
+
+    path = tmp_path / "mail.txt"
+    path.write_text("Lunch?")
+    [mail] = catalog.ingest([path], media="text", metadata={"subject": "Lunch"})
+    with catalog.engine.connect() as conn:
+        [checksum] = catalog.samples.checksums(conn, [mail]).values()
+    out = tmp_path / "out.txt"
+    out.write_text("A lunch.")
+    spec = {"template": "{text}", "settings": [{"temperature": 0.5}]}
+    report = catalog.commit_generated(
+        [
+            Output(
+                file=out,
+                origins=[
+                    InputSample(checksum=checksum, type="text/plain", role="text"),
+                    InputSample(checksum=checksum, type="text/plain", role="style"),
+                ],
+                generation=Generation(
+                    template_digest=content_hash("{text}"),
+                    settings_digest=content_hash({"temperature": 0.5}),
+                    values={"subject": "Lunch"},
+                    seed=3,
+                ),
+            )
+        ],
+        sample_type="generated-text",
+        collections=["generated"],
+        producer="p",
+        spec=spec,
+    )
+    assert (report.counts["origins"], report.counts["generations"]) == (2, 1)
+    derived = catalog.commit_derived(
+        [Output(file=out, origins=[InputSample(checksum=checksum, type="text/plain")])],
+        sample_type="sft-text",
+        collections=["sft"],
+        producer="p",
+        spec={"read": "nothing"},
+    )
+    assert derived.counts["new_samples"] == 1
+    with catalog.engine.connect() as conn:
+        assert conn.execute(select(func.count()).select_from(t.origin)).scalar_one() == 3

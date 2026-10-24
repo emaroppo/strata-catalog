@@ -23,6 +23,7 @@ from strata.contracts import (
 )
 
 from .canonical import canonical_form
+from .purposes import is_generated
 from .rows import CatalogError
 
 #: How many shortfalls a refusal lists before it only counts the rest.
@@ -85,6 +86,14 @@ def admit(root: Path, sample_type: SampleType, type_name: str) -> Admission:
     ``sample_type``; a corpus prepared as anything else is refused whole.
     """
     root = Path(root)
+    if is_generated(type(sample_type)):
+        # A model's output says what made it, and a corpus cannot.
+        # docs/adr/0053
+        raise IntakeError(
+            f"{type_name!r} is generated media, which arrives only through a generate "
+            f"run, with a record of what made it. A prepared corpus cannot be one; "
+            f"nothing was ingested."
+        )
     index = read_index(root)
     present = {
         path.relative_to(root).as_posix()

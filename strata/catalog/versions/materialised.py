@@ -13,6 +13,7 @@ from typing import NamedTuple
 from strata.contracts import MANIFEST_NAME, Manifest, ManifestFormatError
 
 from .features import FeatureSpec
+from .inputs import INPUT
 
 
 class Materialised(NamedTuple):
@@ -88,9 +89,11 @@ def _reusable(directory: Path, catalog_id: str | None, features: list[dict]) -> 
         # every version, the first round after switching to a rebuilt
         # catalog, since its numbering starts again.
         return None
-    if [dict(f) for f in manifest.features] != features:
+    declared = [dict(f) for f in manifest.features if f.get("source") != INPUT]
+    if declared != features:
         # Features are not part of a version's identity: adding one keeps the
-        # version and rebuilds the directory. docs/adr/0026
+        # version and rebuilds the directory. docs/adr/0026. A fine-tuning
+        # input is the version's own, not a declaration. docs/adr/0053
         return None
     return manifest
 

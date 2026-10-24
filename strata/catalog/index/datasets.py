@@ -133,6 +133,7 @@ class Datasets:
         seed: int | None = None,
         given_split: dict | None = None,
         spec_hash: str | None = None,
+        disagreeing_inputs: str | None = None,
     ) -> int | None:
         """The latest version of ``name``, if it froze exactly this.
 
@@ -142,7 +143,9 @@ class Datasets:
         version that re-split itself from the same seed. See
         ``docs/adr/0024``. Two specs that choose the same members today
         are two selections, and differ once more is labelled. See
-        ``docs/adr/0050``.
+        ``docs/adr/0050``. Fine-tuning samples whose inputs were settled
+        another way are another version, since the same spec frozen both
+        ways trains on different examples. See ``docs/adr/0053``.
         """
         latest = conn.execute(
             select(
@@ -156,6 +159,7 @@ class Datasets:
                 t.dataset.c.seed,
                 t.dataset.c.given_split,
                 t.dataset.c.spec_hash,
+                t.dataset.c.disagreeing_inputs,
             )
             .where(t.dataset.c.name == name)
             .order_by(t.dataset.c.version.desc())
@@ -175,6 +179,8 @@ class Datasets:
         if (latest.given_split or None) != (given_split or None):
             return None
         if latest.spec_hash != spec_hash:
+            return None
+        if latest.disagreeing_inputs != disagreeing_inputs:
             return None
         if not inherit and (latest.sides_from_version != latest.version or latest.seed != seed):
             return None
@@ -259,6 +265,7 @@ class Datasets:
         sides_from_version: int | None = None,
         seed: int | None = None,
         given_split: dict | None = None,
+        disagreeing_inputs: str | None = None,
     ) -> int:
         """Write a version and its members. One statement per chunk. See ``docs/adr/0032``."""
         dataset_id = conn.execute(
@@ -279,6 +286,7 @@ class Datasets:
                 sides_from_version=sides_from_version,
                 seed=seed,
                 given_split=given_split,
+                disagreeing_inputs=disagreeing_inputs,
             )
         ).inserted_primary_key[0]
         members = [

@@ -8,16 +8,18 @@ trained against, without either store reading the other. See
 ``docs/adr/0045``.
 
 A dataset version is checked the same way: its spec run again at its
-watermark gives its members back. See ``docs/adr/0050``.
+watermark gives its members back. See ``docs/adr/0050``. A version over
+fine-tuning samples settles their inputs again as it recorded. See
+``docs/adr/0053``.
 """
 
 import hashlib
 from dataclasses import dataclass, field
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 
 from .index import tables as t
-from .index.runs import IMPORT, INGEST, PREPARE, files_digest
+from .index.runs import DERIVE, GENERATE, IMPORT, INGEST, PREPARE, files_digest
 from .rows import CatalogError, chunks, live
 from .storage.blobs import Location
 
@@ -65,6 +67,8 @@ def verify_run(catalog, run_id: str, deep: bool = False) -> VerifyReport:
             _prepared(conn, run, given, report)
         elif run.kind == IMPORT:
             _imported(conn, run, report)
+        elif run.kind in (DERIVE, GENERATE):
+            _committed(conn, run, report)
 
         if deep:
             _deep(catalog, conn, run, report)
@@ -139,6 +143,43 @@ def _imported(conn, run, report: VerifyReport) -> None:
     )
 
 
+def _committed(conn, run, report: VerifyReport) -> None:
+    """Every origin and generation record the run counted is there, under its run."""
+    counts = run.counts
+    origins = conn.execute(
+        select(func.count()).select_from(t.origin).where(t.origin.c.run_id == run.id)
+    ).scalar_one()
+    generations = conn.execute(
+        select(func.count()).select_from(t.generation).where(t.generation.c.run_id == run.id)
+    ).scalar_one()
+    report.add(
+        "counts",
+        origins == counts.get("origins") and generations == counts.get("generations"),
+        f"{origins:,} origin(s) and {generations:,} generation record(s) carry this run, "
+        f"{counts.get('origins')} and {counts.get('generations')} recorded",
+    )
+    samples = len(_made_by(conn, run.id))
+    report.add(
+        "present",
+        samples == counts.get("samples"),
+        f"{samples:,} live sample(s) made in this run, {counts.get('samples')} recorded",
+    )
+
+
+def _made_by(conn, run_id: str) -> set[int]:
+    """The live samples a run wrote an origin or a generation record for."""
+    made: set[int] = set()
+    for table in (t.origin, t.generation):
+        made.update(
+            conn.execute(
+                select(table.c.sample_id)
+                .select_from(table.join(t.sample, t.sample.c.id == table.c.sample_id))
+                .where(table.c.run_id == run_id, live())
+            ).scalars()
+        )
+    return made
+
+
 def _held(conn, table, checksums: list[str]) -> int:
     held = 0
     for chunk in chunks(checksums):
@@ -150,7 +191,18 @@ def _held(conn, table, checksums: list[str]) -> int:
 
 def _deep(catalog, conn, run, report: VerifyReport) -> None:
     """Read every blob behind the run back, and hash it."""
-    if run.kind == PREPARE:
+    if run.kind in (DERIVE, GENERATE):
+        stmt = select(
+            t.sample.c.checksum, t.sample.c.location, t.sample.c.offset, t.sample.c.length
+        ).where(
+            or_(
+                t.sample.c.id.in_(select(t.origin.c.sample_id).where(t.origin.c.run_id == run.id)),
+                t.sample.c.id.in_(
+                    select(t.generation.c.sample_id).where(t.generation.c.run_id == run.id)
+                ),
+            )
+        )
+    elif run.kind == PREPARE:
         stmt = (
             select(t.sample.c.checksum, t.sample.c.location, t.sample.c.offset, t.sample.c.length)
             .select_from(t.origin.join(t.sample, t.sample.c.id == t.origin.c.sample_id))
@@ -202,13 +254,14 @@ def verify_dataset(catalog, name: str, version: int) -> DatasetVerifyReport:
     """
     from .index.locks import lock
     from .selection import SelectionSpec, run_selection
+    from .versions.inputs import settle
 
     report = DatasetVerifyReport(name=name, version=version)
     with catalog.engine.begin() as conn:
         row = conn.execute(
             select(
                 t.dataset.c.id, t.dataset.c.spec, t.dataset.c.spec_hash, t.dataset.c.watermark,
-                t.dataset.c.selection,
+                t.dataset.c.selection, t.dataset.c.disagreeing_inputs,
             ).where(t.dataset.c.name == name, t.dataset.c.version == version)
         ).first()  # fmt: skip
         if row is None:
@@ -230,6 +283,14 @@ def verify_dataset(catalog, name: str, version: int) -> DatasetVerifyReport:
         # reading a row and reading the event that dates it
         lock(conn)
         again = run_selection(conn, spec, row.watermark)
+        if row.disagreeing_inputs is not None:
+            # Settled as the freeze settled them, over the origins it read.
+            # docs/adr/0053
+            settled = settle(
+                conn, again.members, row.disagreeing_inputs, row.watermark.get("origin")
+            )
+            again.members = settled.members
+            again.counts = {**again.counts, "inputs": settled.counts}
         members = set(
             conn.execute(
                 select(t.dataset_member.c.sample_id).where(t.dataset_member.c.dataset_id == row.id)

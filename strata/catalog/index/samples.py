@@ -102,6 +102,28 @@ class Samples:
             )
         )
 
+    def combine(self, conn, sample_id: int, facts: dict, *, new: bool) -> None:
+        """A sample's metadata: its bytes' facts, then each origin's, first value kept.
+
+        A stopgap rule for origins that disagree. docs/adr/0049. A sample the
+        run writing it made has no description yet to replace; any other is
+        described, which records what it replaces. docs/adr/0050
+        """
+        combined = dict(facts)
+        for (metadata,) in conn.execute(
+            select(t.origin.c.metadata)
+            .where(t.origin.c.sample_id == sample_id)
+            .order_by(t.origin.c.id)
+        ):
+            for key, value in (metadata or {}).items():
+                combined.setdefault(key, value)
+        if new:
+            conn.execute(
+                update(t.sample).where(t.sample.c.id == sample_id).values(metadata=combined or None)
+            )
+        elif conn.execute(select(t.sample.c.id).where(t.sample.c.id == sample_id, live())).first():
+            self.describe(conn, sample_id, metadata=combined or None)
+
     def collect(self, conn, sample_ids: Iterable[int], collections: Iterable[str]) -> None:
         """Add samples to collections.
 

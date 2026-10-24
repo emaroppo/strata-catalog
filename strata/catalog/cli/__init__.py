@@ -7,7 +7,8 @@ from pathlib import Path
 from ..config import CatalogConfigError
 from ._shared import CONFIG, Refused
 from .answers import _export_answers, _import_answers
-from .datasets import _dataset_verify, _lists_ls, _lists_put, _lists_show
+from .commit import _commit
+from .datasets import _dataset_freeze, _dataset_verify, _lists_ls, _lists_put, _lists_show
 from .inspect import _list, _probe, _stats, _types
 from .raw import _ingest, _prepare, _raw_ls, _runs, _verify
 from .remove import _remove
@@ -88,6 +89,14 @@ def _parser() -> argparse.ArgumentParser:
     )
     prepare.set_defaults(run=_prepare)
 
+    commit = commands.add_parser(
+        "commit", help="A derive or generate run made elsewhere, from its directory, whole"
+    )
+    commit.add_argument(
+        "directory", type=Path, help="Holding run.json, outputs.jsonl and the output files"
+    )
+    commit.set_defaults(run=_commit)
+
     raw = commands.add_parser("raw", help="Raw files").add_subparsers(dest="raw", required=True)
     ls = raw.add_parser("ls", help="A collection's names, one a line; or every collection")
     ls.add_argument("collection", nargs="?", help="Which collection (default: list them)")
@@ -132,6 +141,27 @@ def _parser() -> argparse.ArgumentParser:
     )
     check.add_argument("version", metavar="NAME@VERSION", help="Which version: enron-sft@3")
     check.set_defaults(run=_dataset_verify)
+    freeze = dataset.add_parser(
+        "freeze", help="Freeze a version, or reuse the latest if it froze exactly this"
+    )
+    freeze.add_argument("name", help="The dataset's name")
+    freeze.add_argument("--label-set", required=True, metavar="NAME", help="Whose answers count")
+    freeze.add_argument("--spec", type=Path, metavar="FILE", help="A selection spec, TOML")
+    freeze.add_argument(
+        "--collection", action="append", metavar="PATH", help="Draw from here, without a spec"
+    )
+    freeze.add_argument("--val-ratio", type=float, default=0.2)
+    freeze.add_argument("--holdout-ratio", type=float, default=0.0)
+    freeze.add_argument("--seed", type=int, default=42)
+    freeze.add_argument("--group-by", metavar="KEY", help="A metadata key kept on one side")
+    freeze.add_argument(
+        "--no-inherit", action="store_true", help="Draw every side afresh, not the last version's"
+    )
+    freeze.add_argument(
+        "--disagreeing-inputs", choices=("drop", "first"), default="drop",
+        help="A fine-tuning sample whose origins disagree on its input: left out, or its first",
+    )  # fmt: skip
+    freeze.set_defaults(run=_dataset_freeze)
 
     # Not "list", which lists the catalogs this host is configured for
     lists = commands.add_parser(

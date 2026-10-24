@@ -10,6 +10,9 @@ one origin row for the input it came from. A sample's metadata is
 combined from what its bytes say and its origins' facts, first value
 first. The whole run is one transaction, so a run that fails leaves
 nothing. See ``docs/adr/0045``, ``docs/adr/0047`` and ``docs/adr/0049``.
+
+A spec writing a generated type is refused, since a model's output arrives
+only through a generate run. See ``docs/adr/0053``.
 """
 
 import hashlib
@@ -20,7 +23,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from sqlalchemy import and_, insert, select, update
+from sqlalchemy import and_, insert, select
 
 from strata.contracts import SampleTypeError
 from strata.contracts import sample_types as types
@@ -30,8 +33,9 @@ from .canonical import CanonicalError, canonical_form
 from .index import tables as t
 from .index.locks import claim
 from .index.runs import PREPARE
+from .purposes import refuse_generated
 from .raw_ingest import listing, producer
-from .rows import CatalogError, chunks, current, live
+from .rows import CatalogError, chunks, current
 from .storage.blobs import Location, blob_path
 
 #: How many inputs are fetched from the store at a time.
@@ -74,6 +78,7 @@ def prepare(
         sample_cls = types.resolve(output.type)
     except SampleTypeError as e:
         raise CatalogError(str(e)) from None
+    refuse_generated(sample_cls, output.type, "A prepare run")
     sample_type = sample_cls()
     canonicalise = canonical_form(sample_cls)
     if cache is None and os.environ.get("STRATA_BLOBS_CACHE"):
@@ -170,7 +175,7 @@ def prepare(
 
         catalog.samples.collect(conn, sorted(touched), [output.collection])
         for sample_id, facts in touched.items():
-            _combine(catalog, conn, sample_id, facts, new=sample_id in created)
+            catalog.samples.combine(conn, sample_id, facts, new=sample_id in created)
 
         record = {
             **counts.as_record(),
@@ -365,24 +370,3 @@ def _origin(conn, sample_id: int, run_id: str, input_checksum: str, facts: dict)
                 metadata=facts or None,
             )
         )
-
-
-def _combine(catalog, conn, sample_id: int, facts: dict, new: bool) -> None:
-    """A sample's metadata: its bytes' facts, then each origin's, first value kept.
-
-    A stopgap rule for origins that disagree. docs/adr/0049. A sample this
-    run made has no description yet to replace; any other is described,
-    which records what it replaces. docs/adr/0050
-    """
-    combined = dict(facts)
-    for (metadata,) in conn.execute(
-        select(t.origin.c.metadata).where(t.origin.c.sample_id == sample_id).order_by(t.origin.c.id)
-    ):
-        for key, value in (metadata or {}).items():
-            combined.setdefault(key, value)
-    if new:
-        conn.execute(
-            update(t.sample).where(t.sample.c.id == sample_id).values(metadata=combined or None)
-        )
-    elif conn.execute(select(t.sample.c.id).where(t.sample.c.id == sample_id, live())).first():
-        catalog.samples.describe(conn, sample_id, metadata=combined or None)

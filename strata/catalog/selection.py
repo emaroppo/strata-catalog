@@ -46,7 +46,10 @@ ORDERED = ("<", "<=", ">", ">=")
 
 #: The appended tables a freeze reads, each covered by the watermark. The
 #: class index is keyed by annotation row, so the annotation's id covers it.
-WATERMARKED = ("sample", "sample_collection", "annotation", "event")
+#: Origins are where a fine-tuning sample's inputs are compared. A
+#: watermark written before they were read has none, and every origin
+#: counts. docs/adr/0053
+WATERMARKED = ("sample", "sample_collection", "annotation", "event", "origin")
 
 
 class _Strict(BaseModel):

@@ -86,6 +86,10 @@ class DatasetRequest(Strict):
     #: sample's set, and which names are holdout and which val, or lists
     #: whose members are. The samples it names are fixed; the rest are drawn.
     given: GivenSplit | None = None
+    #: What to do with a fine-tuning sample whose origins disagree on its
+    #: input: leave it out, or keep its first origin's. Recorded on the
+    #: version. See docs/adr/0053.
+    disagreeing_inputs: Literal["drop", "first"] = "drop"
     #: A version already frozen, to use as it stands rather than freeze
     #: what is labelled now: its members, sides and ratios, whatever has
     #: been labelled since. None freezes (or reuses) the newest.
@@ -145,6 +149,7 @@ def dataset(request: DatasetRequest, context: Context) -> DatasetRecord:
         group_by=request.group_by,
         inherit=request.inherit,
         given=request.given,
+        disagreeing_inputs=request.disagreeing_inputs,
     )
     ref = catalog.datasets.named(dataset_id)
     members = catalog.datasets.members(dataset_id, label_set_id)

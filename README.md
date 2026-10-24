@@ -120,6 +120,26 @@ The format names no metadata key. A key a named type declares is checked
 against its type; one nobody declares has to occur on some candidate, so
 a misspelt key is refused rather than matching nothing.
 
+**Samples made outside the catalog are committed with their lineage.**
+A derive run makes samples from samples the catalog holds, such as a
+masked copy of each message, where the catalog cannot run the work. A
+generate run commits a model's outputs. Either arrives as a directory,
+`run.json` (the kind, the output type, its collections, the producer and
+the spec it ran under) and `outputs.jsonl` (each output file with the
+samples it was made from, by checksum and type, and for a generate run the
+role each filled and a record of what made it: model run, checkpoint,
+template, system prompt and settings digests, values and seed), and
+`strata-catalog commit DIR` checks all of it and writes it as one run, or
+nothing. A type that is generated media arrives only this way; every other
+way in refuses it. The layout is described in full in
+`strata.catalog.commit_run`.
+
+**A fine-tuning example's input is its metadata**, required by its type
+on every origin. A freeze over such a type writes each sample's input as
+its features, and leaves out a sample whose origins disagree on it, or with
+`disagreeing_inputs = "first"` keeps its first origin's. Either is counted
+and recorded on the version.
+
 Materialising writes a self-contained directory: files named by checksum
 and a manifest carrying labels, sides and each sample's metadata, so a
 model needs no database and a split can be drawn again under another key.
@@ -186,6 +206,8 @@ nothing is refused rather than falling back.
 | `raw ls [COLLECTION]` | a collection's names, one a line, or every collection counted |
 | `runs` | what wrote to the catalog, and what each counted |
 | `verify --run ID` | check a run still holds; `--deep` hashes every blob it wrote |
+| `commit DIR` | a derive or generate run made elsewhere, from its directory, checked and written whole |
+| `dataset freeze NAME --label-set SET` | freeze a version by `--spec FILE` or `--collection`; `--disagreeing-inputs first` keeps a fine-tuning sample's first input |
 | `dataset verify NAME@VERSION` | run a version's spec again at its watermark and compare the members |
 | `lists put NAME FILE` | store a set of checksums, `--type TYPE` the one its members are; a different set is the next version |
 | `lists show NAME@VERSION` / `lists ls` | a version's checksums, one a line; every version |
