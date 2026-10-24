@@ -44,7 +44,14 @@ from .rows import (
     CatalogError,
     CatalogMissing,
 )
-from .selection import Selection, SelectionSpec, default_spec, run_selection, watermark
+from .selection import (
+    Selection,
+    SelectionSpec,
+    default_spec,
+    list_members,
+    run_selection,
+    watermark,
+)
 from .storage.blobs import BlobBackend, LocalBackend, Location, blob_path, checksum_of
 from .versions.features import FeatureError, FeatureSpec
 from .versions.files import fetch_into, materialised_name, write_out
@@ -389,7 +396,7 @@ class Catalog:
                 group_by,
                 inherit,
                 seed,
-                given.model_dump() if given is not None else None,
+                given.record() if given is not None else None,
                 spec_hash=None if spec is None else spec.spec_hash,
             )
             if existing is not None:
@@ -403,7 +410,7 @@ class Catalog:
             if not inherit or origin is None:
                 # Sides start here: drawn from nothing, or the first version
                 inherited, origin = {}, version
-            fixed = given.sides_for(self.samples.metadata(conn, sample_ids)) if given else {}
+            fixed = self._given_sides(conn, given, sample_ids) if given else {}
             moved = [i for i, side in fixed.items() if inherited.get(i, side) != side]
             if moved:
                 assert given is not None  # nothing is fixed without a given split
@@ -441,9 +448,24 @@ class Catalog:
                 group_by=group_by,
                 sides_from_version=origin,
                 seed=seed,
-                given_split=given.model_dump() if given is not None else None,
+                given_split=given.record() if given is not None else None,
             )
         return dataset_id
+
+    def given_sides(self, given: GivenSplit, sample_ids: Iterable[int]) -> dict[int, str]:
+        """The side ``given`` fixes for each of ``sample_ids`` that it names."""
+        with self.engine.connect() as conn:
+            return self._given_sides(conn, given, list(sample_ids))
+
+    def _given_sides(self, conn, given: GivenSplit, sample_ids: Sequence[int]) -> dict[int, str]:
+        try:
+            return given.sides_for(
+                self.samples.metadata(conn, sample_ids),
+                self.samples.checksums(conn, sample_ids) if given.refs else None,
+                {ref: list_members(conn, ref) for ref in given.refs},
+            )
+        except ValueError as e:
+            raise CatalogError(f"The given split cannot be applied: {e}") from None
 
     # ------------------------------------------------------------------
     # Materialise

@@ -512,7 +512,7 @@ def run_selection(conn, spec: SelectionSpec, mark: dict[str, int]) -> Selection:
     where = chosen.where
     passed = pool if where is None else [c for c in pool if passes(where, c)]
 
-    lists = {ref: _list(conn, ref) for ref in [*chosen.lists.include, *chosen.lists.exclude]}
+    lists = {ref: list_members(conn, ref) for ref in [*chosen.lists.include, *chosen.lists.exclude]}
     removed: dict[str, int] = {}
     selected = passed
     for ref in chosen.lists.include:
@@ -737,7 +737,8 @@ def _classes(conn, annotation_ids: list[int]) -> dict[int, set[str]]:
     return found
 
 
-def _list(conn, ref: str) -> set[str]:
+def list_members(conn, ref: str) -> set[str]:
+    """The checksums a list version holds, by ``name@version``."""
     name, version = parse_ref(ref)
     list_id = conn.execute(
         select(t.list_version.c.id).where(
@@ -745,7 +746,7 @@ def _list(conn, ref: str) -> set[str]:
         )
     ).scalar_one_or_none()
     if list_id is None:
-        raise CatalogError(f"The selection names list {ref}, which this catalog does not hold.")
+        raise CatalogError(f"This catalog holds no list {ref}.")
     return set(
         conn.execute(
             select(t.list_member.c.checksum).where(t.list_member.c.list_id == list_id)

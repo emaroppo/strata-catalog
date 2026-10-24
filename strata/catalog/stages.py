@@ -83,8 +83,8 @@ class DatasetRequest(Strict):
     #: See docs/adr/0024.
     inherit: bool = True
     #: A split the corpus arrived with: the metadata key naming each
-    #: sample's set, and which names are holdout and which val. The samples
-    #: it names are fixed; the rest are drawn.
+    #: sample's set, and which names are holdout and which val, or lists
+    #: whose members are. The samples it names are fixed; the rest are drawn.
     given: GivenSplit | None = None
     #: A version already frozen, to use as it stands rather than freeze
     #: what is labelled now: its members, sides and ratios, whatever has
@@ -150,7 +150,7 @@ def dataset(request: DatasetRequest, context: Context) -> DatasetRecord:
     members = catalog.datasets.members(dataset_id, label_set_id)
     given = 0
     if request.given is not None:
-        given = len(request.given.sides_for({s.id: s.metadata or {} for s in members}))
+        given = len(catalog.given_sides(request.given, [s.id for s in members]))
     return DatasetRecord(
         dataset_id=dataset_id,
         name=ref.name,

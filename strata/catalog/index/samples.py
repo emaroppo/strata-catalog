@@ -131,6 +131,16 @@ class Samples:
             found.update({sample_id: metadata or {} for sample_id, metadata in rows})
         return found
 
+    def checksums(self, conn, sample_ids: Sequence[int]) -> dict[int, str]:
+        """Each sample's checksum, by id."""
+        found: dict[int, str] = {}
+        for chunk in chunks(list(sample_ids)):
+            rows = conn.execute(
+                select(t.sample.c.id, t.sample.c.checksum).where(t.sample.c.id.in_(chunk))
+            ).all()
+            found.update(dict(rows))
+        return found
+
     def located(self, conn, checksums: Sequence[str]) -> list:
         """Checksum, location and metadata for the live samples among ``checksums``."""
         rows = []

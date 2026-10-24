@@ -654,6 +654,97 @@ def test_a_given_split_wins_over_grouping_and_says_so(catalog, files, label_set,
     assert len(manifest.holdout) == 2
 
 
+# ----------------------------------------------------------------------
+# A split carried in by lists
+# ----------------------------------------------------------------------
+
+
+def _checksums(catalog, ids) -> list[str]:
+    from sqlalchemy import select
+
+    from strata.catalog.index import tables as t
+
+    with catalog.engine.connect() as conn:
+        return list(
+            conn.execute(select(t.sample.c.checksum).where(t.sample.c.id.in_(ids))).scalars()
+        )
+
+
+def test_lists_fix_the_sides_of_a_split_carried_from_elsewhere(catalog, files, label_set, tmp_path):
+    from strata.catalog import GivenSplit
+
+    ids = catalog.ingest(files(20), media="image")
+    annotate_all(catalog, ids, label_set)
+    # Another catalog's version, carried over: its validation and its
+    # holdout, with a sample this catalog never received among them
+    catalog.lists.put("dev", [*_checksums(catalog, ids[:5]), "0" * 64])
+    catalog.lists.put("test", _checksums(catalog, ids[5:8]))
+    given = GivenSplit(val_lists=["dev@1"], holdout_lists=["test@1"])
+    dataset_id = catalog.create_dataset(
+        "d", label_set, collections=EVERYTHING, val_ratio=0.2, given=given
+    )
+    manifest = _manifest(catalog.materialise(dataset_id, tmp_path / "d"))
+
+    # Exactly the listed sides: five in validation meets a target of four,
+    # so nothing more is drawn for it
+    assert {s.id for s in manifest.val} == set(ids[:5])
+    assert {s.id for s in manifest.holdout} == set(ids[5:8])
+    assert manifest.given_split == {"val_lists": ["dev@1"], "holdout_lists": ["test@1"]}
+    # The same lists again are the same freeze
+    assert (
+        catalog.create_dataset("d", label_set, collections=EVERYTHING, val_ratio=0.2, given=given)
+        == dataset_id
+    )
+
+
+def test_a_sample_listed_on_two_sides_is_refused(catalog, files, label_set):
+    from strata.catalog import GivenSplit
+
+    ids = catalog.ingest(files(10), media="image")
+    annotate_all(catalog, ids, label_set)
+    catalog.lists.put("dev", _checksums(catalog, ids[:3]))
+    catalog.lists.put("test", _checksums(catalog, ids[2:5]))
+    given = GivenSplit(val_lists=["dev@1"], holdout_lists=["test@1"])
+    with pytest.raises(CatalogError, match="both holdout and val"):
+        catalog.create_dataset("d", label_set, collections=EVERYTHING, given=given)
+
+
+def test_a_given_split_names_lists_with_their_versions(catalog, files, label_set):
+    from pydantic import ValidationError
+
+    from strata.catalog import GivenSplit
+
+    with pytest.raises(ValidationError, match="names no version"):
+        GivenSplit(val_lists=["dev"])
+    with pytest.raises(ValidationError, match="metadata key or lists"):
+        GivenSplit()
+    ids = catalog.ingest(files(10), media="image")
+    annotate_all(catalog, ids, label_set)
+    with pytest.raises(CatalogError, match="holds no list dev@1"):
+        catalog.create_dataset(
+            "d", label_set, collections=EVERYTHING, given=GivenSplit(val_lists=["dev@1"])
+        )
+
+
+def test_the_dataset_stage_counts_the_sides_lists_give(catalog, files, label_set, tmp_path):
+    from strata.catalog import GivenSplit
+    from strata.catalog.stages import Context, DatasetRequest, dataset
+
+    ids = catalog.ingest(files(12), media="image")
+    annotate_all(catalog, ids, label_set)
+    catalog.lists.put("dev", _checksums(catalog, ids[:3]))
+    record = dataset(
+        DatasetRequest(
+            name="d",
+            label_set=label_set_name(catalog, label_set),
+            collections=[EVERYTHING],
+            given=GivenSplit(val_lists=["dev@1"]),
+        ),
+        Context(catalog, tmp_path / "datasets"),
+    )
+    assert record.given == 3
+
+
 def label_set_name(catalog, label_set_id: int) -> str:
     from sqlalchemy import select
 
