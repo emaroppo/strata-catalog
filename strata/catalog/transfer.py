@@ -339,7 +339,14 @@ def _one(catalog, conn, schema, label_set_id, sample_id, rows, remap, origin, ru
             # A skip never replaces an answer. docs/adr/0009
             report.skips_ignored += 1
             return
-        verdict = "copied"
+        if here is None:
+            verdict = "copied"
+        elif rank > standing:
+            verdict = "confirmed"
+        else:
+            # A skip on a skip says nothing new: known by its standing, not its
+            # time, which a skip made afresh by a rule does not carry
+            verdict = "outranked" if rank < standing else "agreed"
     elif here is None or here.state == t.SKIPPED:
         verdict = "outranked" if standing > rank else "copied"
     elif here.value == incoming.value:

@@ -11,7 +11,7 @@ import pytest
 
 from strata.catalog import Catalog
 from strata.catalog.rows import CatalogError
-from strata.catalog.transfer import AnswersFile, read_pairs
+from strata.catalog.transfer import AnswersFile, ExportedRow, ExportedSample, read_pairs
 from strata.catalog.verify import verify_run
 from strata.contracts import Span, Spans, SpanSchema
 
@@ -138,6 +138,27 @@ def test_a_skip_never_replaces_an_answer(tmp_path, source):
     target.annotations.annotate(two, set_id, Spans(values=[]), source="import")
     report = target.import_answers(_export(source))
     assert report.skips_ignored == 1
+
+
+def test_a_skip_made_afresh_lands_once(tmp_path):
+    # Skips written by a rule carry no time of their own, so a second run
+    # cannot know them by it; a skip on a skip still changes nothing
+    target, [one] = _with(tmp_path, "target", [OLD])
+    set_id = target.label_sets.create("entities", SCHEMA)
+    answers = AnswersFile(
+        catalog_id="rules/html",
+        label_set="entities",
+        schema=SCHEMA.model_dump(mode="json"),
+        samples=[
+            ExportedSample(
+                checksum=_checksum(OLD), rows=[ExportedRow(state="skipped", source="import")]
+            )
+        ],
+    )
+    assert target.import_answers(answers).copied == 1
+    again = target.import_answers(answers)
+    assert (again.agreed, again.rows) == (1, 0)
+    assert len(target.annotations.history(one, set_id)) == 1
 
 
 def test_a_label_set_with_another_schema_is_refused(tmp_path, source):
