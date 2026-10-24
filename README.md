@@ -13,15 +13,17 @@ beneath it are named beside it.
 g=git+https://github.com/emaroppo
 uv add "strata-catalog @ $g/strata-catalog@v0.1.0"     \
        "strata-contracts @ $g/strata-contracts@v0.1.0" \
-       "strata-common @ $g/strata-common@v0.1.0"         # SQLite index, blobs as local files
+       "strata-common @ $g/strata-common@v0.1.0"       \
+       "strata-prepare @ $g/strata-prepare@v0.1.0"       # SQLite index, blobs as local files
 uv add "strata-catalog[postgres] @ $g/strata-catalog@v0.1.0"   # a shared index
 uv add "strata-catalog[s3] @ $g/strata-catalog@v0.1.0"   # blobs as tar shards in a bucket
 uv add "strata-catalog[serve] @ $g/strata-catalog@v0.1.0"   # the blob server
 ```
 
-Depends on `strata-contracts`, `strata-common[migrations]`, SQLAlchemy and
-alembic. May not import `strata-modelling`, `strata-labeller` or Label
-Studio.
+Depends on `strata-contracts`, `strata-common[migrations]`, `strata-prepare`
+(the stage engine a prepare run hands its raw files to, which never imports
+the catalog back), SQLAlchemy and alembic. May not import `strata-modelling`,
+`strata-labeller` or Label Studio.
 
 ## What a catalog holds
 
@@ -207,13 +209,17 @@ nothing is refused rather than falling back.
 | `runs` | what wrote to the catalog, and what each counted |
 | `verify --run ID` | check a run still holds; `--deep` hashes every blob it wrote |
 | `commit DIR` | a derive or generate run made elsewhere, from its directory, checked and written whole |
+| `remove --collection PATH --where KEY=VALUE` | tombstone samples, bad data, and their annotations with them |
+| `export-answers --label-set NAME` | one label set's answers and their history, by checksum, to a file |
+| `import-answers FILE` | another catalog's exported answers, as an import run; `--pairs` for samples whose bytes changed |
 | `dataset freeze NAME --label-set SET` | freeze a version by `--spec FILE` or `--collection`; `--disagreeing-inputs first` keeps a fine-tuning sample's first input |
 | `dataset verify NAME@VERSION` | run a version's spec again at its watermark and compare the members |
 | `lists put NAME FILE` | store a set of checksums, `--type TYPE` the one its members are; a different set is the next version |
 | `lists show NAME@VERSION` / `lists ls` | a version's checksums, one a line; every version |
 
-Every command takes `--json` and `--catalog NAME`; `copy`, `merge` and
-`repack` report what they would do and write nothing until `--apply`.
+Every command takes `--json` and `--catalog NAME`; `merge` reports what
+it would do and writes nothing until `--apply`, and `repack`, `remove` and
+`import-answers` take `--dry-run`.
 
 **Schema changes are migrations.** A catalog `ingest` creates is stamped
 current. Opening one creates nothing: an index with no catalog in it is
