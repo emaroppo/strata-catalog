@@ -29,9 +29,13 @@ def database_url() -> str:
     if root:
         return f"sqlite:///{Path(root) / 'catalog.db'}"
 
-    from strata.catalog.config import CONFIG_ENV, CatalogConfigError, load_catalogs
+    from strata.catalog.config import CONFIG_ENV, CatalogConfigError, load_catalogs, settings_path
 
-    path = Path(os.environ.get(CONFIG_ENV) or "config.toml")
+    try:
+        path = settings_path()
+    except CatalogConfigError as e:
+        # $STRATA_CONFIG names a file that is not there
+        raise SystemExit(str(e)) from None
     if not path.exists():
         raise SystemExit(
             f"No catalog to migrate: there is no {path}. Run from the directory "

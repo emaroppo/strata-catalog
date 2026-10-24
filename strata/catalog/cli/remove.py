@@ -5,7 +5,6 @@ from ._shared import Refused, _emit, _open
 
 def _remove(args) -> int:
     from ..admin import remove
-    from ..rows import CatalogError
     from ..selection import typed
 
     where = {}
@@ -16,17 +15,14 @@ def _remove(args) -> int:
         where[key] = typed(value)
 
     catalog, _ = _open(args)
-    try:
-        report = remove(
-            catalog,
-            collections=args.collection or None,
-            where=where,
-            checksums=args.checksum or None,
-            types=args.type or None,
-            dry_run=args.dry_run,
-        )
-    except CatalogError as e:
-        raise Refused(str(e)) from None
+    report = remove(
+        catalog,
+        collections=args.collection or None,
+        where=where,
+        checksums=args.checksum or None,
+        types=args.type or None,
+        dry_run=args.dry_run,
+    )
 
     def render(r):
         yield f"{r.matched:,} live sample(s) match"

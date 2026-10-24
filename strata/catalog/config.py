@@ -147,6 +147,30 @@ def load_catalogs(path: Path, environ: Mapping[str, str] | None = None) -> Catal
 #: The config file a long-running service reads its catalog from.
 CONFIG_ENV = "STRATA_CONFIG"
 
+#: The host file a command reads when nothing names another.
+SETTINGS_FILE = "config.toml"
+
+
+def settings_path(given: Path | None = None, environ: Mapping[str, str] | None = None) -> Path:
+    """The host file a command reads: what it was given, else what ``$STRATA_CONFIG``
+    names, else ``./config.toml``.
+
+    The variable is the one a service reads, so a host states its file
+    once and a project directory needs no copy. A variable naming a file
+    that does not exist is refused rather than defaulted, as it is for a
+    service. See ``docs/adr/0019``.
+    """
+    if given is not None:
+        return given
+    environ = os.environ if environ is None else environ
+    value = environ.get(CONFIG_ENV, "")
+    if not value:
+        return Path(SETTINGS_FILE)
+    path = Path(value)
+    if not path.exists():
+        raise CatalogConfigError(f"${CONFIG_ENV} names {path}, which does not exist.")
+    return path
+
 
 def host_catalog(environ: Mapping[str, str] | None = None) -> tuple[str, CatalogConfig]:
     """The catalog a service on this host uses, and the name it goes by.
@@ -302,6 +326,7 @@ def _config(
 __all__ = [
     "CONFIG_ENV",
     "DEFAULT_CATALOG",
+    "SETTINGS_FILE",
     "CatalogConfig",
     "CatalogConfigError",
     "CatalogMissing",
@@ -312,4 +337,5 @@ __all__ = [
     "open_catalog",
     "read_catalogs",
     "secret_variables",
+    "settings_path",
 ]

@@ -8,7 +8,7 @@ from ._shared import Refused, _config, _emit, _open, _ticker
 def _repack(args) -> int:
     from ..config import blobs_for
     from ..storage.blobs import LocalBackend
-    from ..storage.repack import RepackError, repack_blobs
+    from ..storage.repack import repack_blobs
 
     config = _config(args)
     if not config.s3_endpoint:
@@ -32,19 +32,16 @@ def _repack(args) -> int:
     # endpoint is set, and that is the destination, not the source.
     source = LocalBackend(Path(config.root) / "blobs")
     show = _ticker("packing")
-    try:
-        report = repack_blobs(
-            catalog,
-            target,
-            source=source,
-            dry_run=args.dry_run,
-            verify=args.verify,
-            on_progress=lambda r: show(
-                f"{r.samples:,} sample(s), {r.bytes / 1e9:.1f} GB, {len(r.shards)} shard(s)"
-            ),
-        )
-    except RepackError as e:
-        raise Refused(str(e)) from None
+    report = repack_blobs(
+        catalog,
+        target,
+        source=source,
+        dry_run=args.dry_run,
+        verify=args.verify,
+        on_progress=lambda r: show(
+            f"{r.samples:,} sample(s), {r.bytes / 1e9:.1f} GB, {len(r.shards)} shard(s)"
+        ),
+    )
 
     payload = {
         "samples": report.samples,

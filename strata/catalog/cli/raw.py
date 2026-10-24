@@ -18,17 +18,12 @@ def _lines(path: Path) -> list[str]:
 
 
 def _ingest(args) -> int:
-    from ..rows import CatalogError
-
     catalog, _ = _open(args, create=True)
     files = _lines(args.files) if args.files is not None else None
     show = _ticker("hashing")
-    try:
-        report = catalog.ingest_raw(
-            args.root, args.collection, files, on_file=lambda d, n: show(f"{d:,}/{n:,}")
-        )
-    except CatalogError as e:
-        raise Refused(str(e)) from None
+    report = catalog.ingest_raw(
+        args.root, args.collection, files, on_file=lambda d, n: show(f"{d:,}/{n:,}")
+    )
 
     def render(r):
         yield f"run {r.run_id}"
@@ -81,14 +76,10 @@ def _runs(args) -> int:
 
 
 def _verify(args) -> int:
-    from ..rows import CatalogError
     from ..verify import verify_run
 
     catalog, _ = _open(args)
-    try:
-        report = verify_run(catalog, args.run_id, deep=args.deep)
-    except CatalogError as e:
-        raise Refused(str(e)) from None
+    report = verify_run(catalog, args.run_id, deep=args.deep)
 
     def render(_):
         yield f"run {report.run_id} ({report.kind})"
@@ -102,22 +93,18 @@ def _verify(args) -> int:
 
 def _prepare(args) -> int:
     from ..prepare_run import load_chain, prepare
-    from ..rows import CatalogError
 
     catalog, _ = _open(args)
     show = _ticker("preparing")
-    try:
-        chain = load_chain(args.spec)
-        report = prepare(
-            catalog,
-            chain,
-            _lines(args.files),
-            allow_missing=args.allow_missing,
-            continues=args.continues,
-            on_input=lambda d, n: show(f"{d:,}/{n:,}"),
-        )
-    except CatalogError as e:
-        raise Refused(str(e)) from None
+    chain = load_chain(args.spec)
+    report = prepare(
+        catalog,
+        chain,
+        _lines(args.files),
+        allow_missing=args.allow_missing,
+        continues=args.continues,
+        on_input=lambda d, n: show(f"{d:,}/{n:,}"),
+    )
 
     def render(_):
         c = report.counts

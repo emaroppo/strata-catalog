@@ -172,7 +172,9 @@ as a read-through cache.
 ## Configuration
 
 A host's `config.toml` names its catalogs, with the host's own settings
-stated once above them:
+stated once above them. Every command reads the file `--config` names,
+else the one `$STRATA_CONFIG` names, else `./config.toml`, and so do the
+services and `strata-catalog-migrate` (`docs/adr/0019`):
 
 ```toml
 [catalog]

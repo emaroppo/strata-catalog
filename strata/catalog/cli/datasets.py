@@ -17,15 +17,11 @@ def _ref(text: str) -> tuple[str, int]:
 
 
 def _dataset_verify(args) -> int:
-    from ..rows import CatalogError
     from ..verify import verify_dataset
 
     name, version = _ref(args.version)
     catalog, _ = _open(args)
-    try:
-        report = verify_dataset(catalog, name, version)
-    except CatalogError as e:
-        raise Refused(str(e)) from None
+    report = verify_dataset(catalog, name, version)
 
     def render(_):
         yield f"{report.name}@{report.version}"
@@ -38,29 +34,25 @@ def _dataset_verify(args) -> int:
 
 
 def _dataset_freeze(args) -> int:
-    from ..rows import CatalogError
     from ..stages import Context, DatasetRequest, dataset
 
     catalog, config = _open(args)
-    try:
-        record = dataset(
-            DatasetRequest(
-                name=args.name,
-                label_set=args.label_set,
-                collections=args.collection or [],
-                spec=args.spec,
-                val_ratio=args.val_ratio,
-                holdout_ratio=args.holdout_ratio,
-                seed=args.seed,
-                group_by=args.group_by,
-                inherit=not args.no_inherit,
-                disagreeing_inputs=args.disagreeing_inputs,
-            ),
-            # Not read by a freeze: only materialising writes there
-            Context(catalog, Path(config.root) / "datasets"),
-        )
-    except CatalogError as e:
-        raise Refused(str(e)) from None
+    record = dataset(
+        DatasetRequest(
+            name=args.name,
+            label_set=args.label_set,
+            collections=args.collection or [],
+            spec=args.spec,
+            val_ratio=args.val_ratio,
+            holdout_ratio=args.holdout_ratio,
+            seed=args.seed,
+            group_by=args.group_by,
+            inherit=not args.no_inherit,
+            disagreeing_inputs=args.disagreeing_inputs,
+        ),
+        # Not read by a freeze: only materialising writes there
+        Context(catalog, Path(config.root) / "datasets"),
+    )
 
     def render(r):
         yield f"{r.name}@{r.version}: {r.samples:,} sample(s), dataset id {r.dataset_id}"
@@ -70,14 +62,9 @@ def _dataset_freeze(args) -> int:
 
 
 def _lists_put(args) -> int:
-    from ..rows import CatalogError
-
     catalog, _ = _open(args)
     checksums = [line.strip() for line in _lines(args.checksums) if line.strip()]
-    try:
-        row, new = catalog.lists.put(args.name, checksums, args.type)
-    except CatalogError as e:
-        raise Refused(str(e)) from None
+    row, new = catalog.lists.put(args.name, checksums, args.type)
 
     def render(_):
         said = "stored" if new else "already held, unchanged"
@@ -89,14 +76,9 @@ def _lists_put(args) -> int:
 
 
 def _lists_show(args) -> int:
-    from ..rows import CatalogError
-
     name, version = _ref(args.version)
     catalog, _ = _open(args)
-    try:
-        row, members = catalog.lists.get(name, version)
-    except CatalogError as e:
-        raise Refused(str(e)) from None
+    row, members = catalog.lists.get(name, version)
     if not args.json:
         # Checksums only, one a line, for the next script
         for checksum in members:

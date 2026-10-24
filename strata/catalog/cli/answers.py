@@ -7,13 +7,8 @@ from ._shared import Refused, _emit, _open, _ticker
 
 
 def _export_answers(args) -> int:
-    from ..rows import CatalogError
-
     catalog, _ = _open(args)
-    try:
-        answers = catalog.export_answers(args.label_set, args.source or ())
-    except CatalogError as e:
-        raise Refused(str(e)) from None
+    answers = catalog.export_answers(args.label_set, args.source or ())
     text = answers.model_dump_json(by_alias=True, indent=1)
     if args.out is None:
         print(text)
@@ -39,16 +34,13 @@ def _import_answers(args) -> int:
     except (OSError, ValueError, CatalogError) as e:
         raise Refused(f"{args.answers}: {str(e).strip().splitlines()[0]}") from None
     show = _ticker("importing")
-    try:
-        report = catalog.import_answers(
-            answers,
-            into=args.into,
-            pairs=pairs,
-            dry_run=args.dry_run,
-            on_sample=lambda d, n: show(f"{d:,}/{n:,}"),
-        )
-    except CatalogError as e:
-        raise Refused(str(e)) from None
+    report = catalog.import_answers(
+        answers,
+        into=args.into,
+        pairs=pairs,
+        dry_run=args.dry_run,
+        on_sample=lambda d, n: show(f"{d:,}/{n:,}"),
+    )
 
     def render(r):
         head = "dry run, nothing kept: " if args.dry_run else ""

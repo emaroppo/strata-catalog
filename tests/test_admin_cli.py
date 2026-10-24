@@ -52,6 +52,24 @@ def test_list_as_json_is_the_record(stocked, config, capsys):
     assert entry["name"] == "default" and entry["identity"] == stocked.id
 
 
+def test_without_config_the_environment_names_the_file(stocked, config, monkeypatch, capsys):
+    # ADR 0019: --config, else $STRATA_CONFIG, else ./config.toml
+    monkeypatch.setenv("STRATA_CONFIG", str(config))
+    code, out = run(capsys, "--json", "list")
+    assert code == 0
+    [entry] = json.loads(out)
+    assert entry["name"] == "default" and entry["identity"] == stocked.id
+
+
+def test_the_environment_naming_a_missing_file_is_refused(tmp_path, monkeypatch, capsys):
+    absent = tmp_path / "absent.toml"
+    monkeypatch.setenv("STRATA_CONFIG", str(absent))
+    assert main(["list"]) == 1
+    captured = capsys.readouterr()
+    assert "STRATA_CONFIG" in captured.err and str(absent) in captured.err
+    assert captured.out == ""
+
+
 def test_a_credential_in_the_file_is_refused(tmp_path, capsys):
     config = tmp_path / "config.toml"
     config.write_text('[catalog]\ns3_secret_key = "oops"\n')
@@ -90,7 +108,10 @@ def test_stats_refuses_a_catalog_that_is_not_there(tmp_path, capsys):
     config = tmp_path / "config.toml"
     config.write_text(f'[catalog]\nroot = "{tmp_path / "nowhere"}"\n')
     assert main(["--config", str(config), "stats"]) == 1
-    assert "No catalog at" in capsys.readouterr().err
+    # A refusal is one line on stderr and nothing on stdout. docs/adr/0030
+    captured = capsys.readouterr()
+    assert "No catalog at" in captured.err and str(config) in captured.err
+    assert captured.out == ""
 
 
 def test_probe_reads_a_real_sample_back(stocked, config, capsys):

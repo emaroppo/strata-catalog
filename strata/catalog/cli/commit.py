@@ -6,17 +6,12 @@ The directory holds ``run.json``, ``outputs.jsonl`` and the output files;
 
 from dataclasses import asdict
 
-from ._shared import Refused, _emit, _open
+from ._shared import _emit, _open
 
 
 def _commit(args) -> int:
-    from ..rows import CatalogError
-
     catalog, _ = _open(args)
-    try:
-        report = catalog.commit_directory(args.directory)
-    except CatalogError as e:
-        raise Refused(str(e)) from None
+    report = catalog.commit_directory(args.directory)
 
     def render(_):
         c = report.counts

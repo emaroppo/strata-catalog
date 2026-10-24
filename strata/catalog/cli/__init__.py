@@ -1,11 +1,13 @@
 """strata-catalog: looking after a catalog from the command line."""
 
 import argparse
-import sys
 from pathlib import Path
 
-from ..config import CatalogConfigError
-from ._shared import CONFIG, Refused
+from strata.common.cli import run
+
+from ..rows import CatalogError
+from ..storage.repack import RepackError
+from ..sync.copy import CopyError
 from .answers import _export_answers, _import_answers
 from .commit import _commit
 from .datasets import _dataset_freeze, _dataset_verify, _lists_ls, _lists_put, _lists_show
@@ -19,11 +21,7 @@ from .sync import _copy, _merge
 def main(argv: list[str] | None = None) -> int:
     parser = _parser()
     args = parser.parse_args(argv)
-    try:
-        return args.run(args) or 0
-    except (Refused, CatalogConfigError) as e:
-        print(str(e), file=sys.stderr)
-        return 1
+    return run(lambda: args.run(args), CatalogError, CopyError, RepackError)
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -31,7 +29,10 @@ def _parser() -> argparse.ArgumentParser:
         prog="strata-catalog", description="Look after a catalog: what it holds, and where."
     )
     parser.add_argument(
-        "--config", type=Path, default=CONFIG, help="Host settings (default: ./config.toml)"
+        "--config",
+        type=Path,
+        default=None,
+        help="Host settings (default: $STRATA_CONFIG, else ./config.toml)",
     )
     parser.add_argument(
         "--catalog", default="", help="Which catalog on this host (default: the host's own)"

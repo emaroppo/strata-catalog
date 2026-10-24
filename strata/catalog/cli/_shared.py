@@ -5,23 +5,19 @@ operation and renders the record; ``--json`` prints the record whole. See
 ``docs/adr/0030``.
 """
 
-import json
 import sys
-from pathlib import Path
 
-from ..config import CatalogMissing, load_catalogs, open_catalog
+from strata.common.cli import emit
+from strata.common.errors import Refused
 
-CONFIG = Path("config.toml")
-
-
-class Refused(Exception):
-    """A reason the command stopped, for the user rather than a traceback."""
-
+from ..config import CatalogMissing, load_catalogs, open_catalog, settings_path
 
 # ----------------------------------------------------------------------
 
 
 def _catalogs(args):
+    # Resolved in place, so a message that names the file names this one
+    args.config = settings_path(args.config)
     return load_catalogs(args.config)
 
 
@@ -42,19 +38,7 @@ def _open(args, create: bool = False):
 
 def _emit(args, record, render) -> None:
     """Render the record for a person, or print it whole for a program."""
-    if not args.json:
-        for line in render(record):
-            print(line)
-        return
-    print(json.dumps(_jsonable(record), indent=2, sort_keys=True, default=str))
-
-
-def _jsonable(record):
-    if hasattr(record, "model_dump"):
-        return record.model_dump(mode="json")
-    if isinstance(record, list):
-        return [_jsonable(item) for item in record]
-    return record
+    emit(record, render, as_json=args.json)
 
 
 def _ticker(label: str):

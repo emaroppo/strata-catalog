@@ -1,21 +1,18 @@
 """Commands for work away from the index: copy it out, merge answers back."""
 
-from ._shared import Refused, _emit, _open, _ticker
+from ._shared import _emit, _open, _ticker
 
 
 def _copy(args) -> int:
     from ..catalog import Catalog
     from ..config import blobs_for
-    from ..sync.copy import CopyError, copy_index
+    from ..sync.copy import copy_index
 
     source, config = _open(args)
     # Only the index moves. docs/adr/0002
     target = Catalog.create(args.to, blobs_for(config))
     show = _ticker("copying")
-    try:
-        report = copy_index(source, target, on_progress=lambda table, n: show(f"{table} ({n:,})"))
-    except CopyError as e:
-        raise Refused(str(e)) from None
+    report = copy_index(source, target, on_progress=lambda table, n: show(f"{table} ({n:,})"))
 
     def render(_):
         for name, count in report.copied.items():
@@ -30,18 +27,15 @@ def _copy(args) -> int:
 def _merge(args) -> int:
     from ..catalog import Catalog
     from ..config import blobs_for
-    from ..sync.merge import MergeError, merge_annotations
+    from ..sync.merge import merge_annotations
 
     target, config = _open(args)
     # A copy is the same corpus, reading the same bytes. docs/adr/0008
     source = Catalog.connect(args.source, blobs_for(config))
     show = _ticker("merging")
-    try:
-        report = merge_annotations(
-            source, target, dry_run=not args.apply, on_progress=lambda d, n: show(f"{d:,}/{n:,}")
-        )
-    except MergeError as e:
-        raise Refused(str(e)) from None
+    report = merge_annotations(
+        source, target, dry_run=not args.apply, on_progress=lambda d, n: show(f"{d:,}/{n:,}")
+    )
 
     payload = {
         "copied": report.copied,
