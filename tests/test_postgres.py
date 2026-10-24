@@ -312,3 +312,129 @@ def test_a_dataset_still_materialises_after_the_move(populated, catalog, tmp_pat
     # the source catalog wrote
     assert len(manifest.samples) == 5
     assert all((directory / s.path).exists() for s in manifest.samples)
+
+
+# ----------------------------------------------------------------------
+# A freeze and a writer: record 0050's locks
+# ----------------------------------------------------------------------
+
+
+def _waiting(catalog, timeout: float = 5.0) -> None:
+    """Until some other session on this database waits on a lock."""
+    import time
+
+    from sqlalchemy import text
+
+    with catalog.engine.connect() as conn:
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            if conn.execute(
+                text(
+                    "SELECT count(*) FROM pg_stat_activity "
+                    "WHERE datname = current_database() AND wait_event_type = 'Lock'"
+                )
+            ).scalar():
+                return
+            time.sleep(0.05)
+    raise AssertionError("nothing came to wait on a lock")
+
+
+def _freeze_in_background(catalog):
+    """A freeze's lock, taken on another thread; returns the thread and what it raised."""
+    import threading
+
+    from strata.catalog.index.locks import lock
+
+    raised: list[BaseException] = []
+
+    def freeze():
+        try:
+            with catalog.engine.begin() as conn:
+                lock(conn)
+        except BaseException as e:  # reported to the test, not lost in the thread
+            raised.append(e)
+
+    thread = threading.Thread(target=freeze)
+    thread.start()
+    return thread, raised
+
+
+def test_a_writer_locking_out_of_order_deadlocks_with_a_freeze(catalog, files):
+    """The premise of claim(): without it a freeze and a describe can deadlock."""
+    from sqlalchemy import insert, update
+    from sqlalchemy.exc import OperationalError
+
+    from strata.catalog.index import tables as t
+
+    [sample_id] = catalog.ingest(files(1), media="image")
+    deadlocked: list[BaseException] = []
+    with catalog.engine.connect() as conn:
+        conn.begin()
+        # The event first, then the sample: the order describe once took
+        conn.execute(insert(t.event).values(kind=t.DESCRIBED, sample_id=sample_id))
+        thread, raised = _freeze_in_background(catalog)
+        _waiting(catalog)
+        try:
+            conn.execute(
+                update(t.sample).where(t.sample.c.id == sample_id).values(metadata={"k": 1})
+            )
+            conn.commit()
+        except OperationalError as e:
+            deadlocked.append(e)
+            conn.rollback()
+        thread.join(10)
+    assert any("deadlock" in str(e) for e in deadlocked + raised)
+
+
+def test_a_writer_that_claims_first_waits_or_is_waited_for_and_never_deadlocks(catalog, files):
+    from sqlalchemy import insert, update
+
+    from strata.catalog.index import tables as t
+    from strata.catalog.index.locks import claim
+
+    [sample_id] = catalog.ingest(files(1), media="image")
+    with catalog.engine.begin() as conn:
+        claim(conn)
+        conn.execute(insert(t.event).values(kind=t.DESCRIBED, sample_id=sample_id))
+        thread, raised = _freeze_in_background(catalog)
+        _waiting(catalog)
+        conn.execute(update(t.sample).where(t.sample.c.id == sample_id).values(metadata={"k": 1}))
+    thread.join(10)
+    assert not thread.is_alive() and raised == []
+
+
+def test_describing_a_known_sample_and_a_freeze_both_finish(catalog, files):
+    """Through the catalog: re-ingest describes, a freeze reads; neither is aborted."""
+    import threading
+
+    from strata.contracts import Choices, ClassificationSchema
+
+    paths = files(4)
+    ids = catalog.ingest(paths, media="image")
+    label_set = catalog.label_sets.create("p", ClassificationSchema(classes=["cat"]))
+    catalog.annotations.annotate_many(label_set, [(i, Choices(values=["cat"])) for i in ids])
+    errors: list[BaseException] = []
+
+    def ingest_again(n: int):
+        try:
+            for round_ in range(n):
+                catalog.ingest(paths, media="image", metadata={"round": round_})
+        except BaseException as e:
+            errors.append(e)
+
+    def freeze(n: int):
+        try:
+            for _ in range(n):
+                catalog.create_dataset("d", label_set, collections=[EVERYTHING])
+        except BaseException as e:
+            errors.append(e)
+
+    threads = [
+        threading.Thread(target=ingest_again, args=(15,)),
+        threading.Thread(target=freeze, args=(15,)),
+    ]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(60)
+    assert errors == []

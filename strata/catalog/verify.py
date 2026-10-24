@@ -200,7 +200,8 @@ def verify_dataset(catalog, name: str, version: int) -> DatasetVerifyReport:
     from samples named outright, has nothing to run, and says so. See
     ``docs/adr/0050``.
     """
-    from .selection import SelectionSpec, lock, run_selection
+    from .index.locks import lock
+    from .selection import SelectionSpec, run_selection
 
     report = DatasetVerifyReport(name=name, version=version)
     with catalog.engine.begin() as conn:

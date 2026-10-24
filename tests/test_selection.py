@@ -448,7 +448,7 @@ def test_matching_compares_typed_values(catalog, mail):
 
 
 def test_a_freeze_holds_writers_back_while_it_reads(catalog, mail, tmp_path):
-    from strata.catalog.selection import lock
+    from strata.catalog.index.locks import lock
 
     other = create_engine(
         f"sqlite:///{tmp_path / 'catalog' / 'catalog.db'}", connect_args={"timeout": 0.1}
@@ -490,3 +490,12 @@ def test_the_counts_are_json(catalog, mail):
             select(t.dataset.c.selection).where(t.dataset.c.id == dataset_id)
         ).scalar_one()
     assert json.loads(json.dumps(counts)) == counts
+
+
+def test_the_values_of_an_in_are_a_set():
+    one = spec(where={"key": "folder", "op": "in", "value": ["inbox", "sent"]})
+    other = spec(where={"key": "folder", "op": "in", "value": ["sent", "inbox", "inbox"]})
+    mixed = spec(where={"key": "folder", "op": "in", "value": ["sent", 3, "inbox", 3]})
+    assert one.spec_hash == other.spec_hash
+    assert one.canonical() == other.canonical()
+    assert mixed.canonical()["select"]["where"]["value"] == ["inbox", "sent", 3]

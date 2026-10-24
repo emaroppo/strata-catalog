@@ -31,7 +31,7 @@ from pydantic import (
     field_validator,
     model_validator,
 )
-from sqlalchemy import and_, func, select, text
+from sqlalchemy import and_, func, select
 
 from strata.common.canonical import canonical_json, content_hash
 from strata.contracts import sample_types
@@ -48,10 +48,6 @@ ORDERED = ("<", "<=", ">", ">=")
 #: class index is keyed by annotation row, so the annotation's id covers it.
 WATERMARKED = ("sample", "sample_collection", "annotation", "event")
 
-#: The tables a freeze locks on Postgres, in this order always, so a freeze
-#: and a writer wait for each other but never deadlock.
-LOCKED = ("sample", "sample_collection", "annotation", "annotation_class", "event")
-
 
 class _Strict(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True, populate_by_name=True)
@@ -66,6 +62,19 @@ class Compare(_Strict):
     key: str = Field(min_length=1)
     op: Literal["==", "!=", "<", "<=", ">", ">=", "in", "exists"]
     value: Scalar | list[Scalar] | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _a_set(cls, data):
+        """The values of an ``in`` are a set: sorted, once each, so one set has one hash."""
+        if (
+            isinstance(data, dict)
+            and data.get("op") == "in"
+            and isinstance(data.get("value"), list)
+        ):
+            unique = {canonical_json(v): v for v in data["value"]}
+            data = {**data, "value": [unique[k] for k in sorted(unique)]}
+        return data
 
     @model_validator(mode="after")
     def _fits(self):
@@ -348,22 +357,6 @@ class Selection:
     members: list[int]
     watermark: dict[str, int]
     counts: dict = field(default_factory=dict)
-
-
-def lock(conn) -> None:
-    """Hold writers back for as long as this transaction reads.
-
-    On Postgres, a share lock on every table the freeze reads: it waits for
-    writes already in flight, and holds new ones until this commits, so
-    every id under the watermark was committed before it was taken.
-    SQLite has one writer at a time, and a write opens this transaction
-    as that writer. See ``docs/adr/0050``.
-    """
-    dialect = conn.engine.dialect.name
-    if dialect == "postgresql":
-        conn.execute(text(f"LOCK TABLE {', '.join(LOCKED)} IN SHARE MODE"))
-    elif dialect == "sqlite":
-        conn.execute(text("UPDATE catalog_identity SET id = id"))
 
 
 def watermark(conn) -> dict[str, int]:

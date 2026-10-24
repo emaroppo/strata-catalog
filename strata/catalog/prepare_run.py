@@ -28,6 +28,7 @@ from strata.prepare.chain import Chain, ChainError, Counts, Emptied, Input, Spec
 
 from .canonical import CanonicalError, canonical_form
 from .index import tables as t
+from .index.locks import claim
 from .index.runs import PREPARE
 from .raw_ingest import listing, producer
 from .rows import CatalogError, chunks, current, live
@@ -80,6 +81,7 @@ def prepare(
 
     name_list = [name.strip() for name in names if name.strip()]
     with catalog.engine.begin() as conn:
+        claim(conn)
         found, missing = catalog.raw.resolve(conn, name_list)
         if missing and not allow_missing:
             raise CatalogError(

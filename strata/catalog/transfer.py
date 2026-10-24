@@ -41,6 +41,7 @@ from strata.contracts import Span, Spans
 
 from .index import conflicts
 from .index import tables as t
+from .index.locks import claim
 from .index.runs import IMPORT
 from .raw_ingest import producer
 from .rows import SCHEMA, VALUE, CatalogError, chunks, current, live
@@ -257,6 +258,7 @@ def _import(catalog, answers, *, into, pairs, dry_run, on_sample) -> "ImportRepo
 
     who, code = producer()
     with catalog.engine.begin() as conn:
+        claim(conn)
         label_set_id = _label_set(conn, name, answers.label_schema)
         run_id = catalog.runs.start(
             conn,

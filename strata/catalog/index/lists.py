@@ -6,7 +6,6 @@ different set under the same name is the next version, and the same set
 again is the version that holds it. See ``docs/adr/0050``.
 """
 
-import hashlib
 from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import datetime
@@ -16,6 +15,7 @@ from sqlalchemy.engine import Engine
 
 from ..rows import CatalogError, chunks
 from . import tables as t
+from .runs import files_digest
 
 
 @dataclass(frozen=True)
@@ -32,8 +32,8 @@ class ListRow:
 
 
 def list_digest(checksums: Iterable[str]) -> str:
-    """Over the sorted distinct checksums, as a run's files digest is."""
-    return hashlib.sha256("\n".join(sorted(set(checksums))).encode()).hexdigest()
+    """Over the sorted distinct checksums: :func:`runs.files_digest`, so one set has one digest."""
+    return files_digest(checksums)
 
 
 def check_name(name: str) -> None:

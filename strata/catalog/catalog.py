@@ -32,6 +32,7 @@ from .index.conflicts import Conflicts
 from .index.datasets import Datasets
 from .index.label_sets import LabelSets
 from .index.lists import Lists
+from .index.locks import claim, lock
 from .index.raw import Raw
 from .index.runs import Runs
 from .index.samples import Samples
@@ -43,7 +44,7 @@ from .rows import (
     CatalogError,
     CatalogMissing,
 )
-from .selection import Selection, SelectionSpec, default_spec, lock, run_selection, watermark
+from .selection import Selection, SelectionSpec, default_spec, run_selection, watermark
 from .storage.blobs import BlobBackend, LocalBackend, Location, blob_path, checksum_of
 from .versions.features import FeatureError, FeatureSpec
 from .versions.files import fetch_into, materialised_name, write_out
@@ -226,6 +227,7 @@ class Catalog:
         """
         ids: list[int] = []
         with TemporaryDirectory(prefix="strata-canonical-") as scratch, self.engine.begin() as conn:
+            claim(conn)
             for path in paths:
                 path = Path(path)
                 extra = metadata_for(path) if metadata_for is not None else None

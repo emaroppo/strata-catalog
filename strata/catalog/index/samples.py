@@ -15,6 +15,7 @@ from ..rows import SAMPLE_COLUMNS, SampleRow, chunks, current, live, sample_rows
 from ..selection import Compare, compares
 from ..storage.blobs import Location
 from . import tables as t
+from .locks import claim
 
 
 class Samples:
@@ -71,17 +72,18 @@ class Samples:
         subtype = before.subtype if subtype is None else subtype
         if (subtype, metadata) == (before.subtype, before.metadata):
             return
+        # The sample, then the event: the order a freeze locks them in
+        conn.execute(
+            update(t.sample)
+            .where(t.sample.c.id == sample_id)
+            .values(subtype=subtype, metadata=metadata)
+        )
         conn.execute(
             insert(t.event).values(
                 kind=t.DESCRIBED,
                 sample_id=sample_id,
                 before={"subtype": before.subtype, "metadata": before.metadata},
             )
-        )
-        conn.execute(
-            update(t.sample)
-            .where(t.sample.c.id == sample_id)
-            .values(subtype=subtype, metadata=metadata)
         )
 
     def collect(self, conn, sample_ids: Iterable[int], collections: Iterable[str]) -> None:
@@ -205,6 +207,7 @@ class Samples:
         """
         gone = 0
         with self.engine.begin() as conn:
+            claim(conn)
             for chunk in chunks(list(sample_ids)):
                 alive = list(
                     conn.execute(

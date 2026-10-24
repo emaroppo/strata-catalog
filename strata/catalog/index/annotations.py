@@ -22,6 +22,7 @@ from strata.contracts import AnySchema, AnyValue
 from ..rows import SCHEMA, VALUE, AnnotateReport, CatalogError, current
 from . import conflicts
 from . import tables as t
+from .locks import claim
 
 
 @dataclass(frozen=True)
@@ -91,6 +92,7 @@ class Annotations:
         _, schema = self._schema(label_set_id)
         schema.validate_value(value)
         with self.engine.begin() as conn:
+            claim(conn)
             written = self._write(
                 conn,
                 sample_id,
@@ -118,6 +120,7 @@ class Annotations:
         terms as :meth:`annotate`.
         """
         with self.engine.begin() as conn:
+            claim(conn)
             written = self._write(
                 conn,
                 sample_id,
@@ -147,6 +150,7 @@ class Annotations:
         _, schema = self._schema(label_set_id)
         annotated = skipped = kept = 0
         with self.engine.begin() as conn:
+            claim(conn)
             for sample_id, value in items:
                 if value is None:
                     written = self._write(
@@ -192,6 +196,7 @@ class Annotations:
         """
         moved = 0
         with self.engine.begin() as conn:
+            claim(conn)
             for sample_id in sample_ids:
                 skip = conn.execute(
                     select(t.annotation.c.id).where(
