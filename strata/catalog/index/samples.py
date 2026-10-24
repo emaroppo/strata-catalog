@@ -11,7 +11,17 @@ from collections.abc import Iterable, Sequence
 from sqlalchemy import and_, func, insert, select, update
 from sqlalchemy.engine import Engine
 
-from ..rows import SAMPLE_COLUMNS, SampleRow, chunks, current, live, sample_rows, scoped
+from ..rows import (
+    SAMPLE_COLUMNS,
+    AmbiguousSample,
+    SampleRow,
+    chunks,
+    current,
+    live,
+    sample_rows,
+    scoped,
+    split_type,
+)
 from ..selection import Compare, compares
 from ..storage.blobs import Location
 from . import tables as t
@@ -315,15 +325,27 @@ class Samples:
         with self.engine.connect() as conn:
             return sample_rows(conn, scoped(stmt, collections))
 
-    def by_checksum(self, checksum: str) -> SampleRow | None:
-        """The sample with these bytes, or None.
+    def by_checksum(self, checksum: str, type: str | None = None) -> SampleRow | None:
+        """The live sample with these bytes and this type, or None.
 
         The lookup behind every reference that has to survive a move: a
-        task URL, a cache key, a manifest entry. See ``docs/adr/0001``.
+        task URL, a manifest entry, a list. ``type`` is ``text/email``.
+        Without it, the one live sample with these bytes, and
+        :class:`AmbiguousSample` if several types hold them: a reference
+        written before types were part of one. See ``docs/adr/0001`` and
+        ``docs/adr/0052``.
         """
         stmt = select(*SAMPLE_COLUMNS).where(and_(live(), t.sample.c.checksum == checksum))
+        if type is not None:
+            media, subtype = split_type(type)
+            stmt = stmt.where(t.sample.c.media == media, t.sample.c.subtype == subtype)
         with self.engine.connect() as conn:
             rows = sample_rows(conn, stmt)
+        if len(rows) > 1:
+            raise AmbiguousSample(
+                f"{len(rows)} samples hold the bytes {checksum[:12]}: "
+                f"{', '.join(sorted(r.type for r in rows))}. Name the type."
+            )
         return rows[0] if rows else None
 
     def composition(self, collections) -> dict[tuple[str, str], int]:

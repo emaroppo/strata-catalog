@@ -24,7 +24,16 @@ See ``docs/adr/0021``.
 from .canonical import CanonicalError, canonical_form
 from .catalog import Catalog
 from .intake import Admission, IntakeError, admit
-from .rows import EVERYTHING, AnnotateReport, CatalogError, CatalogMissing, DatasetRef, SampleRow
+from .rows import (
+    EVERYTHING,
+    AmbiguousSample,
+    AnnotateReport,
+    CatalogError,
+    CatalogMissing,
+    DatasetRef,
+    SampleRow,
+    split_type,
+)
 from .selection import SelectionSpec
 from .storage.blobs import BlobBackend, LocalBackend, Location, blob_path, checksum_of
 from .storage.repack import RepackError, RepackReport, repack_blobs
@@ -56,6 +65,7 @@ __all__ = [
     "VAL",
     "Achieved",
     "Admission",
+    "AmbiguousSample",
     "AnnotateReport",
     "BlobBackend",
     "CanonicalError",
@@ -89,6 +99,7 @@ __all__ = [
     "ensure_materialised",
     "merge_annotations",
     "repack_blobs",
+    "split_type",
     "suffix_of",
     "verify_dataset",
 ]

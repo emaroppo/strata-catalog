@@ -34,6 +34,30 @@ class CatalogMissing(CatalogError):
     """An index with no catalog in it: nothing to open, and nothing is made."""
 
 
+class AmbiguousSample(CatalogError):
+    """A checksum named without a type, where more than one type holds the bytes.
+
+    A reference written before types were part of one (a Label Studio task,
+    an untyped list) resolves only while one live sample has its bytes. See
+    ``docs/adr/0052``.
+    """
+
+
+def split_type(type_: str) -> tuple[str, str]:
+    """``text/email/masked`` as its media and stored subtype, ``("text", "email/masked")``.
+
+    The media is the first segment; the subtype may have several. See
+    ``docs/adr/0010`` and ``docs/adr/0052``.
+    """
+    media, sep, subtype = type_.partition("/")
+    if not media or not sep or not subtype:
+        raise CatalogError(
+            f"{type_!r} is not a sample type. A type is its media and its subtype, "
+            f"such as 'text/email' or 'image/plain'."
+        )
+    return media, subtype
+
+
 @dataclass(frozen=True)
 class SampleRow:
     """A sample as callers see it — never a raw database row."""
@@ -46,6 +70,14 @@ class SampleRow:
     #: Out of comparison, and therefore out of the generated hash: two rows
     #: for the same sample are the same sample. See docs/adr/0001.
     metadata: dict | None = field(default=None, compare=False)
+
+    @property
+    def type(self) -> str:
+        """Its media and subtype, ``text/email``: with the checksum, its identity.
+
+        See ``docs/adr/0052``.
+        """
+        return f"{self.media}/{self.subtype}"
 
 
 @dataclass(frozen=True)
