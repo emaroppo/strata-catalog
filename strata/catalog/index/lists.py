@@ -1,13 +1,5 @@
-"""Lists: sets of checksums with a name and a version.
-
-What a script chose, where a condition on one sample cannot say it:
-near-duplicates to drop, a hand-picked set. A version never changes; a
-different set under the same name is the next version, and the same set
-again is the version that holds it. See ``docs/adr/0050``.
-
-A version records the one type its members are, where it was put with
-one, so each member names a sample outright: the same bytes can be two
-samples. See ``docs/adr/0052``.
+"""Lists: sets of checksums with a name and a version; a version never changes, and
+records the one type its members are. See ``docs/adr/0050``, ``docs/adr/0052``.
 """
 
 from collections.abc import Iterable
@@ -60,11 +52,8 @@ class Lists:
     ) -> tuple[ListRow, bool]:
         """Store a set under ``name``: the version holding it, and whether it is new.
 
-        The same set as the latest version is that version, unless this
-        names a type and the latest is of another or none. Anything else is
-        the next one. A checksum need not be a sample here: a list says what
-        a script chose, and a sample can arrive after it. ``type`` is
-        ``text/email``, the type of every member. See ``docs/adr/0052``.
+        The same set as the latest version is that version unless ``type`` differs;
+        a checksum need not be a sample yet. See ``docs/adr/0052``.
         """
         check_name(name)
         if type is not None:

@@ -6,14 +6,11 @@ from pathlib import Path
 
 from sqlalchemy import func, select
 
-from ..config import CatalogConfig, blobs_for, open_catalog
+from ..config import CatalogConfig, CatalogMissing, blobs_for, open_catalog
 from ..index import tables as t
 from ..storage.blobs import Location, checksum_of
+from ..storage.s3 import S3Backend
 from .where import Strict, where_blobs, where_index
-
-# ----------------------------------------------------------------------
-# probe
-# ----------------------------------------------------------------------
 
 
 class IndexProbe(Strict):
@@ -27,8 +24,7 @@ class BlobProbe(Strict):
     where: str
     ok: bool
     bytes: int | None = None
-    #: The checksum of the sample read back, when the catalog had one to
-    #: read. None when the store was proved with a synthetic blob instead.
+    #: The checksum of the sample read back; None when a synthetic blob proved the store instead.
     sample: str | None = None
     error: str | None = None
     #: What a wrong answer most likely means, when there is one.
@@ -49,13 +45,12 @@ class Probe(Strict):
 def probe(config: CatalogConfig) -> Probe:
     """The index answers a query, and a sample's bytes come back as the index recorded them.
 
-    Proved on a sample the catalog holds, against the checksum its row
-    carries; a synthetic blob is the fallback for a catalog with nothing in
-    it yet. See ``docs/adr/0002``.
+    A synthetic blob stands in for a catalog with nothing in it yet; an index holding no catalog
+    is reported, never made. See ``docs/adr/0002``, ``docs/adr/0018``.
     """
     index = IndexProbe(where=where_index(config), reachable=False)
     try:
-        catalog = open_catalog(config, create=True)
+        catalog = open_catalog(config)
         with catalog.engine.connect() as conn:
             samples = conn.execute(select(func.count()).select_from(t.sample)).scalar()
             first = conn.execute(
@@ -71,6 +66,9 @@ def probe(config: CatalogConfig) -> Probe:
                 .limit(1)
             ).first()
         index = IndexProbe(where=index.where, reachable=True, samples=samples)
+    except CatalogMissing as e:
+        # Nothing to probe the blobs against, and nothing was made to probe. docs/adr/0018
+        return Probe(index=index.model_copy(update={"error": str(e)}), blobs=None)
     except Exception as e:
         failed = index.model_copy(update={"error": f"{type(e).__name__}: {e}"})
         return Probe(index=failed, blobs=None)
@@ -108,10 +106,8 @@ def _read_back(config: CatalogConfig, catalog, row) -> BlobProbe:
 
 
 def _round_trip(config: CatalogConfig) -> BlobProbe:
-    """A synthetic blob written and read back: the store works, whatever it holds.
-
-    Writes into a probe prefix and removes it afterwards, so nothing lands
-    among real shards.
+    """A synthetic blob written under a probe prefix, read back and removed: the store works,
+    whatever it holds.
     """
     root = Path(config.root)
     endpoint = config.s3_endpoint
@@ -126,14 +122,11 @@ def _round_trip(config: CatalogConfig) -> BlobProbe:
     try:
         blobs = blobs_for(config)
         if endpoint:
-            from ..storage.s3 import S3Backend
-
             assert isinstance(blobs, S3Backend)  # an endpoint is what selects it
             # A prefix of its own, so a probe never lands among real shards
             blobs.prefix = "probe"
         location = blobs.put(marker, checksum_of(marker))
-        # flush is what makes an object exist, so it decides whether there
-        # is one to clean up. docs/adr/0002
+        # flush makes the object exist, so it decides if there is one to clean up. docs/adr/0002
         blobs.flush()
         uploaded = location
         read = blobs.get(location)
@@ -160,8 +153,6 @@ def _round_trip(config: CatalogConfig) -> BlobProbe:
     finally:
         marker.unlink(missing_ok=True)
         if endpoint and uploaded is not None and blobs is not None:
-            from ..storage.s3 import S3Backend
-
             assert isinstance(blobs, S3Backend)
             try:
                 blobs.client.delete_object(Bucket=config.s3_bucket, Key=uploaded.container)

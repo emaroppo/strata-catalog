@@ -1,10 +1,5 @@
-"""The catalog's stages: what an experiment asks of it, as requests and records.
-
-Three of them. ``dataset`` freezes a version, ``materialise`` puts it on
-disk, and ``split`` decides — or, by default, reads — which side each
-sample is on. Each takes a request and a context and returns a record that
-names what it made by identity: a dataset id, a directory. See
-``docs/adr/0030``.
+"""The catalog's stages: ``dataset`` freezes a version, ``materialise`` puts it on disk,
+``split`` reads or draws sides; each returns a record naming what it made. See ``docs/adr/0030``.
 """
 
 from collections.abc import Callable
@@ -47,18 +42,12 @@ class Context:
     """The handles a catalog stage needs: the catalog, and where versions land."""
 
     catalog: Catalog
-    #: Where materialised versions live on this host, ``<name>/v<version>``
-    #: under it.
+    #: Where materialised versions live on this host, ``<name>/v<version>`` under it.
     datasets_dir: Path
     #: Blobs already on this host, consulted before the backend.
     cache: Path | None = None
     #: ``on_progress(done, total)`` as blobs land.
     on_progress: Callable[[int, int], None] | None = None
-
-
-# ----------------------------------------------------------------------
-# dataset
-# ----------------------------------------------------------------------
 
 
 class DatasetRequest(Strict):
@@ -68,31 +57,20 @@ class DatasetRequest(Strict):
     label_set: str
     #: Where to draw from when no spec is given; a spec names its own.
     collections: list[str] = Field(default_factory=list)
-    #: A selection spec, by path: which types, collections, answers,
-    #: conditions and lists the version draws. Its content is stored, never
-    #: the path. None freezes every sample in ``collections`` with a
-    #: current answer. See docs/adr/0050.
+    #: A selection spec by path, content stored; None freezes every answered sample. docs/adr/0050
     spec: Path | None = None
     val_ratio: float = 0.2
     holdout_ratio: float = 0.0
     seed: int = 42
     #: A metadata key whose values stay on one side. None: no grouping.
     group_by: str | None = None
-    #: False re-splits from nothing rather than keeping the previous
-    #: version's sides; the version records it, and a warm start stops there.
-    #: See docs/adr/0024.
+    #: False re-splits from nothing rather than keeping the previous version's sides. docs/adr/0024
     inherit: bool = True
-    #: A split the corpus arrived with: the metadata key naming each
-    #: sample's set, and which names are holdout and which val, or lists
-    #: whose members are. The samples it names are fixed; the rest are drawn.
+    #: A split the corpus arrived with; what it names is fixed, the rest drawn. docs/adr/0024
     given: GivenSplit | None = None
-    #: What to do with a fine-tuning sample whose origins disagree on its
-    #: input: leave it out, or keep its first origin's. Recorded on the
-    #: version. See docs/adr/0053.
+    #: A fine-tuning sample with disagreeing inputs: dropped, or its first origin's. docs/adr/0053
     disagreeing_inputs: Literal["drop", "first"] = "drop"
-    #: A version already frozen, to use as it stands rather than freeze
-    #: what is labelled now: its members, sides and ratios, whatever has
-    #: been labelled since. None freezes (or reuses) the newest.
+    #: A version already frozen, used as it stands; None freezes or reuses the newest.
     version: int | None = None
 
 
@@ -108,8 +86,7 @@ class DatasetRecord(Strict):
     samples: int
     #: How many samples' sides the corpus gave rather than the draw.
     given: int = 0
-    #: How many groups the given sides cut across. Reproduced rather than
-    #: corrected, and counted. See docs/adr/0024.
+    #: How many groups the given sides cut across, reproduced rather than corrected. docs/adr/0024
     groups_cut: int = 0
 
 
@@ -199,17 +176,11 @@ def _pinned(
     )
 
 
-# ----------------------------------------------------------------------
-# materialise
-# ----------------------------------------------------------------------
-
-
 class MaterialiseRequest(Strict):
     """A version as a directory a model can train from."""
 
     dataset_id: int
-    #: Feature declarations, ``{name, source, ref}``, as a project writes
-    #: them. Declarations only: the values are read from the catalog here.
+    #: Feature declarations, ``{name, source, ref}``; the values are read from the catalog.
     features: list[dict] = Field(default_factory=list)
 
 
@@ -217,8 +188,7 @@ class MaterialiseRecord(Strict):
     directory: Path
     dataset: str
     version: int
-    #: Samples fetched to build it. Zero when a directory already there was
-    #: reused, which is what tells a cache hit from a transfer.
+    #: Samples fetched to build it; zero when the directory there was reused.
     fetched: int
     train: int
     val: int
@@ -241,8 +211,7 @@ def materialise(request: MaterialiseRequest, context: Context) -> MaterialiseRec
     )
     manifest = result.manifest
     if context.on_progress is not None:
-        # One last tick, whichever way the version was obtained, so a caller
-        # watching ticks learns that materialising is over. docs/adr/0031
+        # One last tick whichever way, so a watcher learns materialising is over. docs/adr/0031
         context.on_progress(len(manifest.samples), len(manifest.samples))
     return MaterialiseRecord(
         directory=result.directory,
@@ -257,20 +226,9 @@ def materialise(request: MaterialiseRequest, context: Context) -> MaterialiseRec
     )
 
 
-# ----------------------------------------------------------------------
-# split
-# ----------------------------------------------------------------------
-
-
 class SplitRequest(Strict):
-    """Which side each sample is on, read from the version or drawn afresh.
-
-    Without a seed the sides are the ones the catalog's version carries.
-    With one, the sides are drawn again from nothing and written into a
-    copy of the directory; the version on disk is never rewritten.
-    ``group_by`` names the metadata key whose values stay on one side in
-    that draw, which need not be the key the version was frozen under. See
-    ``docs/adr/0024``.
+    """Which side each sample is on: the version's, or with a seed drawn afresh into a copy
+    of the directory. See ``docs/adr/0024``.
     """
 
     dataset_dir: Path
@@ -281,18 +239,14 @@ class SplitRequest(Strict):
 
 
 class SplitRecord(Strict):
-    """Where the sides are, and how many samples landed on each.
-
-    The realisation itself — which sample landed where — is not here. It
-    is the manifest in ``directory``. A record names what it made and never
-    embeds it. See ``docs/adr/0030``.
+    """Where the sides are, and how many samples landed on each; the realisation is the
+    manifest in ``directory``. See ``docs/adr/0030``.
     """
 
     directory: Path
     drawn: bool
     seed: int | None
-    #: The key the sides respect: the version's own when inherited, the
-    #: request's when drawn.
+    #: The key the sides respect: the version's own when inherited, the request's when drawn.
     group_by: str | None
     counts: dict[Side, int]
 
@@ -358,12 +312,8 @@ def apply_sides(
     tag: str,
     group_by: str | None = None,
 ) -> tuple[Path, Manifest]:
-    """A copy of ``source`` whose manifest puts each sample on the side given, by position.
-
-    Used by ``split`` for a draw it made and by the modelling host for a
-    draw a caller sent. Beside the version, named for ``tag``; the version
-    on disk is never rewritten. ``group_by`` is what the copy's manifest
-    says its sides respect. See ``docs/adr/0024``.
+    """A copy of ``source`` beside it, named for ``tag``, whose manifest puts each sample on
+    the side given by position; the version is never rewritten. See ``docs/adr/0024``.
     """
     if len(sides) != len(manifest.samples):
         raise CatalogError(

@@ -1,8 +1,5 @@
-"""Dataset versions: frozen selections, their sides, and what each one holds.
-
-A version is written as rows and never recomputed; the next inherits every
-side its predecessor decided. Its identity is its members and a digest
-over their annotations. See ``docs/adr/0003``.
+"""Dataset versions: frozen selections, their sides, and what each one holds; a version
+is rows, never recomputed. See ``docs/adr/0003``.
 """
 
 from collections.abc import Sequence
@@ -24,13 +21,7 @@ class Datasets:
     def named(self, dataset_id: int) -> DatasetRef:
         """A dataset's name, version and digest, without materialising it.
 
-        So a caller can work out where a version would live, and whether it
-        already holds it, before paying to fetch it. Reading either off the
-        manifest is only possible once the files are written, which is too
-        late to decide not to write them.
-
-        The digest is what a round sends along with the id, so a host can
-        tell its own dataset from a copy's that happens to share the number.
+        See ``docs/adr/0008``, ``docs/adr/0026``.
         """
         with self.engine.connect() as conn:
             row = conn.execute(
@@ -82,22 +73,15 @@ class Datasets:
         return info
 
     def members(self, dataset_id: int, label_set_id: int) -> Sequence[Row]:
-        """Every member with its side and its annotation against ``label_set_id``.
+        """Every member with its side and its current annotation against ``label_set_id``.
 
-        The label set is bound rather than joined: an ON clause cannot
-        reference a table joined after it, and binding the id drops a
-        three-way join to a two-way one.
+        The label set is bound rather than joined: an ON clause cannot reference a table joined
+        after it.
         """
         with self.engine.connect() as conn:
             return conn.execute(
                 select(
-                    t.sample.c.id,
-                    t.sample.c.checksum,
-                    t.sample.c.media,
-                    t.sample.c.subtype,
-                    t.sample.c.location,
-                    t.sample.c.offset,
-                    t.sample.c.length,
+                    *t.SAMPLE_LOCATION,
                     t.sample.c.metadata,
                     t.dataset_member.c.side,
                     t.annotation.c.state,
@@ -135,17 +119,9 @@ class Datasets:
         spec_hash: str | None = None,
         disagreeing_inputs: str | None = None,
     ) -> int | None:
-        """The latest version of ``name``, if it froze exactly this.
-
-        Exactly this: the same members, the same answers about them, the
-        same ratios asked for, the same grouping respected, the same split
-        given, the same spec — and, for a freeze that re-splits, a latest
-        version that re-split itself from the same seed. See
-        ``docs/adr/0024``. Two specs that choose the same members today
-        are two selections, and differ once more is labelled. See
-        ``docs/adr/0050``. Fine-tuning samples whose inputs were settled
-        another way are another version, since the same spec frozen both
-        ways trains on different examples. See ``docs/adr/0053``.
+        """The latest version of ``name``, if it froze exactly this: the same members, answers,
+        ratios, grouping, given split, spec and input settlement, and the same seed where
+        it re-split. See ``docs/adr/0024``, ``docs/adr/0050``, ``docs/adr/0053``.
         """
         latest = conn.execute(
             select(
@@ -195,11 +171,10 @@ class Datasets:
         return latest.id if members == wanted else None
 
     def groups_cut(self, dataset_id: int, label_set_id: int, group_by: str | None) -> int:
-        """How many of a version's groups have members on more than one side.
+        """How many of a version's groups have members on more than one side; zero unless a given
+        split put them there.
 
-        Zero unless a split the corpus arrived with put them there: the
-        draw keeps a group whole, and a given division is reproduced rather
-        than corrected. See ``docs/adr/0024``.
+        See ``docs/adr/0024``.
         """
         if group_by is None:
             return 0
@@ -211,11 +186,8 @@ class Datasets:
         return sum(1 for seen in sides.values() if len(seen) > 1)
 
     def previous_split(self, conn, name: str) -> tuple[dict[int, str], int | None]:
-        """What N+1 inherits: each member's side in the latest version of
-        ``name``, and the version those sides descend from.
-
-        The second is the latest version's own ``sides_from_version``, or
-        its number where it recorded none. See ``docs/adr/0024``.
+        """What N+1 inherits: each member's side in the latest version of ``name``, and the
+        version those sides descend from. See ``docs/adr/0024``.
         """
         previous = conn.execute(
             select(t.dataset.c.id, t.dataset.c.version, t.dataset.c.sides_from_version)

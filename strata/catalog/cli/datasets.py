@@ -3,13 +3,14 @@
 from dataclasses import asdict
 from pathlib import Path
 
+from ..selection import parse_ref
+from ..stages import Context, DatasetRequest, dataset
+from ..verify import verify_dataset
 from ._shared import Refused, _emit, _open
 from .raw import _lines
 
 
 def _ref(text: str) -> tuple[str, int]:
-    from ..selection import parse_ref
-
     try:
         return parse_ref(text)
     except ValueError as e:
@@ -17,8 +18,6 @@ def _ref(text: str) -> tuple[str, int]:
 
 
 def _dataset_verify(args) -> int:
-    from ..verify import verify_dataset
-
     name, version = _ref(args.version)
     catalog, _ = _open(args)
     report = verify_dataset(catalog, name, version)
@@ -34,8 +33,6 @@ def _dataset_verify(args) -> int:
 
 
 def _dataset_freeze(args) -> int:
-    from ..stages import Context, DatasetRequest, dataset
-
     catalog, config = _open(args)
     record = dataset(
         DatasetRequest(

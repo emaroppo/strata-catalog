@@ -26,11 +26,7 @@ class LabelSets:
             ).scalar_one()
 
     def get(self, name: str) -> tuple[int, AnySchema]:
-        """A label set by name, as whatever kind of schema it is.
-
-        Read back through the discriminator rather than as one label type's
-        schema. See ``docs/adr/0014``.
-        """
+        """A label set by name, as whatever kind of schema it is. See ``docs/adr/0014``."""
         with self.engine.connect() as conn:
             row = conn.execute(
                 select(t.label_set.c.id, t.label_set.c.schema).where(t.label_set.c.name == name)
@@ -38,15 +34,6 @@ class LabelSets:
         if row is None:
             raise CatalogError(f"No label set named {name!r}")
         return row.id, SCHEMA.validate_python(row.schema)
-
-    def by_id(self, label_set_id: int) -> tuple[int, AnySchema]:
-        with self.engine.connect() as conn:
-            row = conn.execute(
-                select(t.label_set.c.schema).where(t.label_set.c.id == label_set_id)
-            ).first()
-        if row is None:
-            raise CatalogError(f"No label set with id {label_set_id}")
-        return label_set_id, SCHEMA.validate_python(row.schema)
 
     def name_of(self, conn, label_set_id: int) -> str:
         """A label set's name, within a caller's transaction."""
@@ -58,10 +45,9 @@ class LabelSets:
         return name
 
     def set_classes(self, label_set_id: int, schema: AnySchema) -> None:
-        """Replace a label set's schema.
+        """Replace a label set's schema; append-only is a convention, not a constraint.
 
-        Append-only is a convention rather than a constraint here. See
-        ``docs/adr/0005``.
+        See ``docs/adr/0005``.
         """
         with self.engine.begin() as conn:
             conn.execute(

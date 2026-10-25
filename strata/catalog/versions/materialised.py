@@ -1,8 +1,6 @@
-"""A dataset version on disk: reused when it is the right one, rebuilt when not.
+"""A dataset version on disk: reused only when its manifest proves it, rebuilt otherwise.
 
-The one rule for both machines. A directory is reused only when its
-manifest reads, was built from this catalog, and was built with the same
-feature declarations. Anything else is rebuilt. See ``docs/adr/0026``.
+See ``docs/adr/0026``.
 """
 
 import shutil
@@ -21,8 +19,7 @@ class Materialised(NamedTuple):
 
     manifest: Manifest
     directory: Path
-    #: Samples fetched to build it. Zero when a directory already there was
-    #: reused, which is what lets a caller tell a cache hit from a transfer.
+    #: Samples fetched to build it; zero when the directory there was reused.
     fetched: int
 
 
@@ -37,10 +34,8 @@ def ensure_materialised(
 ) -> Materialised:
     """The directory for a dataset version under ``root``, built if need be.
 
-    ``catalog`` is anything with ``id``, ``datasets.named`` and
-    ``materialise`` — a :class:`~strata.catalog.Catalog`, in practice.
-
-    Reuse is checked before fetching. See ``docs/adr/0026``.
+    ``catalog`` is anything with ``id``, ``datasets.named`` and ``materialise``. See
+    ``docs/adr/0026``.
     """
     ref = catalog.datasets.named(dataset_id)
     name = ref.name
@@ -67,8 +62,7 @@ def ensure_materialised(
             on_progress(done, total)
 
     catalog.materialise(dataset_id, staging, on_progress=tick, cache=cache, features=specs)
-    # The manifest is written last, so a directory that has one is complete;
-    # the rename is what makes it visible under its version. docs/adr/0026
+    # Manifest last, then the rename: a visible directory with a manifest is whole. docs/adr/0026
     staging.rename(directory)
     manifest = Manifest.model_validate_json((directory / MANIFEST_NAME).read_text())
     return Materialised(manifest, directory, fetched)
@@ -81,19 +75,14 @@ def _reusable(directory: Path, catalog_id: str | None, features: list[dict]) -> 
     except FileNotFoundError:
         return None
     except ManifestFormatError:
-        # A layout this release does not read: rebuilt, never guessed at.
-        # docs/adr/0026
+        # A layout this release does not read is rebuilt, never guessed at. docs/adr/0026
         return None
     if manifest.catalog_id != catalog_id:
-        # Another catalog's version with the same name and number — which is
-        # every version, the first round after switching to a rebuilt
-        # catalog, since its numbering starts again.
+        # Another catalog's version with the same name and number. docs/adr/0008
         return None
     declared = [dict(f) for f in manifest.features if f.get("source") != INPUT]
     if declared != features:
-        # Features are not part of a version's identity: adding one keeps the
-        # version and rebuilds the directory. docs/adr/0026. A fine-tuning
-        # input is the version's own, not a declaration. docs/adr/0053
+        # Features are no part of a version's identity. docs/adr/0026, docs/adr/0053
         return None
     return manifest
 

@@ -1,9 +1,6 @@
-"""Removing data: samples tombstoned, and their annotations gone with them.
+"""Removing data: samples tombstoned, their annotations with them; bytes and frozen versions stay.
 
-A removed sample leaves every reader and its annotations leave with it.
-The bytes stay, and a version already frozen keeps its members. See
-``docs/adr/0002``. Another type's sample over the same bytes is another
-sample, and stays. See ``docs/adr/0052``.
+See ``docs/adr/0002``, ``docs/adr/0052``.
 """
 
 from pydantic import Field
@@ -40,12 +37,8 @@ def remove(
 ) -> RemoveReport:
     """Tombstone the live samples a selection names.
 
-    A selection is at least one of: the collections to look in, metadata
-    values to match, checksums to name outright. With none of them it is
-    refused. See ``docs/adr/0002``. ``types`` keeps it to samples of those
-    types. A checksum names a sample outright only with its type, so one
-    that matched samples of several types, with no type given, is refused
-    rather than taking them all. See ``docs/adr/0052``.
+    Refused with no selection at all, and when a checksum is held by several
+    types and ``types`` does not say which. See ``docs/adr/0002``, ``docs/adr/0052``.
     """
     where = dict(where or {})
     named = set(checksums or ())

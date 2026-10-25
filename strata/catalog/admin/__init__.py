@@ -1,8 +1,6 @@
 """Looking after a catalog: what is in it, whether it is reachable, what is installed.
 
-The operations behind ``strata-catalog``, as functions returning records.
-Copying, merging and repacking live in ``sync`` and ``storage``. See
-``docs/adr/0030``.
+The operations behind ``strata-catalog``, as functions returning records. See ``docs/adr/0030``.
 """
 
 from .installed import CatalogEntry, TypeEntry, catalogs, types

@@ -1,13 +1,8 @@
 """Alembic environment for the catalog index.
 
-There is no ``alembic.ini``: the URL comes from the ``[catalog]`` tables of
-``config.toml`` — the file ``$STRATA_CONFIG`` names, or ``./config.toml`` —
-and their default, or the one named with ``-x catalog=<name>``. The
-password comes from ``$PGPASSWORD``. See ``docs/adr/0018``.
-
-``$STRATA_CATALOG_URL``, or ``$STRATA_CATALOG_ROOT`` for a SQLite directory,
-points a run at one database directly, which is how a test migrates a
-scratch one.
+The URL comes from ``config.toml`` (``-x catalog=<name>`` picks a catalog) or from
+``$STRATA_CATALOG_URL`` / ``$STRATA_CATALOG_ROOT`` directly. See ``docs/adr/0018``,
+``docs/adr/0019``.
 """
 
 from __future__ import annotations
@@ -17,6 +12,7 @@ from pathlib import Path
 
 from alembic import context
 
+from strata.catalog.config import CONFIG_ENV, CatalogConfigError, load_catalogs, settings_path
 from strata.catalog.index.tables import metadata
 from strata.common.migrations import run_alembic
 
@@ -28,8 +24,6 @@ def database_url() -> str:
     root = os.environ.get("STRATA_CATALOG_ROOT")
     if root:
         return f"sqlite:///{Path(root) / 'catalog.db'}"
-
-    from strata.catalog.config import CONFIG_ENV, CatalogConfigError, load_catalogs, settings_path
 
     try:
         path = settings_path()

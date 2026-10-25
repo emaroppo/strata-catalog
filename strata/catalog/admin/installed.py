@@ -1,11 +1,10 @@
 """What a host is configured for, and what is installed on it: catalogs and sample types."""
 
+from strata.contracts.sample_types import available, resolve
+
+from ..canonical import canonical_form
 from ..config import CatalogMissing, Catalogs, open_catalog
 from .where import Strict, where_blobs, where_index
-
-# ----------------------------------------------------------------------
-# what is configured, and what is installed
-# ----------------------------------------------------------------------
 
 
 class CatalogEntry(Strict):
@@ -45,18 +44,13 @@ class TypeEntry(Strict):
     media: str
     subtype: str
     extensions: list[str]
-    #: What a sample must arrive with beyond what its parent requires
-    #: included: the keys its ``Metadata`` declares. docs/adr/0040
+    #: Keys a sample of this type must arrive with: ``Metadata``'s required ones. docs/adr/0040
     requires: list[str]
     #: Whether its bytes are rewritten into a canonical form when stored.
     canonical: bool
 
 
 def types() -> list[TypeEntry]:
-    from strata.contracts.sample_types import available, resolve
-
-    from ..canonical import canonical_form
-
     return [
         TypeEntry(
             name=name,

@@ -65,6 +65,19 @@ def test_a_refused_ingest_says_why_and_fails(capsys, config, maildir, tmp_path):
     assert "a/inbox/404." in err
 
 
+def test_an_unreadable_file_list_is_refused_before_a_catalog_is_made(
+    capsys, config, maildir, tmp_path
+):
+    # Validation first: a refusal leaves nothing behind where no catalog was. docs/adr/0018
+    code, _, err = run(
+        capsys, config, "ingest", str(maildir), "--collection", "enron/maildir",
+        "--files", str(tmp_path / "absent.txt"),
+    )  # fmt: skip
+    assert code == 1
+    assert "Cannot read the file list" in err
+    assert not (tmp_path / "catalog").exists()
+
+
 def test_raw_ls_without_a_collection_counts_each(capsys, config, maildir):
     _ingested(capsys, config, maildir)
     _, out, _ = run(capsys, config, "raw", "ls")

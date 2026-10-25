@@ -1,8 +1,5 @@
-"""Moving an index from one database to another.
-
-Only the index moves; the bytes are addressed by content. Primary keys
-and the catalog's identity are preserved, and on Postgres the sequences
-behind them are reset last. See ``docs/adr/0002`` and ``docs/adr/0008``.
+"""Moving an index from one database to another: only the index moves, and ids and
+identity are kept. See ``docs/adr/0002``, ``docs/adr/0008``.
 """
 
 from dataclasses import dataclass, field
@@ -11,11 +8,9 @@ from sqlalchemy import delete, func, insert, select, text
 
 from ..index import tables as t
 
-#: Parents before children. annotation_class is copied, not recomputed.
-#: docs/adr/0008
+#: Parents before children; annotation_class is copied, not recomputed. docs/adr/0008
 ORDER = (
-    # First: everything after it means something only within the catalog
-    # this names. docs/adr/0008
+    # Everything after it means something only within this catalog. docs/adr/0008
     t.catalog_identity,
     t.run,
     t.run_input,
@@ -28,8 +23,7 @@ ORDER = (
     t.annotation,
     t.annotation_class,
     t.annotation_conflict,
-    # Ids kept, so a version's watermark means the same in the copy and it
-    # can be verified there. docs/adr/0050
+    # Ids kept, so a version's watermark means the same in the copy. docs/adr/0050
     t.event,
     t.list_version,
     t.list_member,
@@ -52,9 +46,10 @@ class CopyReport:
 
 
 def copy_index(source, target, batch: int = 2000, on_progress=None) -> CopyReport:
-    """Copy every row from ``source``'s index into ``target``'s.
+    """Copy every row from ``source``'s index into ``target``'s; a target holding samples is
+    refused.
 
-    Refuses a target that already holds samples. See ``docs/adr/0008``.
+    See ``docs/adr/0008``.
     """
     with target.engine.connect() as conn:
         existing = conn.execute(select(func.count()).select_from(t.sample)).scalar()
@@ -67,6 +62,7 @@ def copy_index(source, target, batch: int = 2000, on_progress=None) -> CopyRepor
     # The target's own minted identity goes first. docs/adr/0008
     with target.engine.begin() as conn:
         conn.execute(delete(t.catalog_identity))
+    target._id = None
 
     report = CopyReport()
     for table in ORDER:
@@ -86,9 +82,8 @@ def copy_index(source, target, batch: int = 2000, on_progress=None) -> CopyRepor
 
 
 def _reset_sequences(target) -> None:
-    """Point each key sequence past the ids just inserted.
+    """Point each key sequence past the ids just inserted; only Postgres has them.
 
-    Only Postgres has them, and only because the ids came in explicitly.
     See ``docs/adr/0008``.
     """
     if target.engine.dialect.name != "postgresql":

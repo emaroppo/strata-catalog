@@ -1,18 +1,6 @@
-"""Preparing samples from raw files: a spec's chain, run over the files a run is handed.
-
-The run is handed names or checksums. They resolve to distinct raw
-checksums, and a name nothing ingested refuses the run. Inputs a run with
-the same chain identity already prepared are skipped and counted, since
-the chain is deterministic. A different chain over inputs another run
-prepared must say which run it continues. The rest go to the engine, and
-each output is canonicalised, stored once by checksum, and recorded with
-one origin row for the input it came from. A sample's metadata is
-combined from what its bytes say and its origins' facts, first value
-first. The whole run is one transaction, so a run that fails leaves
-nothing. See ``docs/adr/0045``, ``docs/adr/0047`` and ``docs/adr/0049``.
-
-A spec writing a generated type is refused, since a model's output arrives
-only through a generate run. See ``docs/adr/0053``.
+"""Preparing samples from raw files: a spec's chain run over the files a run is handed, as
+one transaction, each output stored once by checksum with an origin per input.
+See ``docs/adr/0045``, ``docs/adr/0047``, ``docs/adr/0049``, ``docs/adr/0053``.
 """
 
 import hashlib
@@ -145,8 +133,7 @@ def prepare(
                         conn, checksum, media=sample_cls.media, subtype=sample_cls.subtype()
                     )
                     if sample_id is None:
-                        # Bytes held as another type are a new sample of
-                        # this one, over the same blob. docs/adr/0052
+                        # Bytes held as another type: a new sample over the same blob. docs/adr/0052
                         location = stored.get(checksum) or catalog.raw.stored(conn, [checksum]).get(
                             checksum
                         )
@@ -188,8 +175,7 @@ def prepare(
             **superseded,
         }
         catalog.runs.finish(conn, run_id, record)
-        # Before the commit: rows naming a shard that failed to upload
-        # would be worse than no rows. docs/adr/0002
+        # Before the commit, or rows could name a shard that never uploaded. docs/adr/0002
         catalog.blobs.flush()
 
     return PrepareReport(
@@ -227,9 +213,7 @@ def _already(conn, identity: str, checksums: list[str]) -> set[str]:
 def _overlap(conn, identity: str, todo: list[str], continues: str | None) -> dict[str, int]:
     """Refuse a different chain over prepared inputs unless it says which run it continues.
 
-    A run continues a run, and with it every run that one continued. What
-    it supersedes is counted: the earlier samples of the inputs both
-    prepared, and how many of those a person answered. Nothing is deleted.
+    What it supersedes is counted, and nothing is deleted. See ``docs/adr/0045``.
     """
     others = {
         run_id: inputs
@@ -301,10 +285,9 @@ def _line_of(conn, run_id: str) -> set[str]:
 def _inputs(
     catalog, conn, checksums: list[str], cache: Path | None, scratch: Path, on_input
 ) -> Iterator[Input]:
-    """Each input as a local file, fetched a batch at a time where it is not local.
+    """Each input as a local file: the store's own, else the cache, else fetched a batch at a time.
 
-    A local store's own file first, then the blob cache, then the store.
-    A file is named by checksum, without an extension. docs/adr/0045
+    See ``docs/adr/0045``.
     """
     path_for = getattr(catalog.blobs, "path_for", None)
     done = 0

@@ -1,10 +1,7 @@
-"""What a model is told about a sample, beyond the sample itself.
+"""What a model is told about a sample beyond the sample itself: a feature names where its value is
+read.
 
-A feature is a role a project declares, not a fact about the data: it
-names where to read a value — another label set's answer, or a metadata
-key on the sample — and the same place can be a target elsewhere. A
-feature must be present for every sample the project draws from, and that
-is checked and counted. See ``docs/adr/0011``.
+See ``docs/adr/0011``.
 """
 
 from dataclasses import dataclass

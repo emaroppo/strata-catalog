@@ -1,12 +1,6 @@
-"""Annotations: what was said about a sample, by whom, and what was said before.
-
-Append-only. A write never changes a row: it stamps the current one as
-superseded and adds a new one. Writes honour :data:`tables.AUTHORITY`: a
-write never replaces an answer from a source that outranks it. Unlabelled
-is the absence of a current row. Each row's classes are indexed through
-the indexing contract in :mod:`strata.contracts`, and kept with the row.
-See ``docs/adr/0027`` and ``docs/adr/0050``. Disputes live in :mod:`conflicts`; the reads a version
-or a feature makes over answers live in :mod:`answers`.
+"""Annotations: what was said about a sample, by whom, and what was said before; append-only,
+and a write never replaces an answer from a source that outranks it.
+See ``docs/adr/0009``, ``docs/adr/0027``, ``docs/adr/0050``.
 """
 
 import json
@@ -15,7 +9,7 @@ from dataclasses import dataclass
 from datetime import datetime
 
 from sqlalchemy import and_, func, insert, select, update
-from sqlalchemy.engine import Engine
+from sqlalchemy.engine import Engine, Row
 
 from strata.contracts import AnySchema, AnyValue
 
@@ -82,12 +76,11 @@ class Annotations:
         source: str = t.HUMAN,
         batch: str | None = None,
     ) -> bool:
-        """Record what a sample is, and index the classes it asserts.
+        """Record what a sample is, and index the classes it asserts; returns whether it was
+        recorded.
 
-        Returns whether it was recorded: not when a source outranking this
-        one already answered (see :data:`tables.AUTHORITY`). ``batch``
-        names the import this arrived in; a write that names none inherits
-        the batch of the answer it replaces. See ``docs/adr/0027``.
+        A write naming no ``batch`` inherits the batch of the answer it replaces. See
+        ``docs/adr/0009``, ``docs/adr/0027``.
         """
         _, schema = self._schema(label_set_id)
         schema.validate_value(value)
@@ -104,8 +97,7 @@ class Annotations:
             )
             if written is None:
                 return False
-            # Someone has looked again, which is what a conflict was asking
-            # for. Whichever way they went, it is settled.
+            # A fresh look settles a conflict whichever way it went. docs/adr/0009
             conflicts.clear(conn, sample_id, label_set_id)
             self._index_classes(conn, written, schema.classes_asserted(value))
         return True
@@ -113,11 +105,8 @@ class Annotations:
     def skip(
         self, sample_id: int, label_set_id: int, source: str = t.HUMAN, batch: str | None = None
     ) -> bool:
-        """Mark a sample reviewed with nothing applicable.
-
-        Excluded from datasets and from the review queue alike, so it does
-        not come back round. Returns whether it was recorded, on the same
-        terms as :meth:`annotate`.
+        """Mark a sample reviewed with nothing applicable; returns whether it was recorded, on
+        :meth:`annotate`'s terms.
         """
         with self.engine.begin() as conn:
             claim(conn)
@@ -142,10 +131,8 @@ class Annotations:
     ) -> "AnnotateReport":
         """Record many annotations in one transaction.
 
-        A ``None`` value means skipped: no answer, as against an empty
-        value, which is the answer "nothing here". An item landing on an
-        answer from a source that outranks this one is left alone and
-        counted in ``kept`` (:data:`tables.AUTHORITY`).
+        A ``None`` value is a skip; an item an outranking source already answered is
+        counted in ``kept``. See ``docs/adr/0009``.
         """
         _, schema = self._schema(label_set_id)
         annotated = skipped = kept = 0
@@ -189,9 +176,7 @@ class Annotations:
     def unskip(self, label_set_id: int, sample_ids: Iterable[int]) -> int:
         """Return skipped samples to the queue; returns how many moved.
 
-        Stamps the skip as superseded with nothing after it; the skip stays
-        in the history. Anything annotated is left alone. A change in place,
-        so it is an event as well. See ``docs/adr/0027`` and
+        The skip stays in the history, and the withdrawal is an event. See ``docs/adr/0027``,
         ``docs/adr/0050``.
         """
         moved = 0
@@ -236,16 +221,11 @@ class Annotations:
         run_id: str | None = None,
         created_at: datetime | None = None,
     ) -> int | None:
-        """Append one answer, superseding the current one unless it outranks ``source``.
+        """Append one answer, superseding the current one unless it outranks ``source``; the
+        new row's id, or None.
 
-        ``run_id`` names the import or judge run writing it (record 0048).
-        ``created_at`` keeps the time an answer carried from another catalog
-        was first given; a new answer takes the database's.
-
-        Returns the new row's id, or None if it wrote nothing. See
-        :data:`tables.AUTHORITY`: an import
-        landing on a sample a person already answered leaves the answer
-        alone rather than replacing it with the guess it may have corrected.
+        ``run_id`` names the import or judge run writing it; ``created_at`` keeps the time
+        an answer carried from elsewhere was first given. See ``docs/adr/0009``, ``docs/adr/0048``.
         """
         if source not in t.AUTHORITY:
             raise CatalogError(
@@ -332,56 +312,20 @@ class Annotations:
         return found
 
     def history(self, sample_id: int, label_set_id: int) -> list[Answer]:
-        """Everything ever said about a sample under a label set, oldest first.
-
-        The last entry is the current answer, unless it was withdrawn — a
-        skip returned to the queue — in which case nothing is.
+        """Everything ever said about a sample under a label set, oldest first; the last is current
+        unless withdrawn.
         """
-        with self.engine.connect() as conn:
-            rows = conn.execute(
-                select(
-                    t.annotation.c.state,
-                    t.annotation.c.value,
-                    t.annotation.c.source,
-                    t.annotation.c.batch,
-                    t.annotation.c.created_at,
-                    t.annotation.c.superseded_at,
-                )
-                .where(
-                    and_(
-                        t.annotation.c.sample_id == sample_id,
-                        t.annotation.c.label_set_id == label_set_id,
-                    )
-                )
-                .order_by(t.annotation.c.created_at, t.annotation.c.id)
-            ).all()
+        rows = self._timeline(label_set_id, sample_id).get(sample_id, [])
         return [_answer(row) for row in rows]
 
     def second_looks(self, label_set_id: int) -> tuple[int, int]:
         """How a person's answers fared when a person looked again: (agreed, changed).
 
-        A sample whose current answer is a person's and whose previous one
-        was also a person's had a second look — an audit, or a correction
-        somebody came back to make. Equal values agree; anything else,
-        including a skip after an answer, changed.
+        Over samples whose current and previous answers are both a person's; a skip after an answer
+        changed it.
         """
-        with self.engine.connect() as conn:
-            rows = conn.execute(
-                select(
-                    t.annotation.c.sample_id,
-                    t.annotation.c.state,
-                    t.annotation.c.value,
-                    t.annotation.c.source,
-                    t.annotation.c.superseded_at,
-                )
-                .where(t.annotation.c.label_set_id == label_set_id)
-                .order_by(t.annotation.c.sample_id, t.annotation.c.created_at, t.annotation.c.id)
-            ).all()
-        by_sample: dict[int, list] = {}
-        for row in rows:
-            by_sample.setdefault(row.sample_id, []).append(row)
         agreed = changed = 0
-        for answers in by_sample.values():
+        for answers in self._timeline(label_set_id).values():
             people = [a for a in answers if a.source == t.HUMAN]
             if len(people) < 2 or people[-1].superseded_at is not None:
                 continue
@@ -393,31 +337,11 @@ class Annotations:
         return agreed, changed
 
     def review_counts(self, label_set_id: int) -> dict[str, ReviewCounts]:
-        """How each import batch fared under review, by batch name.
-
-        Per sample: the latest imported answer, and what stands now. Still
-        the import, nobody has looked. A person's answer after it, equal in
-        value, is an acceptance; a different one, or a skip, a correction.
-        See ``docs/adr/0027``.
+        """How each import batch fared under review, by batch name: a person's equal answer
+        accepts, a different one or a skip corrects. See ``docs/adr/0027``.
         """
-        with self.engine.connect() as conn:
-            rows = conn.execute(
-                select(
-                    t.annotation.c.sample_id,
-                    t.annotation.c.state,
-                    t.annotation.c.value,
-                    t.annotation.c.source,
-                    t.annotation.c.batch,
-                    t.annotation.c.superseded_at,
-                )
-                .where(t.annotation.c.label_set_id == label_set_id)
-                .order_by(t.annotation.c.sample_id, t.annotation.c.created_at, t.annotation.c.id)
-            ).all()
         tallies: dict[str, dict[str, int]] = {}
-        by_sample: dict[int, list] = {}
-        for row in rows:
-            by_sample.setdefault(row.sample_id, []).append(row)
-        for answers in by_sample.values():
+        for answers in self._timeline(label_set_id).values():
             imports = [a for a in answers if a.source == t.IMPORT and a.state == t.ANNOTATED]
             if not imports:
                 continue
@@ -434,6 +358,32 @@ class Annotations:
             else:
                 tally["pending"] += 1
         return {batch: ReviewCounts(**tally) for batch, tally in sorted(tallies.items())}
+
+    def _timeline(self, label_set_id: int, sample_id: int | None = None) -> dict[int, list[Row]]:
+        """Every row ever written under a label set, per sample, oldest first; one sample's when
+        ``sample_id`` is given.
+        """
+        where = [t.annotation.c.label_set_id == label_set_id]
+        if sample_id is not None:
+            where.append(t.annotation.c.sample_id == sample_id)
+        with self.engine.connect() as conn:
+            rows = conn.execute(
+                select(
+                    t.annotation.c.sample_id,
+                    t.annotation.c.state,
+                    t.annotation.c.value,
+                    t.annotation.c.source,
+                    t.annotation.c.batch,
+                    t.annotation.c.created_at,
+                    t.annotation.c.superseded_at,
+                )
+                .where(and_(*where))
+                .order_by(t.annotation.c.sample_id, t.annotation.c.created_at, t.annotation.c.id)
+            ).all()
+        by_sample: dict[int, list[Row]] = {}
+        for row in rows:
+            by_sample.setdefault(row.sample_id, []).append(row)
+        return by_sample
 
 
 def _answer(row) -> Answer:

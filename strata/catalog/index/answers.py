@@ -13,11 +13,9 @@ from . import tables as t
 
 
 def digest(conn, label_set_id: int, sample_ids: Sequence[int]) -> str:
-    """What this label set currently says about these samples, as a digest.
+    """What this label set currently says about these samples, as a digest of the answers alone.
 
-    Over state, source and value, ordered by sample id and serialised
-    with sorted keys, so it is a function of the answers alone. See
-    ``docs/adr/0003``.
+    See ``docs/adr/0003``.
     """
     digest = hashlib.sha256()
     for chunk in chunks(list(sample_ids), 500):
@@ -54,9 +52,7 @@ def asserted(
 ) -> dict[int, list[str]]:
     """The classes each sample's answer asserts, through the schema's indexing contract.
 
-    Read that way rather than by reaching into a payload this does not
-    understand. Samples with no answer, or an answer asserting nothing,
-    are absent. See ``docs/adr/0039``.
+    A sample with no answer, or one asserting nothing, is absent. See ``docs/adr/0039``.
     """
     found: dict[int, list[str]] = {}
     for chunk in chunks(list(sample_ids)):

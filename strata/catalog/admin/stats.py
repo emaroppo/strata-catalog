@@ -7,18 +7,12 @@ from ..index import tables as t
 from ..rows import EVERYTHING
 from .where import Strict
 
-# ----------------------------------------------------------------------
-# stats
-# ----------------------------------------------------------------------
-
 
 class LabelSetStats(Strict):
     name: str
-    #: What its annotations look like: classification, span or bbox
-    #: (docs/adr/0041).
+    #: What its annotations look like: classification, span or bbox. docs/adr/0041
     label_type: str
-    #: Whether choices are exclusive, for a classification set; null for
-    #: a label type with no such notion.
+    #: Whether choices are exclusive, for a classification set; null where the notion is absent.
     multiple: bool | None
     annotated: int
     awaiting: int
@@ -37,16 +31,12 @@ class Stats(Strict):
 
 
 def stats(catalog: Catalog, where: str) -> Stats:
-    """Counts from the index, and the per-class counts from the class index.
-
-    The per-class counts come from ``annotation_class`` rather than from
-    scanning stored values, so they are also the check that indexing did
-    its job.
+    """Counts from the index; the per-class ones come from ``annotation_class``, so they also check
+    indexing.
     """
     with catalog.engine.connect() as conn:
         total = conn.execute(select(func.count()).select_from(t.sample)).scalar() or 0
-        # A comprehension, not dict(rows): a result has keys(), so dict()
-        # would read it as a mapping and fail
+        # Not dict(rows): a result has keys(), so dict() would read it as a mapping
         collections: dict[str, int] = {  # noqa: C416
             name: count
             for name, count in conn.execute(
@@ -69,8 +59,7 @@ def stats(catalog: Catalog, where: str) -> Stats:
     label_sets = []
     for name in names:
         label_set_id, schema = catalog.label_sets.get(name)
-        # The whole catalog on purpose: this is the view of everything there
-        # is, not of what any one job draws from
+        # The whole catalog, not what any one job draws from
         label_sets.append(
             LabelSetStats(
                 name=name,

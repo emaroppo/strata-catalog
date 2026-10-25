@@ -1,9 +1,5 @@
-"""Samples: the rows behind the bytes, and every query that draws on them.
-
-Reads join whatever they need; writes touch the sample and collection
-tables only. Everything here is scoped to the collections a caller names
-(:func:`rows.scoped`), and nothing here reads a file: bytes are the blob
-backend's, and canonical form is a sample type's.
+"""Samples: the rows behind the bytes, and every query that draws on them, each scoped to
+the collections a caller names. See ``docs/adr/0022``.
 """
 
 from collections.abc import Iterable, Sequence
@@ -37,11 +33,7 @@ class Samples:
     # -- within a caller's transaction ----------------------------------
 
     def find(self, conn, checksum: str, *, media: str, subtype: str) -> int | None:
-        """The id for these bytes as this type, if they are catalogued so.
-
-        The same bytes as another type are another sample. See
-        ``docs/adr/0052``.
-        """
+        """The id for these bytes as this type, if they are catalogued so. See ``docs/adr/0052``."""
         return conn.execute(
             select(t.sample.c.id).where(
                 t.sample.c.checksum == checksum,
@@ -74,40 +66,28 @@ class Samples:
         ).inserted_primary_key[0]
 
     def describe(self, conn, sample_id: int, *, metadata: dict | None) -> None:
-        """Bring a known sample's metadata up to date.
-
-        Updated rather than left alone; a dataset already built is
-        undisturbed, since membership is materialised into
-        ``dataset_member``. See ``docs/adr/0023``. Never its type: with the
-        checksum, the type is which sample this is, and the same bytes as
-        another type are another sample. See ``docs/adr/0052``. A change in
-        place, so what it replaced is an event, for a freeze's replay to
-        read back. Nothing changed is nothing recorded. See
-        ``docs/adr/0050``.
+        """Bring a known sample's metadata up to date, never its type; what it replaced is
+        an event. See ``docs/adr/0023``, ``docs/adr/0050``, ``docs/adr/0052``.
         """
         before = conn.execute(
             select(t.sample.c.subtype, t.sample.c.metadata).where(t.sample.c.id == sample_id)
         ).one()
         if metadata == before.metadata:
             return
-        # The sample, then the event: the order a freeze locks them in
+        # The sample, then the event: the order a freeze locks them in. docs/adr/0050
         conn.execute(update(t.sample).where(t.sample.c.id == sample_id).values(metadata=metadata))
         conn.execute(
             insert(t.event).values(
                 kind=t.DESCRIBED,
                 sample_id=sample_id,
-                # The subtype as well, unchanged, as events written while
-                # describing could retype a sample carry it
+                # The subtype as well, so every DESCRIBED event has one shape
                 before={"subtype": before.subtype, "metadata": before.metadata},
             )
         )
 
     def combine(self, conn, sample_id: int, facts: dict, *, new: bool) -> None:
-        """A sample's metadata: its bytes' facts, then each origin's, first value kept.
-
-        A stopgap rule for origins that disagree. docs/adr/0049. A sample the
-        run writing it made has no description yet to replace; any other is
-        described, which records what it replaces. docs/adr/0050
+        """A sample's metadata: its bytes' facts, then each origin's, first value kept; a
+        sample not ``new`` is described. See ``docs/adr/0049``, ``docs/adr/0050``.
         """
         combined = dict(facts)
         for (metadata,) in conn.execute(
@@ -125,32 +105,40 @@ class Samples:
             self.describe(conn, sample_id, metadata=combined or None)
 
     def collect(self, conn, sample_ids: Iterable[int], collections: Iterable[str]) -> None:
-        """Add samples to collections.
+        """Add samples to collections; a sample in one that turns up in another belongs to both.
 
-        Added rather than replaced: a sample already in one collection that
-        turns up in another belongs to both. See ``docs/adr/0022``.
+        See ``docs/adr/0022``.
         """
-        for sample_id in sample_ids:
-            for name in collections:
-                exists = conn.execute(
-                    select(t.sample_collection.c.sample_id).where(
+        names = list(dict.fromkeys(collections))
+        if not names:
+            return
+        for chunk in chunks(list(dict.fromkeys(sample_ids))):
+            held = {
+                tuple(row)
+                for row in conn.execute(
+                    select(t.sample_collection.c.sample_id, t.sample_collection.c.collection).where(
                         and_(
-                            t.sample_collection.c.sample_id == sample_id,
-                            t.sample_collection.c.collection == name,
+                            t.sample_collection.c.sample_id.in_(chunk),
+                            t.sample_collection.c.collection.in_(names),
                         )
                     )
-                ).first()
-                if not exists:
-                    conn.execute(
-                        insert(t.sample_collection).values(sample_id=sample_id, collection=name)
-                    )
+                )
+            }
+            # Sample by sample, so the ids keep that order
+            rows = [
+                {"sample_id": sample_id, "collection": name}
+                for sample_id in chunk
+                for name in names
+                if (sample_id, name) not in held
+            ]
+            if rows:
+                conn.execute(insert(t.sample_collection), rows)
 
     def grouping(self, conn, sample_ids: Sequence[int], key: str | None) -> dict[int, str | None]:
-        """Each sample's group under metadata ``key``, None for its own.
+        """Each sample's group under metadata ``key``, None for its own; no key, or a null under it,
+        is a group of one.
 
-        No key means no grouping: every sample is its own group. A sample
-        without the key, or with a null under it, is its own group too. See
-        ``docs/adr/0023``.
+        See ``docs/adr/0023``.
         """
         if key is None:
             return dict.fromkeys(sample_ids)
@@ -194,9 +182,7 @@ class Samples:
     def locate(self, checksum: str) -> Location | None:
         """Where the bytes of a live sample with this checksum are, of whatever type.
 
-        One copy per checksum, which every row over it names, so any row
-        will do: what reads the bytes alone needs no type. See
-        ``docs/adr/0052``.
+        See ``docs/adr/0052``.
         """
         with self.engine.connect() as conn:
             row = conn.execute(
@@ -228,12 +214,8 @@ class Samples:
     def unlabelled(
         self, label_set_id: int, collections, limit: int | None = None
     ) -> list[SampleRow]:
-        """Samples nobody has dealt with, drawn from ``collections``.
-
-        Per label set, not global: a sample can be classified and still be
-        waiting for boxes. Skipped samples have a row, so they are excluded
-        by the same join rather than by a second condition. Scoped to the
-        collections named. See ``docs/adr/0022``.
+        """Samples with no current row under ``label_set_id``, drawn from ``collections``; a
+        skipped sample has one. See ``docs/adr/0022``.
         """
         stmt = (
             select(*SAMPLE_COLUMNS)
@@ -256,11 +238,9 @@ class Samples:
     def labelled(
         self, label_set_id: int, collections, source: str | None = None
     ) -> list[SampleRow]:
-        """Samples with a real answer — skipped ones are not training data.
+        """Samples with a real answer, skipped ones excluded; ``source`` narrows to one origin.
 
-        Scoped like the queue: dropping a collection from a project declares
-        that data out of scope, training included. ``source`` narrows to
-        answers from one origin. See ``docs/adr/0022``.
+        See ``docs/adr/0022``.
         """
         predicates = [
             t.annotation.c.label_set_id == label_set_id,
@@ -272,13 +252,8 @@ class Samples:
         return self._joined(t.annotation, *predicates, collections=collections)
 
     def tombstone(self, sample_ids: Iterable[int]) -> int:
-        """Remove samples: a tombstone, not a delete, and their answers go with them.
-
-        Every reader takes live samples only, so a removed sample leaves
-        the queue, the labelled set and any version frozen from here on;
-        its rows and its history stay. A version already frozen keeps its
-        members. Returns how many were live and are not now. Each is an
-        event as well. See ``docs/adr/0002`` and ``docs/adr/0050``.
+        """Remove samples: a tombstone, not a delete, their answers with them; returns how
+        many were live. See ``docs/adr/0002``, ``docs/adr/0050``.
         """
         gone = 0
         with self.engine.begin() as conn:
@@ -303,12 +278,8 @@ class Samples:
         return gone
 
     def matching(self, collections, where: dict[str, object] | None = None) -> list[SampleRow]:
-        """Live samples in ``collections`` whose metadata has every key of ``where`` at its value.
-
-        Compared with their types, as a selection spec compares them, by the
-        same code: ``2000`` matches the number and not the string. The
-        metadata is filtered here rather than in SQL. See ``docs/adr/0021``
-        and ``docs/adr/0050``.
+        """Live samples in ``collections`` whose metadata has every key of ``where`` at its
+        value, compared with their types. See ``docs/adr/0021``, ``docs/adr/0050``.
         """
         stmt = select(*SAMPLE_COLUMNS).where(live())
         with self.engine.connect() as conn:
@@ -323,8 +294,7 @@ class Samples:
     def unreviewed(self, label_set_id: int, collections) -> list[SampleRow]:
         """Samples whose current answer arrived with the corpus and nobody has confirmed.
 
-        Trusted and trained on, since an import is an answer; listed so a
-        spot review can pick among them. See ``docs/adr/0028``.
+        See ``docs/adr/0028``.
         """
         return self._joined(
             t.annotation,
@@ -336,11 +306,7 @@ class Samples:
         )
 
     def skipped(self, label_set_id: int, collections) -> list[SampleRow]:
-        """Samples reviewed with nothing applicable.
-
-        Neither training data nor queue: they belong to neither of the other
-        two, so anything reconstructing the whole picture needs them named.
-        """
+        """Samples reviewed with nothing applicable: neither training data nor queue."""
         return self._joined(
             t.annotation,
             t.annotation.c.label_set_id == label_set_id,
@@ -381,14 +347,10 @@ class Samples:
             return sample_rows(conn, scoped(stmt, collections))
 
     def by_checksum(self, checksum: str, type: str | None = None) -> SampleRow | None:
-        """The live sample with these bytes and this type, or None.
+        """The live sample with these bytes and this type (``text/email``), or None.
 
-        The lookup behind every reference that has to survive a move: a
-        task URL, a manifest entry, a list. ``type`` is ``text/email``.
-        Without it, the one live sample with these bytes, and
-        :class:`AmbiguousSample` if several types hold them: a reference
-        written before types were part of one. See ``docs/adr/0001`` and
-        ``docs/adr/0052``.
+        Without ``type``, the one live sample with these bytes, or :class:`AmbiguousSample`
+        if several types hold them. See ``docs/adr/0001``, ``docs/adr/0052``.
         """
         stmt = select(*SAMPLE_COLUMNS).where(and_(live(), t.sample.c.checksum == checksum))
         if type is not None:
@@ -406,9 +368,7 @@ class Samples:
     def composition(self, collections) -> dict[tuple[str, str], int]:
         """What the samples in these collections are, keyed (media, subtype).
 
-        A project declares both so ``ingest`` can work before anything is
-        catalogued. Afterwards the samples are the truth, and the two can
-        disagree. See ``docs/adr/0010``.
+        See ``docs/adr/0010``.
         """
         stmt = (
             select(t.sample.c.media, t.sample.c.subtype, func.count())

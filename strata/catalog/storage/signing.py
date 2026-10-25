@@ -1,9 +1,5 @@
-"""Signed URLs for blobs, so a browser can fetch one without a header.
-
-The URL is the credential, worth exactly one blob: the signature covers
-the checksum and an expiry, nothing else. Expiries round up to a window so
-the same blob signs to the same URL and stays cacheable. See
-``docs/adr/0013``.
+"""Signed URLs for blobs: the URL is the credential, worth one blob until an expiry
+rounded up to a window. See ``docs/adr/0013``.
 """
 
 import hmac
@@ -18,12 +14,10 @@ from .blobs import blob_path
 #: How much of the digest goes in the URL: 128 bits. docs/adr/0013
 _SIGNATURE_CHARS = 32
 
-#: Thirty days, so a task can sit in a review queue for weeks. ``relink``
-#: re-signs when a queue does outlive it. docs/adr/0013
+#: Thirty days; ``relink`` re-signs a queue that outlives it. docs/adr/0013
 DEFAULT_TTL = 30 * 24 * 3600
 
-#: Expiries round up to this, so the same blob signs identically for
-#: everyone within the window and stays cacheable. docs/adr/0013
+#: Expiries round up to this, so the same blob signs identically within a window. docs/adr/0013
 WINDOW = 3600
 
 
@@ -32,13 +26,9 @@ class SigningError(Exception):
 
 
 def window_expiry(ttl: int = DEFAULT_TTL, now: float | None = None) -> int:
-    """The expiry a signature made now should carry.
+    """The expiry a signature made now carries: ``now + ttl`` rounded up to a window boundary.
 
-    ``now + ttl`` rounded up to a window boundary, so two signings that land
-    in the same window produce the same expiry and therefore the same URL.
-    Always at least ``ttl`` away, never more than ``ttl + WINDOW``. Two
-    signings either side of a boundary differ, and the browser fetches once
-    more. See ``docs/adr/0013``.
+    See ``docs/adr/0013``.
     """
     now = time.time() if now is None else now
     return int(-(-(now + ttl) // WINDOW) * WINDOW)
@@ -61,11 +51,10 @@ def verify(
 ) -> None:
     """Raise unless ``signature`` authorises ``checksum`` and is still live.
 
-    The signature is checked before the expiry. See ``docs/adr/0013``.
+    See ``docs/adr/0013``.
     """
     expected = sign(checksum, secret, expires)
-    # Constant time, or the comparison leaks the signature a character at a
-    # time to anyone able to measure it
+    # Constant time, or the comparison leaks the signature to anyone who can time it
     if not hmac.compare_digest(expected, signature):
         raise SigningError("Signature does not authorise this blob.")
     now = time.time() if now is None else now
@@ -82,8 +71,7 @@ def suffix_of(sample) -> str:
 class SignedUrls:
     """The URLs a catalog's blob server answers, written and read by one object.
 
-    The catalog issues the URL its server verifies, so the secret never
-    leaves the package. See ``docs/adr/0013``.
+    See ``docs/adr/0013``.
     """
 
     #: The serving API, e.g. ``http://minipc:8081``.

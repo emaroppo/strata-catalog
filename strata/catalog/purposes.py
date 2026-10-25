@@ -1,11 +1,7 @@
 """What a sample is for, beside what it is made of: the rules the catalog checks.
 
-A type that is :class:`GeneratedMedia` arrives only through a generate run,
-and a generate run writes only such types; any other way in is refused. A
-type that is an :class:`SFTExample` carries its input in its metadata, and
-a freeze over it compares that input across a sample's origins. Stored
-samples name their type as media and subtype, so these read the class
-back from what is installed. See ``docs/adr/0053``.
+Generated media arrives only through a generate run; a fine-tuning example
+carries its input. See ``docs/adr/0053``.
 """
 
 from typing import TypeGuard
@@ -66,9 +62,8 @@ def refuse_stored_generated(media: str, subtype: str, how: str) -> None:
 def example_type(media: str, subtype: str) -> type[SFTExample] | None:
     """The fine-tuning type a sample stored as ``media/subtype`` is, or None.
 
-    A type not installed here, below one that is a fine-tuning type, is
-    refused: its own ``input_of`` may compare inputs otherwise, and a
-    freeze cannot guess.
+    A type not installed here, below one that is, is refused: its ``input_of`` is its own. See
+    ``docs/adr/0053``.
     """
     cls = installed(media, subtype)
     if cls is not None:

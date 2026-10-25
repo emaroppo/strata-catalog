@@ -1,10 +1,5 @@
-"""Taking a prepared corpus in: its index read, checked against its type, taken whole or refused.
-
-The index is the only way in. A file under the root that it does not name
-is counted, not ingested; a file it names that falls short of the declared
-type refuses the corpus, with every shortfall listed, before anything is
-written. What comes out is exactly what ``Catalog.ingest`` records. See
-``docs/adr/0036`` and ``docs/adr/0040``.
+"""Taking a prepared corpus in: its index read, checked against its type, taken whole
+or refused before anything is written. See ``docs/adr/0036``, ``docs/adr/0040``.
 """
 
 from dataclasses import dataclass, field
@@ -42,15 +37,11 @@ class IntakeError(CatalogError):
 class Admission:
     """A corpus as it will be recorded, every file checked."""
 
-    #: Each file to ingest and the metadata to record on it: what its type
-    #: required, what the preparer knew, and ``source_path``, where in the
-    #: corpus it sat. In the index's order.
+    #: Each file to ingest and the metadata recorded on it, in the index's order.
     entries: dict[Path, dict] = field(default_factory=dict)
-    #: The candidate annotations the corpus arrived with, by file.
-    #: docs/adr/0028
+    #: The candidate annotations the corpus arrived with, by file. docs/adr/0028
     values: dict[Path, AnyValue] = field(default_factory=dict)
-    #: Files under the root the index does not name. Not ingested, and
-    #: counted so that a corpus smaller than its directory says so.
+    #: Files under the root the index does not name: counted, not ingested. docs/adr/0036
     unindexed: int = 0
     produced_by: str = ""
 
@@ -58,9 +49,7 @@ class Admission:
 def read_index(root: Path) -> PreparedIndex:
     """The index at ``root``, or the reason there is none a catalog can take.
 
-    Strict where it used to be forgiving: the index is what is ingested now,
-    so a missing or corrupt one is a corpus that cannot be. See
-    ``docs/adr/0040``.
+    See ``docs/adr/0040``.
     """
     path = Path(root) / PREPARED_NAME
     if not path.is_file():
@@ -87,8 +76,7 @@ def admit(root: Path, sample_type: SampleType, type_name: str) -> Admission:
     """
     root = Path(root)
     if is_generated(type(sample_type)):
-        # A model's output says what made it, and a corpus cannot.
-        # docs/adr/0053
+        # A model's output says what made it, and a corpus cannot. docs/adr/0053
         raise IntakeError(
             f"{type_name!r} is generated media, which arrives only through a generate "
             f"run, with a record of what made it. A prepared corpus cannot be one; "
@@ -103,9 +91,7 @@ def admit(root: Path, sample_type: SampleType, type_name: str) -> Admission:
     checked = check(index, sample_type, type_name, present)
     violations = list(checked.violations)
 
-    # A candidate annotation addresses the bytes the preparer wrote. Where
-    # the catalog would store other bytes, its offsets would point at other
-    # characters, so it is refused rather than landed wrong. docs/adr/0040
+    # A candidate annotation addresses the preparer's bytes, so others are refused. docs/adr/0040
     form = canonical_form(type(sample_type))
     if form is not None:
         for key in checked.entries:

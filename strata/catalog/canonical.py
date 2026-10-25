@@ -1,16 +1,7 @@
 """The one form a catalog stores a sample's bytes in.
 
-Canonical form is the catalog's: it decides what a checksum addresses, so
-two files that read identically are one sample. It is semantically null and
-idempotent, and normalisation does not belong here. Each media has a
-default, of which only text's is not the identity; a plugin type that needs
-its own registers one under the ``strata.canonical_forms`` entry point
-group by the type's name, and a type without one takes the nearest
-ancestor's, then its media's.
-
-A preparer that ships annotations against a file's characters writes the
-file in this form already, and a catalog refuses a candidate annotation on
-bytes this would change. See ``docs/adr/0010`` and ``docs/adr/0040``.
+A plugin registers a form under ``strata.canonical_forms`` by type name; a type without one takes
+its nearest ancestor's, then its media's. See ``docs/adr/0010``, ``docs/adr/0040``.
 """
 
 import unicodedata
@@ -18,6 +9,7 @@ from collections.abc import Callable
 from importlib.metadata import entry_points
 from typing import cast
 
+from strata.common import plugins
 from strata.contracts import SampleType
 from strata.contracts import sample_types as registry
 
@@ -32,11 +24,7 @@ class CanonicalError(Exception):
 
 
 def text(data: bytes) -> bytes:
-    """UTF-8, no BOM, LF endings, NFC. Encoding is refused, not guessed.
-
-    Converting an encoding is a preparer's job, since only it knows what the
-    corpus is. See ``docs/adr/0010``.
-    """
+    """UTF-8, no BOM, LF endings, NFC. Encoding is refused, not guessed. See ``docs/adr/0010``."""
     if data.startswith(b"\xef\xbb\xbf"):
         data = data[3:]
     try:
@@ -53,8 +41,7 @@ def text(data: bytes) -> bytes:
     return unicodedata.normalize("NFC", decoded).encode("utf-8")
 
 
-#: Each media's default. A media absent here stores its bytes untouched, and
-#: ingest reads no file for it: a corpus of images is hardlinked.
+#: Each media's default; a media absent here stores its bytes untouched, unread.
 BY_MEDIA: dict[str, Canonicalise] = {"text": text}
 
 
@@ -66,16 +53,18 @@ def entries():
 def canonical_form(sample_type: type[SampleType]) -> Canonicalise | None:
     """How a type's bytes are stored, or None where they are stored as they are.
 
-    The form registered for the nearest class in the type's chain, else its
-    media's default.
+    The nearest registered form in the type's chain, else its media's default;
+    a name registered twice is refused. See ``docs/adr/0033``.
     """
-    registered = {entry.name: entry for entry in entries()}
-    if registered:
+    installed = entries()
+    if installed:
+        registered = {entry.name for entry in installed}
         for klass in sample_type.__mro__:
             if not (isinstance(klass, type) and issubclass(klass, SampleType)):
                 continue
             for name in _names_of(klass, registered):
-                form = registered[name].load()
+                entry = plugins.find(installed, name, what="canonical form", error=CanonicalError)
+                form = entry.load()
                 if not callable(form):
                     raise CanonicalError(
                         f"The canonical form registered for {name!r} is {form!r}, "
@@ -85,16 +74,15 @@ def canonical_form(sample_type: type[SampleType]) -> Canonicalise | None:
     return BY_MEDIA.get(sample_type.media)
 
 
-def _names_of(klass: type[SampleType], registered: dict) -> list[str]:
+def _names_of(klass: type[SampleType], registered: set[str]) -> list[str]:
     """The registered type names that resolve to ``klass`` and have a form."""
     names = []
-    for name in sorted(set(registered) & set(registry.available())):
+    for name in sorted(registered & set(registry.available())):
         try:
             if registry.resolve(name) is klass:
                 names.append(name)
         except registry.SampleTypeError:
-            # A type that does not resolve is refused where it is named;
-            # here it simply has no form to offer.
+            # Refused where it is named; here it simply has no form to offer
             continue
     return names
 

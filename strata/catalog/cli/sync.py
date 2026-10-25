@@ -1,13 +1,14 @@
 """Commands for work away from the index: copy it out, merge answers back."""
 
+from ..admin.where import redacted
+from ..catalog import Catalog
+from ..config import blobs_for
+from ..sync.copy import copy_index
+from ..sync.merge import merge_annotations
 from ._shared import _emit, _open, _ticker
 
 
 def _copy(args) -> int:
-    from ..catalog import Catalog
-    from ..config import blobs_for
-    from ..sync.copy import copy_index
-
     source, config = _open(args)
     # Only the index moves. docs/adr/0002
     target = Catalog.create(args.to, blobs_for(config))
@@ -25,10 +26,6 @@ def _copy(args) -> int:
 
 
 def _merge(args) -> int:
-    from ..catalog import Catalog
-    from ..config import blobs_for
-    from ..sync.merge import merge_annotations
-
     target, config = _open(args)
     # A copy is the same corpus, reading the same bytes. docs/adr/0008
     source = Catalog.connect(args.source, blobs_for(config))
@@ -53,7 +50,7 @@ def _merge(args) -> int:
 
     def render(_):
         if not report.total and not report.unknown_label_sets:
-            yield f"Nothing to merge from {args.source}."
+            yield f"Nothing to merge from {redacted(args.source)}."
             return
         for line in report.lines():
             yield f"  {line}"

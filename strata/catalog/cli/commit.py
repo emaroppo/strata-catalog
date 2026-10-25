@@ -1,7 +1,6 @@
-"""Committing a derive or generate run made outside the catalog. See ``docs/adr/0053``.
+"""Committing a derive or generate run made outside the catalog, from its directory.
 
-The directory holds ``run.json``, ``outputs.jsonl`` and the output files;
-:mod:`strata.catalog.commit_run` describes them.
+See ``docs/adr/0053``.
 """
 
 from dataclasses import asdict

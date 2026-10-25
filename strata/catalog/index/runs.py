@@ -1,13 +1,7 @@
 """Runs: whatever wrote to the catalog, beside what it wrote.
 
-An ingest, a prepare, a derive, a generate, an import, a judge or a
-backfill. A run is opened and closed inside the transaction that writes
-its rows, so a run that failed leaves nothing behind, and one that wrote
-nothing new is still recorded with its counts. Training runs are modelling's (record 0005);
-these are the catalog's. See ``docs/adr/0045``.
-
-A derive and a generate run are made outside the catalog and committed to
-it with their lineage declared. See ``docs/adr/0053``.
+A run is opened and closed inside the transaction that writes its rows; a derive
+or generate run is committed with its lineage. See ``docs/adr/0045``, ``docs/adr/0053``.
 """
 
 import hashlib
@@ -27,10 +21,9 @@ KINDS = (INGEST, PREPARE, DERIVE, GENERATE, IMPORT, JUDGE, BACKFILL)
 
 
 def host_token(name: str | None = None) -> str:
-    """A hostname reduced to something safe to put in an identifier.
+    """A hostname reduced to something safe in an identifier, as modelling's run ids do.
 
-    The same reduction modelling's run ids use, so the two stores mint ids
-    of one shape. docs/adr/0045
+    See ``docs/adr/0045``.
     """
     raw = (name or socket.gethostname()).split(".")[0].lower()
     cleaned = "".join(c if c.isalnum() else "-" for c in raw).strip("-")

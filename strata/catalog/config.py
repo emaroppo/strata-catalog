@@ -1,14 +1,7 @@
-"""Which catalog a host uses, and opening it.
+"""Which catalog a host uses, and opening it: the file says where, the environment holds secrets,
+and ``[catalog.<name>]`` tables layer on the flat ``[catalog]``.
 
-Every process that touches a catalog reads the same file through this
-module. The file says where; the environment holds secrets: ``$PGPASSWORD``
-for the index, ``$STRATA_S3_ACCESS_KEY`` and ``$STRATA_S3_SECRET_KEY`` for
-the bucket, ``$STRATA_BLOB_SECRET`` for signed URLs. A named catalog reads
-its own first, ``$STRATA_BLOB_SECRET_ALT`` for ``[catalog.alt]``.
-See ``docs/adr/0019``.
-
-Several catalogs can be described, as ``[catalog.<name>]`` tables layered on
-the flat ``[catalog]`` keys, and one of them is the host's default.
+See ``docs/adr/0019``, ``docs/adr/0020``.
 """
 
 import os
@@ -22,21 +15,20 @@ from typing import cast
 from .catalog import Catalog
 from .rows import CatalogError, CatalogMissing
 from .storage.blobs import BlobBackend, LocalBackend
+from .storage.s3 import ObjectStore, S3Backend
+from .storage.signing import SignedUrls
 
 #: The name a host's single catalog goes by when the file names none.
 DEFAULT_CATALOG = "default"
 
-#: Credentials, by the environment variable that supplies each. Never read
-#: from the file. A named catalog reads the variable suffixed with its name
-#: first, so two catalogs on one host hold two keys. See docs/adr/0019.
+#: Credentials, by variable; a named catalog reads its suffixed variable first. docs/adr/0019
 _SECRETS = {
     "s3_access_key": "STRATA_S3_ACCESS_KEY",
     "s3_secret_key": "STRATA_S3_SECRET_KEY",
     "blob_secret": "STRATA_BLOB_SECRET",
 }
 
-#: Keys refused under ``[catalog]``, and what to do instead. They would be
-#: refused anyway as unknown; these only make the refusal useful.
+#: Keys refused under ``[catalog]``, with what to do instead.
 _MOVED = {
     key: f"It is a credential, and comes from ${variable}_<NAME> or ${variable} only."
     for key, variable in _SECRETS.items()
@@ -51,45 +43,34 @@ class CatalogConfigError(CatalogError):
 class CatalogConfig:
     """Where one catalog is."""
 
-    #: The local catalog directory: the SQLite index when ``url`` is empty,
-    #: and the blobs when ``s3_endpoint`` is.
+    #: The local directory: the SQLite index without ``url``, the blobs without ``s3_endpoint``.
     root: str = "catalog"
-    #: The index. Empty means SQLite under ``root``. A Postgres URL, written
-    #: without its password, points several machines at one index. See
-    #: docs/adr/0021.
+    #: The index; empty means SQLite under ``root``. docs/adr/0021
     url: str = ""
-    #: Where the blobs are. Empty means files under ``root``; an endpoint
-    #: means tar shards in an S3-compatible bucket. See docs/adr/0002.
+    #: Files under ``root``, or tar shards in a bucket once an endpoint is set. docs/adr/0002
     s3_endpoint: str = ""
     s3_bucket: str = "strata"
     #: Garage and MinIO ignore it, but boto3 insists on one being set.
     s3_region: str = "garage"
-    #: The catalog's blob server, e.g. ``http://minipc:8081``. Empty means
-    #: Label Studio reads files off a mount instead.
+    #: The catalog's blob server; empty means Label Studio reads files off a mount instead.
     serve_url: str = ""
-    #: What this catalog's blob directory is called inside the Label Studio
-    #: container, for tasks that read files off that mount — and to read
-    #: back tasks made that way, whose URLs keep the name after a blob
-    #: server takes over. Per catalog: two catalogs are two mounts.
+    #: This catalog's blob directory inside the Label Studio container; two catalogs are two mounts.
     blobs_prefix: str = "blobs"
 
     # Credentials, filled from the environment. Out of repr. docs/adr/0019
     s3_access_key: str = field(default="", repr=False)
     s3_secret_key: str = field(default="", repr=False)
-    #: Signs blob URLs, and must match what the blob server was started
-    #: with. An image tag cannot carry a header, so the URL is the credential.
+    #: Signs blob URLs; must match what the blob server was started with. docs/adr/0013
     blob_secret: str = field(default="", repr=False)
 
     def signed_urls(self):
-        """How this catalog's server addresses a sample, or None without a server.
-
-        The one way to get a signed URL: the secret is read here and goes
+        """How this catalog's server addresses a sample, or None without a server; the secret goes
         nowhere else.
+
+        See ``docs/adr/0013``.
         """
         if not self.serve_url:
             return None
-        from .storage.signing import SignedUrls
-
         return SignedUrls(base_url=self.serve_url, secret=self.blob_secret)
 
 
@@ -99,11 +80,9 @@ class Catalogs:
 
     #: The one used when nothing names another.
     default: CatalogConfig = field(default_factory=CatalogConfig)
-    #: From ``[catalog.<name>]`` tables. Empty on a host with a flat
-    #: ``[catalog]`` only.
+    #: From ``[catalog.<name>]`` tables; empty on a host with a flat ``[catalog]`` only.
     by_name: dict[str, CatalogConfig] = field(default_factory=dict)
-    #: Which name :attr:`default` resolved to. Empty when several are
-    #: described and none is marked default — see :meth:`named`.
+    #: Which name :attr:`default` resolved to; empty when several are described and none is marked.
     default_name: str = DEFAULT_CATALOG
 
     def names(self) -> list[str]:
@@ -112,10 +91,7 @@ class Catalogs:
     def named(self, name: str = "") -> CatalogConfig:
         """One catalog by name, or the default when nothing is named.
 
-        A name that does not exist is refused with the list of the ones
-        that do; nothing falls back to the default. Asking for "the default"
-        where several exist and none is marked is refused here, at the point
-        of the ambiguity. See ``docs/adr/0020``.
+        An unknown name, or an unmarked default among several, is refused. See ``docs/adr/0020``.
         """
         if not name:
             if not self.default_name and self.by_name:
@@ -155,10 +131,7 @@ def settings_path(given: Path | None = None, environ: Mapping[str, str] | None =
     """The host file a command reads: what it was given, else what ``$STRATA_CONFIG``
     names, else ``./config.toml``.
 
-    The variable is the one a service reads, so a host states its file
-    once and a project directory needs no copy. A variable naming a file
-    that does not exist is refused rather than defaulted, as it is for a
-    service. See ``docs/adr/0019``.
+    A variable naming a missing file is refused, not defaulted. See ``docs/adr/0019``.
     """
     if given is not None:
         return given
@@ -175,10 +148,7 @@ def settings_path(given: Path | None = None, environ: Mapping[str, str] | None =
 def host_catalog(environ: Mapping[str, str] | None = None) -> tuple[str, CatalogConfig]:
     """The catalog a service on this host uses, and the name it goes by.
 
-    The blob server and the modelling host read the same ``[catalog]``
-    tables the CLI does, from the file ``$STRATA_CONFIG`` names. The file's
-    default is the one served. Unlike the CLI, a missing file is an error
-    rather than a default catalog. See ``docs/adr/0019``.
+    Unlike the CLI, a missing file is an error rather than a default catalog. See ``docs/adr/0019``.
     """
     environ = os.environ if environ is None else environ
     value = environ.get(CONFIG_ENV, "")
@@ -195,15 +165,10 @@ def host_catalog(environ: Mapping[str, str] | None = None) -> tuple[str, Catalog
 
 
 def read_catalogs(section: dict, environ: Mapping[str, str] | None = None) -> Catalogs:
-    """A flat ``[catalog]``, or ``[catalog.<name>]`` tables, or both.
+    """A flat ``[catalog]``, or ``[catalog.<name>]`` tables layered on it, or both.
 
-    Flat keys are shared by every named table, which layers on top of them.
-    A file with no named tables is the single-catalog case. See
+    Credentials come from ``environ``, each named catalog taking its own first. See
     ``docs/adr/0019``.
-
-    Credentials come from ``environ``, the process environment unless
-    given. Each named catalog takes its own where one is set, and the
-    unsuffixed one otherwise. See :func:`secret_variables`.
     """
     environ = os.environ if environ is None else environ
     scalars = {k: v for k, v in section.items() if not isinstance(v, dict)}
@@ -233,25 +198,20 @@ def read_catalogs(section: dict, environ: Mapping[str, str] | None = None) -> Ca
     if len(by_name) == 1:
         [(name, only)] = by_name.items()
         return Catalogs(default=only, by_name=by_name, default_name=name)
-    # Left unresolved rather than guessed, and not an error yet: a project
-    # or --catalog naming one settles it. docs/adr/0020
+    # Unresolved rather than guessed; a project or --catalog settles it. docs/adr/0020
     return Catalogs(default=base, by_name=by_name, default_name="")
 
 
 def blobs_for(config: CatalogConfig, local: Path | None = None) -> BlobBackend:
-    """Where a catalog's bytes are read and written.
-
-    Files under the catalog root when no endpoint is set, or under ``local``
-    for a process told exactly where they are. An endpoint means tar shards
-    in a bucket.
+    """Where a catalog's bytes are read and written: files under the root (or ``local``)
+    without an endpoint, tar shards in a bucket with one.
     """
     if not config.s3_endpoint:
         return LocalBackend(Path(local) if local is not None else Path(config.root) / "blobs")
 
+    # The s3 extra; a catalog on local files never loads it
     import boto3
     from botocore.config import Config
-
-    from .storage.s3 import ObjectStore, S3Backend
 
     client = boto3.client(
         "s3",
@@ -259,8 +219,7 @@ def blobs_for(config: CatalogConfig, local: Path | None = None) -> BlobBackend:
         aws_access_key_id=config.s3_access_key or None,
         aws_secret_access_key=config.s3_secret_key or None,
         region_name=config.s3_region,
-        # Anything that is not AWS serves buckets as a path rather than as a
-        # subdomain, and the default guesses the other way
+        # Anything that is not AWS serves buckets as a path, and the default guesses the other way
         config=Config(s3={"addressing_style": "path"}),
     )
     # boto3's client is untyped; the protocol is the slice this package uses
@@ -270,9 +229,8 @@ def blobs_for(config: CatalogConfig, local: Path | None = None) -> BlobBackend:
 def open_catalog(config: CatalogConfig, *, create: bool = False) -> Catalog:
     """The catalog a config describes: opened, or with ``create`` made if absent.
 
-    Opening never creates. An index with no catalog in it is
-    :class:`CatalogMissing`. The commands that put data in pass ``create``.
-    See ``docs/adr/0018``.
+    Opening never creates; an index with no catalog in it is :class:`CatalogMissing`. See
+    ``docs/adr/0018``.
     """
     blobs = blobs_for(config)
     if config.url:
@@ -291,13 +249,8 @@ def open_catalog(config: CatalogConfig, *, create: bool = False) -> Catalog:
 
 
 def secret_variables(variable: str, name: str) -> tuple[str, ...]:
-    """Where a catalog's credential is looked for, in order.
-
-    ``$STRATA_BLOB_SECRET_ALT`` for ``[catalog.alt]``, then the
-    unsuffixed variable, the way modelling hosts name their tokens. A catalog
-    whose own is unset takes the shared one, and a server it does not belong
-    to refuses it. The flat ``[catalog]`` has no name and reads only the
-    shared one. See ``docs/adr/0019``.
+    """Where a catalog's credential is looked for, in order: ``$STRATA_BLOB_SECRET_ALT`` for
+    ``[catalog.alt]``, then the unsuffixed variable. See ``docs/adr/0019``.
     """
     if not name:
         return (variable,)

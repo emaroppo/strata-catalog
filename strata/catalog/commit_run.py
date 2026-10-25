@@ -1,31 +1,10 @@
 """Committing a run made outside the catalog: a derive or a generate, with its lineage declared.
 
-A derive run makes samples from samples the catalog holds, where the
-catalog cannot run it: masking a message reads predictions and asks an
-LLM, on a GPU host. A generate run commits a model's outputs. Either is
-made elsewhere and handed over whole: its outputs, each output's origins
-and, for a generate run, what made it. The catalog checks everything
-before it writes anything, then writes the run, the blobs and the rows in
-one transaction, so a refusal leaves nothing. See ``docs/adr/0053``.
+Everything is checked before anything is written, then the run, blobs and rows go
+in one transaction. See ``docs/adr/0049``, ``docs/adr/0052``, ``docs/adr/0053``.
 
-What is checked:
-
-- the output type is generated media for a generate run, and is not for a
-  derive run (record 0053);
-- every input sample exists, named by checksum and type (record 0052),
-  and so does every sample a prompt value was copied from;
-- the output type's ``Metadata`` holds for each origin's facts with the
-  bytes' own (record 0049);
-- a derive output names at least one input, and no role; a generate
-  output has a generation record, whose template, system prompt and
-  settings digests are of what the run's spec holds in full.
-
-The run records its producer and code identity, its spec, canonical, and
-its hash, the distinct input checksums, and its counts, including what
-the producer left out and why (records 0036 and 0045).
-
-**The directory** a command commits holds ``run.json``, ``outputs.jsonl``
-and the output files::
+The directory a command commits holds ``run.json``, ``outputs.jsonl`` and the
+output files::
 
     run.json        {"kind": "derive" | "generate",
                      "type": "phishnet-sft",          # a registered sample type
@@ -49,10 +28,9 @@ and the output files::
                                           "field": "subject"}],
                          "seed": 7}}
 
-A generate run's spec holds ``template`` and ``system_prompt``, each a
-string or a list of them, and ``settings``, an object or a list of every
-variant. A digest is the sha256 of the canonical JSON of one of them, as
-modelling digests settings, so each sample says which variant made it.
+A generate run's spec holds ``template`` and ``system_prompt``, each a string or a
+list, and ``settings``, an object or a list; a digest is the sha256 of the canonical
+JSON of one variant.
 """
 
 import hashlib
@@ -95,8 +73,7 @@ class InputSample(_Strict):
     checksum: str = Field(pattern=r"^[0-9a-f]{64}$")
     #: ``text/email``: with the checksum, which sample. docs/adr/0052
     type: str
-    #: The part of a generation it filled, and which one, where several
-    #: fill a part in order. A derive run's inputs have no parts.
+    #: The part of a generation it filled, and its position; a derive input has none.
     role: str | None = Field(default=None, min_length=1, max_length=64)
     position: int | None = Field(default=None, ge=0)
     metadata: dict[str, Any] = Field(default_factory=dict)
@@ -179,9 +156,6 @@ class _Checked:
     #: Each origin's input, and the facts this occurrence recorded.
     origins: list[tuple[InputSample, dict]]
     generation: Generation | None
-
-
-# ----------------------------------------------------------------------
 
 
 def read_directory(root: Path) -> tuple[RunFile, list[Output]]:
@@ -328,8 +302,7 @@ def commit(
         for output in checked:
             sample_id = catalog.samples.find(conn, output.checksum, media=media, subtype=subtype)
             if sample_id is None:
-                # Bytes held as another type are a new sample of this one,
-                # over the same blob. docs/adr/0052
+                # Bytes held as another type: a new sample over the same blob. docs/adr/0052
                 location = stored.get(output.checksum) or catalog.raw.stored(
                     conn, [output.checksum]
                 ).get(output.checksum)
@@ -363,8 +336,7 @@ def commit(
                 )
                 origins += 1
             if output.generation is not None:
-                # One record per generation: the same bytes from two
-                # prompts are one sample with two
+                # One record per generation: the same bytes from two prompts have two
                 row = output.generation.row()
                 key = (sample_id, canonical_json(row))
                 if key not in written:
@@ -385,21 +357,16 @@ def commit(
             "inputs": len(inputs),
             "origins": origins,
             "generations": generations,
-            # Under the producer's own names: what it made nothing from,
-            # and why. docs/adr/0036
+            # Under the producer's own names. docs/adr/0036
             "left_out": dict(sorted(left_out.items())),
         }
         catalog.runs.finish(conn, run_id, counts)
-        # Before the commit: rows naming a shard that failed to upload
-        # would be worse than no rows. docs/adr/0002
+        # Before the commit, or rows could name a shard that never uploaded. docs/adr/0002
         catalog.blobs.flush()
 
     return CommitReport(
         run_id=run_id, kind=kind, sample_type=sample_type, collections=targets, counts=counts
     )
-
-
-# ----------------------------------------------------------------------
 
 
 def _digests(spec: dict) -> dict[str, set[str]]:
@@ -445,8 +412,7 @@ def _check(
         found += _check_origins(kind, output.origins)
         found += _check_generation(kind, output.generation, allowed)
 
-        # Each origin's facts with the bytes' own: the contract holds for
-        # every occurrence. docs/adr/0049
+        # Each origin's facts with the bytes' own: the contract holds per occurrence. docs/adr/0049
         origins: list[tuple[InputSample, dict]] = []
         for given in output.origins:
             try:

@@ -145,6 +145,7 @@ def test_probe_notices_a_store_that_does_not_hold_the_samples(stocked, config, c
 def test_probe_on_an_empty_catalog_falls_back_to_a_round_trip(tmp_path, capsys):
     config = tmp_path / "config.toml"
     config.write_text(f'[catalog]\nroot = "{tmp_path / "fresh"}"\n')
+    Catalog.local(tmp_path / "fresh")
 
     code, out = run(capsys, "--config", str(config), "--json", "probe")
     record = json.loads(out)
@@ -152,6 +153,22 @@ def test_probe_on_an_empty_catalog_falls_back_to_a_round_trip(tmp_path, capsys):
     assert record["index"]["samples"] == 0
     assert record["blobs"]["ok"] and record["blobs"]["bytes"] == 16384
     assert record["blobs"]["sample"] is None and "no samples" in record["blobs"]["note"]
+
+
+def test_probe_reports_a_catalog_that_is_not_there_and_makes_none(tmp_path, capsys):
+    # A command that only looks must not leave an empty catalog behind. docs/adr/0018
+    root = tmp_path / "nowhere"
+    config = tmp_path / "config.toml"
+    config.write_text(f'[catalog]\nroot = "{root}"\n')
+
+    code, out = run(capsys, "--config", str(config), "--json", "probe")
+    record = json.loads(out)
+    assert code == 1
+    assert not record["index"]["reachable"] and "No catalog at" in record["index"]["error"]
+    assert record["blobs"] is None
+    assert not (root / "catalog.db").exists() and not root.exists()
+    code, out = run(capsys, "--config", str(config), "probe")
+    assert "unreachable — No catalog at" in out
 
 
 def test_remove_tombstones_what_a_selection_names(stocked, config, capsys):

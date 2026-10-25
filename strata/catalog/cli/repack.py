@@ -2,14 +2,14 @@
 
 from pathlib import Path
 
+from ..config import blobs_for
+from ..storage.blobs import LocalBackend
+from ..storage.repack import repack_blobs
+from ..storage.s3 import S3Backend
 from ._shared import Refused, _config, _emit, _open, _ticker
 
 
 def _repack(args) -> int:
-    from ..config import blobs_for
-    from ..storage.blobs import LocalBackend
-    from ..storage.repack import repack_blobs
-
     config = _config(args)
     if not config.s3_endpoint:
         raise Refused(
@@ -20,16 +20,12 @@ def _repack(args) -> int:
             "is nowhere to put them otherwise."
         )
     catalog, _ = _open(args)
-    # This catalog's bucket, not the host default's: with --catalog naming
-    # another, the default's would pack one corpus into someone else's.
-    from ..storage.s3 import S3Backend
-
+    # This catalog's bucket, not the host default's. docs/adr/0020
     target = blobs_for(config)
     if not isinstance(target, S3Backend):
         raise Refused("Repacking needs [catalog] s3_endpoint: shards go to a bucket.")
     target.shard_bytes = args.shard_mb * 1024 * 1024
-    # Explicitly the local one: blobs_for answers with the bucket once an
-    # endpoint is set, and that is the destination, not the source.
+    # blobs_for answers with the bucket once an endpoint is set; the source is the local one.
     source = LocalBackend(Path(config.root) / "blobs")
     show = _ticker("packing")
     report = repack_blobs(

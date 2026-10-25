@@ -1,13 +1,10 @@
 """Commands that look: what is configured and installed, what a catalog holds, if it answers."""
 
+from ..admin import catalogs, probe, stats, types, where_index
 from ._shared import _catalogs, _config, _emit, _open
-
-# ----------------------------------------------------------------------
 
 
 def _list(args) -> int:
-    from ..admin import catalogs
-
     entries = catalogs(_catalogs(args))
 
     def render(entries):
@@ -23,8 +20,6 @@ def _list(args) -> int:
 
 
 def _types(args) -> int:
-    from ..admin import types
-
     def render(entries):
         for e in entries:
             files = ", ".join(f".{x}" for x in e.extensions) or "-"
@@ -42,8 +37,6 @@ def _types(args) -> int:
 
 
 def _stats(args) -> int:
-    from ..admin import stats, where_index
-
     catalog, config = _open(args)
     record = stats(catalog, where_index(config))
 
@@ -70,8 +63,6 @@ def _stats(args) -> int:
 
 
 def _probe(args) -> int:
-    from ..admin import probe
-
     record = probe(_config(args))
 
     def render(p):

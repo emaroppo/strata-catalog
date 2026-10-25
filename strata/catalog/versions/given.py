@@ -1,20 +1,7 @@
-"""A split the corpus arrived with, read off a metadata key or named by lists.
+"""A split the corpus arrived with, read off a metadata key or named by lists; given sides are fixed
+before anything is drawn.
 
-The division is recorded once, at ingest, as a metadata key on each
-sample; this says which of that key's values are holdout and which are
-validation. Everything else is drawn by ratio as usual. Given sides are
-fixed before anything is drawn, and win over grouping: a group they cut is
-reproduced, not corrected, and counted. See ``docs/adr/0024``.
-
-A split that arrives after ingest, such as another catalog's version
-carried over, has no key on the samples to read. Lists say it instead:
-each list, by ``name@version``, puts its members on a side. A list is
-fixed once stored, so the version means what it meant when frozen. See
-``docs/adr/0051``.
-
-Samples with the same bytes take one side, whichever of them the key or a
-list names, and a split that names two sides for them is refused. See
-``docs/adr/0052``.
+See ``docs/adr/0024``, ``docs/adr/0051``, ``docs/adr/0052``.
 """
 
 from collections.abc import Mapping
@@ -26,9 +13,8 @@ from .split import HOLDOUT, VAL
 
 
 class GivenSplit(BaseModel):
-    """Which samples are held out, and which are validation.
-
-    By a metadata key's values, by lists of checksums, or both.
+    """Which samples are held out and which are validation, by a metadata key's values, by lists, or
+    both.
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
@@ -78,7 +64,7 @@ class GivenSplit(BaseModel):
         return [*self.holdout_lists, *self.val_lists]
 
     def record(self) -> dict:
-        """As a version stores it. A split by key alone is stored as it always was."""
+        """As a version stores it."""
         recorded: dict = {}
         if self.key:
             recorded |= {"key": self.key, "holdout": self.holdout, "val": self.val}
@@ -96,10 +82,8 @@ class GivenSplit(BaseModel):
     ) -> dict[int, str]:
         """The side of every sample the key or a list puts on one.
 
-        ``samples`` maps each sample id to its checksum and type, and
-        ``lists`` each of :attr:`refs` to its members; lists need both.
-        With ``samples``, a side reaches every sample with the same bytes.
-        A sample put on two sides is refused, and so are the same bytes.
+        ``samples`` maps each id to its checksum and type and ``lists`` each of
+        :attr:`refs` to its members; a sample, or its bytes, put on two sides is refused.
         """
         sides: dict[int, str] = {}
         if self.key:
@@ -114,8 +98,7 @@ class GivenSplit(BaseModel):
                     sides[sample_id] = VAL
         samples, lists = samples or {}, lists or {}
         if self.refs:
-            # By bytes, whatever the lists' types: the same bytes on two
-            # sides is a leak. docs/adr/0052
+            # By bytes, whatever the lists' types: one checksum on two sides leaks. docs/adr/0052
             listed: dict[str, str] = {}
             for side, refs in ((HOLDOUT, self.holdout_lists), (VAL, self.val_lists)):
                 for ref in refs:
@@ -142,10 +125,10 @@ class GivenSplit(BaseModel):
 
 
 def _by_bytes(sides: dict[int, str], samples: Mapping[int, tuple[str, str]]) -> dict[int, str]:
-    """``sides`` reaching every sample with the bytes of one it names, or refused.
+    """``sides`` reaching every sample with the bytes of one it names, or refused where two sides
+    meet.
 
-    Two types over one checksum are two samples, and one side. See
-    ``docs/adr/0052``.
+    See ``docs/adr/0052``.
     """
     held: dict[str, str] = {}
     torn: set[str] = set()

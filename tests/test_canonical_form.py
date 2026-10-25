@@ -9,6 +9,7 @@ offsets that come back address characters that are not there.
 
 import hashlib
 import re
+from types import SimpleNamespace
 
 import pytest
 
@@ -41,8 +42,9 @@ def test_a_subtype_takes_its_media_s_form():
 class _Entry:
     """An entry point, as far as ``canonical_form`` reads one."""
 
-    def __init__(self, name, target):
+    def __init__(self, name, target, dist="?"):
         self.name, self.target = name, target
+        self.dist = SimpleNamespace(name=dist)
 
     def load(self):
         return self.target
@@ -61,6 +63,18 @@ def test_a_plugin_type_can_register_its_own(monkeypatch):
 def test_a_registered_form_that_is_not_a_function_is_refused(monkeypatch):
     monkeypatch.setattr(forms, "entries", lambda: [_Entry("text", "not callable")])
     with pytest.raises(CanonicalError, match="not a function"):
+        canonical_form(Text)
+
+
+def test_a_name_registered_twice_is_refused_naming_both(monkeypatch):
+    # Two plugins claiming one type would otherwise be settled by install
+    # order, and which bytes a checksum addresses would depend on it
+    monkeypatch.setattr(
+        forms,
+        "entries",
+        lambda: [_Entry("text", bytes.upper, "plugin-a"), _Entry("text", bytes.lower, "plugin-b")],
+    )
+    with pytest.raises(CanonicalError, match=r"registered more than once.*plugin-a, plugin-b"):
         canonical_form(Text)
 
 

@@ -1,9 +1,4 @@
-"""What every command starts from: the config, the catalog, the rendering.
-
-Standard library only. Every command builds a request, calls the
-operation and renders the record; ``--json`` prints the record whole. See
-``docs/adr/0030``.
-"""
+"""What every command starts from: the config, the catalog, the rendering. See ``docs/adr/0030``."""
 
 import sys
 
@@ -11,8 +6,6 @@ from strata.common.cli import emit
 from strata.common.errors import Refused
 
 from ..config import CatalogMissing, load_catalogs, open_catalog, settings_path
-
-# ----------------------------------------------------------------------
 
 
 def _catalogs(args):

@@ -1,14 +1,20 @@
-"""Running the blob server from an environment.
-
-The process that owns a deployment, as opposed to :mod:`server`, which owns
-an app. Where the catalog is comes from a config file in the format the CLI
-reads, named by ``$STRATA_CONFIG``, and the file's default is the catalog
-served. The signing secret and the bucket's credentials come from the
-environment. It refuses to start rather than start degraded. See
-``docs/adr/0019``.
+"""Running the blob server from an environment: the config file says which catalog,
+the environment holds the secret, and it refuses to start degraded. See ``docs/adr/0019``.
 """
 
 import os
+
+from strata.common.service import serve
+
+from ..config import (
+    DEFAULT_CATALOG,
+    CatalogConfigError,
+    CatalogMissing,
+    host_catalog,
+    open_catalog,
+    secret_variables,
+)
+from .server import create_app
 
 
 class ConfigError(Exception):
@@ -17,16 +23,6 @@ class ConfigError(Exception):
 
 def build():
     """The app, from the environment. Raises if anything essential is absent."""
-    from ..config import (
-        DEFAULT_CATALOG,
-        CatalogConfigError,
-        CatalogMissing,
-        host_catalog,
-        open_catalog,
-        secret_variables,
-    )
-    from .server import create_app
-
     # Opened by the same code the CLI uses. docs/adr/0019
     try:
         name, config = host_catalog()
@@ -48,7 +44,6 @@ def build():
         # Otherwise it would serve an empty catalog. docs/adr/0019
         raise ConfigError(str(e)) from None
 
-    # Comma-separated, and everything by default. docs/adr/0013
     origins = tuple(
         o.strip() for o in os.environ.get("STRATA_SERVE_ORIGINS", "*").split(",") if o.strip()
     )
@@ -57,6 +52,4 @@ def build():
 
 def main() -> None:
     """Entry point. Serves until stopped."""
-    from strata.common.service import serve
-
     serve(build, prog="strata-blobs", port=8081, error=ConfigError)

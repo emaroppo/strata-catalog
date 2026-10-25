@@ -1,19 +1,7 @@
-"""One input per fine-tuning example: what a freeze does where a sample's origins disagree.
+"""One input per fine-tuning example: a freeze compares each sample's input across its
+origins, and ``disagreeing_inputs`` says what to do where they differ.
 
-An SFT example's bytes are its target and its input is its metadata, so
-two examples with one target and two inputs are one sample with two
-origins (record 0049). A materialised sample carries one input, so a
-freeze over a fine-tuning type compares each sample's input across its
-origins, in the form its type compares them in (``input_of``). Where they
-disagree, ``disagreeing_inputs`` decides: ``drop``, the default, leaves the
-sample out; ``first`` keeps it with its first origin's input, the one its
-combined metadata shows. Either way the samples are counted under a reason
-(record 0036), and the choice is recorded on the version as part of its
-identity, as a given split is (record 0024). The input is then written as
-the sample's features. See ``docs/adr/0053`` and ``docs/adr/0054``.
-
-A fine-tuning sample with no origin, as one ingested directly, has one
-input: its own metadata.
+See ``docs/adr/0053``, ``docs/adr/0054``.
 """
 
 from collections.abc import Sequence
@@ -31,8 +19,7 @@ from ..rows import CatalogError, chunks
 DROP, FIRST = "drop", "first"
 DISAGREEING = (DROP, FIRST)
 
-#: How a manifest's feature declarations name an input field, apart from
-#: the ones a project declares. docs/adr/0011
+#: How a manifest's feature declarations name an input field. docs/adr/0011
 INPUT = "input"
 
 
@@ -41,8 +28,7 @@ class Settled:
     """The members a freeze keeps, and what it did about disagreeing inputs."""
 
     members: list[int]
-    #: The option, as the version records it. None where no member is a
-    #: fine-tuning example, since it means nothing there.
+    #: The option as the version records it; None where no member is a fine-tuning example.
     option: str | None = None
     counts: dict = field(default_factory=dict)
 
@@ -99,10 +85,8 @@ def settle(
 
 
 def first_inputs(conn, sample_ids: Sequence[int]) -> tuple[dict[int, dict], list[str]]:
-    """Each fine-tuning sample's input, its first origin's, and every input field named.
-
-    The first origin is the earliest recorded, so a later one never
-    changes it. The fields are in each type's order, once each.
+    """Each fine-tuning sample's input, its earliest origin's, and every input field named once, in
+    type order.
     """
     typed = examples(conn, sample_ids)
     names: dict[str, None] = {}
@@ -113,14 +97,8 @@ def first_inputs(conn, sample_ids: Sequence[int]) -> tuple[dict[int, dict], list
 
 
 def _inputs(conn, typed: dict[int, type[SFTExample]], up_to: int | None) -> dict[int, list[dict]]:
-    """Each sample's input as each origin recorded it, in the order they were recorded.
-
-    Read over the sample's own metadata, which holds what its type computes
-    from its bytes: an input can be one of those facts, such as whether a
-    message links anywhere, which no origin records. A field an origin
-    records is that origin's. Every input is required of every origin with
-    the facts beside it (record 0049), so no origin's input borrows
-    another's. See ``docs/adr/0053``.
+    """Each sample's input as each origin recorded it, in recorded order, read over the
+    sample's own metadata. See ``docs/adr/0049``, ``docs/adr/0053``.
     """
     recorded: dict[int, list[dict]] = {}
     for chunk in chunks(sorted(typed)):

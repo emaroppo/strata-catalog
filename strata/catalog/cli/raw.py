@@ -1,15 +1,16 @@
 """Commands for raw files and the runs that wrote them. See ``docs/adr/0045``."""
 
+import sys
 from dataclasses import asdict
 from pathlib import Path
 
+from ..prepare_run import load_chain, prepare
+from ..verify import verify_run
 from ._shared import Refused, _emit, _open, _ticker
 
 
 def _lines(path: Path) -> list[str]:
     if str(path) == "-":
-        import sys
-
         return sys.stdin.read().splitlines()
     try:
         return path.read_text().splitlines()
@@ -18,8 +19,9 @@ def _lines(path: Path) -> list[str]:
 
 
 def _ingest(args) -> int:
-    catalog, _ = _open(args, create=True)
+    # Read before the catalog is opened: an ingest makes one, and a refusal must leave none
     files = _lines(args.files) if args.files is not None else None
+    catalog, _ = _open(args, create=True)
     show = _ticker("hashing")
     report = catalog.ingest_raw(
         args.root, args.collection, files, on_file=lambda d, n: show(f"{d:,}/{n:,}")
@@ -76,8 +78,6 @@ def _runs(args) -> int:
 
 
 def _verify(args) -> int:
-    from ..verify import verify_run
-
     catalog, _ = _open(args)
     report = verify_run(catalog, args.run_id, deep=args.deep)
 
@@ -92,8 +92,6 @@ def _verify(args) -> int:
 
 
 def _prepare(args) -> int:
-    from ..prepare_run import load_chain, prepare
-
     catalog, _ = _open(args)
     show = _ticker("preparing")
     chain = load_chain(args.spec)

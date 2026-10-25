@@ -20,6 +20,7 @@ from strata.catalog.config import (
     CatalogConfig,
     CatalogConfigError,
     CatalogMissing,
+    Catalogs,
     blobs_for,
     load_catalogs,
     open_catalog,
@@ -30,6 +31,17 @@ def _write(tmp_path, body: str):
     path = tmp_path / "config.toml"
     path.write_text(body)
     return path
+
+
+def two_catalogs(tmp_path, shared: str = "", **tables: str) -> Catalogs:
+    """A host with two named catalogs, loaded: ``images`` and ``text`` unless ``tables`` names
+    others, each rooted at its name with its own extra lines, under any ``shared`` flat keys.
+    """
+    tables = tables or {"images": "", "text": ""}
+    body = f"[catalog]\n{shared}\n" if shared else ""
+    for name, extra in tables.items():
+        body += f'\n[catalog.{name}]\nroot = "{name}"\n{extra}'
+    return load_catalogs(_write(tmp_path, body))
 
 
 @pytest.fixture(autouse=True)
@@ -68,17 +80,7 @@ def test_no_file_at_all(tmp_path):
 
 
 def test_named_catalogs_are_addressable(tmp_path):
-    path = _write(
-        tmp_path,
-        """
-[catalog.images]
-root = "images"
-
-[catalog.text]
-root = "text"
-""",
-    )
-    catalogs = load_catalogs(path)
+    catalogs = two_catalogs(tmp_path)
     assert catalogs.names() == ["images", "text"]
     assert catalogs.named("images").root == "images"
     assert catalogs.named("text").root == "text"
@@ -120,20 +122,7 @@ def test_a_single_named_catalog_needs_no_default(tmp_path):
 
 
 def test_an_explicit_default_is_honoured(tmp_path):
-    path = _write(
-        tmp_path,
-        """
-[catalog]
-default = "text"
-
-[catalog.images]
-root = "images"
-
-[catalog.text]
-root = "text"
-""",
-    )
-    catalogs = load_catalogs(path)
+    catalogs = two_catalogs(tmp_path, shared='default = "text"')
     assert catalogs.named().root == "text"
 
 
@@ -143,17 +132,7 @@ root = "text"
 
 
 def test_an_unknown_name_lists_the_ones_that_exist(tmp_path):
-    path = _write(
-        tmp_path,
-        """
-[catalog.images]
-root = "images"
-
-[catalog.text]
-root = "text"
-""",
-    )
-    catalogs = load_catalogs(path)
+    catalogs = two_catalogs(tmp_path)
     with pytest.raises(CatalogConfigError, match="images, text"):
         catalogs.named("satellite")
 
@@ -166,17 +145,7 @@ def test_an_unknown_name_does_not_fall_back(tmp_path):
 
 
 def test_several_catalogs_and_no_default_is_ambiguous(tmp_path):
-    path = _write(
-        tmp_path,
-        """
-[catalog.images]
-root = "images"
-
-[catalog.text]
-root = "text"
-""",
-    )
-    catalogs = load_catalogs(path)
+    catalogs = two_catalogs(tmp_path)
     # Not at load time — a project or --catalog naming one settles it, and
     # only asking for "the default" is genuinely ambiguous
     with pytest.raises(CatalogConfigError, match="several catalogs"):
@@ -212,18 +181,7 @@ def test_a_credential_in_the_file_is_refused(tmp_path):
 
 def test_each_catalog_names_its_own_blob_mount(tmp_path):
     """Two catalogs read off mounts are two mounts in Label Studio, with two names."""
-    path = _write(
-        tmp_path,
-        """
-[catalog.main]
-root = "main"
-
-[catalog.emails]
-root = "emails"
-blobs_prefix = "blobs-emails"
-""",
-    )
-    catalogs = load_catalogs(path)
+    catalogs = two_catalogs(tmp_path, main="", emails='blobs_prefix = "blobs-emails"')
     assert catalogs.named("main").blobs_prefix == "blobs"
     assert catalogs.named("emails").blobs_prefix == "blobs-emails"
 
@@ -236,17 +194,7 @@ blobs_prefix = "blobs-emails"
 def test_credentials_reach_every_catalog(tmp_path, monkeypatch):
     monkeypatch.setenv("STRATA_S3_ACCESS_KEY", "key")
     monkeypatch.setenv("STRATA_BLOB_SECRET", "secret")
-    path = _write(
-        tmp_path,
-        """
-[catalog.images]
-root = "images"
-
-[catalog.text]
-root = "text"
-""",
-    )
-    catalogs = load_catalogs(path)
+    catalogs = two_catalogs(tmp_path)
     for name in ("images", "text"):
         assert catalogs.named(name).s3_access_key == "key"
         assert catalogs.named(name).blob_secret == "secret"
@@ -260,17 +208,7 @@ def test_a_catalog_reads_its_own_credentials_first(tmp_path, monkeypatch):
     monkeypatch.setenv("STRATA_BLOB_SECRET", "shared secret")
     monkeypatch.setenv("STRATA_S3_ACCESS_KEY_ALT", "alt key")
     monkeypatch.setenv("STRATA_BLOB_SECRET_ALT", "alt secret")
-    path = _write(
-        tmp_path,
-        """
-[catalog.main]
-root = "main"
-
-[catalog.alt]
-root = "alt"
-""",
-    )
-    catalogs = load_catalogs(path)
+    catalogs = two_catalogs(tmp_path, main="", alt="")
     alt, main = catalogs.named("alt"), catalogs.named("main")
     assert (alt.s3_access_key, alt.blob_secret) == ("alt key", "alt secret")
     assert (main.s3_access_key, main.blob_secret) == ("shared key", "shared secret")

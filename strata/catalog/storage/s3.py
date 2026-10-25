@@ -1,13 +1,7 @@
-"""Blobs as tar shards in S3-compatible object storage.
-
-The catalog's ``(location, offset, length)`` is the only index, so one
-sample is one range request. A shard is immutable, built locally and
-uploaded whole on :meth:`flush` — which the index must call before it
-commits rows naming the shard — and packed in the order it is given.
-See ``docs/adr/0002``.
+"""Blobs as tar shards in S3-compatible object storage: one sample is one range
+request, and a shard is built locally and uploaded whole on :meth:`flush`. See ``docs/adr/0002``.
 """
 
-import io
 import tarfile
 import tempfile
 import uuid
@@ -30,10 +24,7 @@ def _padded(size: int) -> int:
 
 
 class ObjectStore(Protocol):
-    """The slice of the S3 API this needs.
-
-    Narrow on purpose. See ``docs/adr/0002``.
-    """
+    """The slice of the S3 API this needs. See ``docs/adr/0002``."""
 
     def put_object(self, Bucket: str, Key: str, Body: bytes) -> object: ...
 
@@ -60,10 +51,6 @@ class S3Backend:
         self._buffer: tempfile.SpooledTemporaryFile | None = None
         self._key: str | None = None
 
-    # ------------------------------------------------------------------
-    # Writing
-    # ------------------------------------------------------------------
-
     def _open(self) -> tuple[tarfile.TarFile, tempfile.SpooledTemporaryFile, str]:
         """The open shard, its buffer and its key, opening one if none is."""
         if self._shard is None or self._buffer is None or self._key is None:
@@ -74,10 +61,10 @@ class S3Backend:
         return self._shard, self._buffer, self._key
 
     def put(self, source: Path, checksum: str) -> Location:
-        """Append a file to the open shard, returning where it landed.
+        """Append a file to the open shard, returning where it landed; the object exists only after
+        :meth:`flush`.
 
-        The location is final the moment the member is written, but the
-        object does not exist until :meth:`flush`. See ``docs/adr/0002``.
+        See ``docs/adr/0002``.
         """
         source = Path(source)
         shard, buffer, key = self._open()
@@ -88,11 +75,7 @@ class S3Backend:
         with open(source, "rb") as f:
             shard.addfile(info, f)
 
-        # Worked backwards from where the shard now stands, rather than read
-        # off the TarInfo: addfile copies it, so the caller's object keeps
-        # whatever offset_data it was born with — zero. Backwards is also
-        # right when a long name costs extra header blocks, which counting
-        # forwards from a fixed 512 would not be.
+        # Back from the shard's offset: addfile copies TarInfo, and long names cost extra headers
         start = shard.offset - _padded(info.size)
         location = Location(container=key, offset=start, length=info.size)
 
@@ -112,10 +95,6 @@ class S3Backend:
         self._shard = self._buffer = self._key = None
         return key
 
-    # ------------------------------------------------------------------
-    # Reading
-    # ------------------------------------------------------------------
-
     def get(self, location: Location) -> bytes:
         """One sample, as one range request."""
         end = location.offset + location.length - 1
@@ -127,12 +106,7 @@ class S3Backend:
         return response["Body"].read()
 
     def fetch(self, locations: Iterable[Location]) -> Iterator[tuple[Location, bytes]]:
-        """Many samples, a shard at a time.
-
-        Grouped by shard and read whole. The order the caller gave is not
-        preserved; each result carries its own location. See
-        ``docs/adr/0002``.
-        """
+        """Many samples, a shard at a time, in no promised order. See ``docs/adr/0002``."""
         by_shard: dict[str, list[Location]] = {}
         for location in locations:
             by_shard.setdefault(location.container, []).append(location)
@@ -142,8 +116,3 @@ class S3Backend:
             for location in members:
                 start = location.offset
                 yield location, body[start : start + location.length]
-
-
-def open_shard_reader(body: bytes) -> tarfile.TarFile:
-    """A whole shard as a tar, for anything wanting to walk it."""
-    return tarfile.open(fileobj=io.BytesIO(body), mode="r")

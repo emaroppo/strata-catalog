@@ -1,9 +1,5 @@
-"""Moving blobs from files into tar shards, without moving the index.
-
-The counterpart to :mod:`copy`: content stays, ``location``, ``offset`` and
-``length`` are rewritten. A shard is uploaded before the rows naming it are
-committed, and samples are packed in ingest order. The source must have
-real files behind it. See ``docs/adr/0002``.
+"""Moving blobs from files into tar shards without moving the index: a shard is
+uploaded before the rows naming it are committed. See ``docs/adr/0002``.
 """
 
 import hashlib
@@ -16,8 +12,7 @@ from sqlalchemy import bindparam, func, select, update
 from ..index import tables as t
 from .blobs import Location
 
-#: Tar offsets go into an INTEGER column, which Postgres caps at 2^31-1; a
-#: larger shard is refused. docs/adr/0002
+#: Tar offsets go into an INTEGER column, which Postgres caps at 2^31-1. docs/adr/0002
 MAX_SHARD_BYTES = 2**31 - 1
 
 
@@ -30,8 +25,7 @@ class RepackReport:
     """What a repack did, or would do."""
 
     samples: int = 0
-    #: Raw rows pointed at a packed blob, whether packed for them or for a
-    #: sample with the same bytes. docs/adr/0045
+    #: Raw rows pointed at a packed blob, theirs or a sample's with the same bytes. docs/adr/0045
     raw: int = 0
     bytes: int = 0
     shards: list[str] = field(default_factory=list)
@@ -50,11 +44,10 @@ _HOLDERS = (t.sample, t.raw)
 
 
 def _pending(prefix: str, table=t.sample):
-    """Rows not yet in the target's prefix.
+    """Rows not yet in the target's prefix; a packed container is ``<prefix>/<hex>.tar``, so a
+    re-run resumes.
 
-    A packed row's container is ``<prefix>/<hex>.tar`` and a local one's
-    ``aa/bb/<checksum><suffix>``, so the two cannot collide and a re-run
-    resumes. See ``docs/adr/0002``.
+    See ``docs/adr/0002``.
     """
     return table.c.location.notlike(f"{prefix}/%")
 
@@ -70,9 +63,8 @@ def repack_blobs(
 ) -> RepackReport:
     """Pack every unpacked blob into ``target``, rewriting where it lives.
 
-    ``source`` defaults to the catalog's own backend and must expose
-    ``path_for``: packing reads files. Nothing is deleted: the source keeps
-    its copy, the rollback. See ``docs/adr/0002``.
+    ``source`` defaults to the catalog's own backend and must expose ``path_for``;
+    nothing is deleted. See ``docs/adr/0002``.
     """
     source = source or catalog.blobs
     if not hasattr(source, "path_for"):
@@ -91,9 +83,7 @@ def repack_blobs(
     report = RepackReport()
 
     rows: list[tuple] = []
-    # Where a checksum already sits in the target. One blob per checksum
-    # however many rows name it, so a second row reuses the first's member.
-    # docs/adr/0045
+    # One blob per checksum however many rows name it. docs/adr/0045
     packed_at: dict[str, Location] = {}
     with catalog.engine.connect() as conn:
         report.already_packed = conn.execute(
@@ -132,9 +122,7 @@ def repack_blobs(
             on_progress(report)
         return report
 
-    # Rows for the shard being filled, held until a change of container
-    # shows it was uploaded: the backend flushes a full shard inside put.
-    # docs/adr/0002
+    # Held until a new container shows the shard uploaded: put flushes a full one. docs/adr/0002
     pending: list[tuple[object, int, Location]] = []
     open_shard: str | None = None
     packed: list[tuple[str, str]] = []
@@ -161,8 +149,7 @@ def repack_blobs(
         if on_progress is not None:
             on_progress(report)
 
-    # The last shard is still open: flush before committing its rows.
-    # docs/adr/0002
+    # The last shard is still open: flush before committing its rows. docs/adr/0002
     if pending:
         target.flush()
         _commit(catalog, pending)
@@ -203,10 +190,7 @@ def _commit(catalog, pending: list[tuple[object, int, Location]]) -> None:
             ]
             if not batch:
                 continue
-            # One statement and one round trip per table for the whole
-            # shard (docs/adr/0032). Bind names differ from the column names
-            # on purpose: reusing "offset" and "length" would collide with
-            # the columns being set.
+            # Bind names differ from column names, or they would collide. docs/adr/0032
             conn.execute(
                 update(table)
                 .where(table.c.id == bindparam("row_id"))
@@ -220,9 +204,8 @@ def _commit(catalog, pending: list[tuple[object, int, Location]]) -> None:
 
 
 def _verify(catalog, target, packed, verify: int, seed: int, report: RepackReport) -> None:
-    """Read a sample of members back and check they are what they claim.
+    """Read a sample of members back, every shard represented, and check they are what they claim.
 
-    A sample rather than all of them, with every shard written represented.
     See ``docs/adr/0002``.
     """
     by_shard: dict[str, list[str]] = {}

@@ -1,8 +1,5 @@
-"""What callers see, and the scope every query shares.
-
-A caller never sees a raw database row; it sees one of the records here.
-And every query over samples names the collections it draws from, through
-:func:`scoped`. See ``docs/adr/0022``.
+"""What callers see, and the scope every query shares: a record, never a raw row, and
+the collections a query draws from. See ``docs/adr/0022``.
 """
 
 from dataclasses import dataclass, field
@@ -21,8 +18,7 @@ from .storage.blobs import Location
 SCHEMA = TypeAdapter(AnySchema)
 VALUE = TypeAdapter(AnyValue)
 
-#: Every collection, said out loud. A query has to name what it wants. See
-#: docs/adr/0022.
+#: Every collection, said out loud: a query has to name what it wants. docs/adr/0022
 EVERYTHING = "*"
 
 
@@ -37,17 +33,14 @@ class CatalogMissing(CatalogError):
 class AmbiguousSample(CatalogError):
     """A checksum named without a type, where more than one type holds the bytes.
 
-    A reference written before types were part of one (a Label Studio task,
-    an untyped list) resolves only while one live sample has its bytes. See
-    ``docs/adr/0052``.
+    See ``docs/adr/0052``.
     """
 
 
 def split_type(type_: str) -> tuple[str, str]:
     """``text/email/masked`` as its media and stored subtype, ``("text", "email/masked")``.
 
-    The media is the first segment; the subtype may have several. See
-    ``docs/adr/0010`` and ``docs/adr/0052``.
+    See ``docs/adr/0010``, ``docs/adr/0052``.
     """
     media, sep, subtype = type_.partition("/")
     if not media or not sep or not subtype:
@@ -60,15 +53,14 @@ def split_type(type_: str) -> tuple[str, str]:
 
 @dataclass(frozen=True)
 class SampleRow:
-    """A sample as callers see it — never a raw database row."""
+    """A sample as callers see it, never a raw database row."""
 
     id: int
     checksum: str
     location: Location
     media: str
     subtype: str
-    #: Out of comparison, and therefore out of the generated hash: two rows
-    #: for the same sample are the same sample. See docs/adr/0001.
+    #: Out of comparison and the hash: two rows for one sample are the same sample. docs/adr/0001
     metadata: dict | None = field(default=None, compare=False)
 
     @property
@@ -119,8 +111,7 @@ class DatasetRef(NamedTuple):
 
     name: str
     version: int
-    #: Over the version's members and their annotations. Null for a version
-    #: frozen before versions carried one.
+    #: Over the version's members and their annotations; null where the version carries none.
     annotation_digest: str | None
 
 
@@ -131,32 +122,25 @@ class AnnotateReport(NamedTuple):
     annotated: int
     #: Skips recorded.
     skipped: int
-    #: Left alone, because a source outranking the one writing had already
-    #: answered — an import landing on a sample a person dealt with.
+    #: Left alone, because a source outranking the writer had already answered. docs/adr/0009
     kept: int
 
 
 def chunks(items: list, size: int = 500):
-    """SQLite caps parameters per statement, and a review pool is past it.
-
-    See ``docs/adr/0032``.
-    """
+    """Batches of ``size``: SQLite caps parameters per statement. See ``docs/adr/0032``."""
     for start in range(0, len(items), size):
         yield items[start : start + size]
 
 
 def within(collections) -> ColumnElement[bool] | None:
-    """A condition matching samples in any of ``collections``.
+    """A condition matching samples in any of ``collections``, or ``None`` for everything.
 
-    ``None`` when the answer is everything, so a caller can drop the join.
-
-    Selecting a collection selects what is under it: ``sat_images`` covers
-    ``sat_images/2024`` but never ``sat_images_old``. See ``docs/adr/0022``.
+    A collection covers what is under it: ``a`` covers ``a/b``, never ``a_old``. See
+    ``docs/adr/0022``.
     """
     names = [collections] if isinstance(collections, str) else list(collections)
     if names == [EVERYTHING]:
-        # The marker alone, bare or as a list's only member: a request that
-        # arrived through a config carries a list, and means the same thing
+        # Bare or as a list's only member: a config carries a list, meaning the same
         return None
     if not names:
         raise CatalogError(
@@ -186,9 +170,9 @@ def current():
 
 
 def scoped(stmt, collections):
-    """Restrict a sample query to the collections a caller named.
+    """Restrict a sample query to the collections a caller named, by EXISTS rather than a join.
 
-    An EXISTS rather than a join. See ``docs/adr/0021``.
+    See ``docs/adr/0021``.
     """
     condition = within(collections)
     if condition is None:

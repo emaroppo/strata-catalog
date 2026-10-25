@@ -3,6 +3,8 @@
 from dataclasses import asdict
 from pathlib import Path
 
+from ..rows import CatalogError
+from ..transfer import AnswersFile, read_pairs
 from ._shared import Refused, _emit, _open, _ticker
 
 
@@ -24,9 +26,6 @@ def _export_answers(args) -> int:
 
 
 def _import_answers(args) -> int:
-    from ..rows import CatalogError
-    from ..transfer import AnswersFile, read_pairs
-
     catalog, _ = _open(args)
     try:
         answers = AnswersFile.model_validate_json(Path(args.answers).read_text(encoding="utf-8"))

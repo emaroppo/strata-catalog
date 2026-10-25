@@ -1,9 +1,5 @@
-"""Where a sample's bytes live, and how to get them back.
-
-The interface is shaped for immutable shards in object storage, and the
-local backend keeps its rules: write-once, no listing, bytes or a
-:class:`Location` and never a path (:meth:`LocalBackend.path_for` is
-deliberately off the protocol). See ``docs/adr/0002``.
+"""Where a sample's bytes live, and how to get them back: write-once, no listing,
+a :class:`Location` and never a path. See ``docs/adr/0002``.
 """
 
 import hashlib
@@ -22,8 +18,7 @@ _CHUNK = 1 << 20
 class Location:
     """Where bytes are: a container, and a range within it.
 
-    For the local backend the container is a file and the range is all of
-    it. For object storage it is a tar shard and one member's extent.
+    Locally a file and all of it; in object storage a tar shard and one member's extent.
     """
 
     container: str
@@ -36,39 +31,29 @@ class BlobBackend(Protocol):
     """Storage for sample bytes."""
 
     def put(self, source: Path, checksum: str) -> Location:
-        """Store ``source``'s bytes, returning where they went.
-
-        Idempotent on ``checksum``: storing the same bytes twice returns the
-        same location rather than a second copy.
-        """
+        """Store ``source``'s bytes, returning where they went; idempotent on ``checksum``."""
         ...
 
     def get(self, location: Location) -> bytes:
-        """One sample. Sparse and random — the review queue's access pattern."""
+        """One sample, sparse and random."""
         ...
 
     def fetch(self, locations: Iterable[Location]) -> Iterator[tuple[Location, bytes]]:
-        """Many samples. Dense and bulk: what materialising a dataset uses.
+        """Many samples, dense and bulk. See ``docs/adr/0002``."""
+        ...
+
+    def flush(self) -> object:
+        """Make everything written so far durable; a caller flushes before committing index rows.
 
         See ``docs/adr/0002``.
         """
         ...
 
-    def flush(self) -> object:
-        """Make everything written so far durable.
-
-        A caller writing index rows flushes before it commits them. See
-        ``docs/adr/0002``.
-        """
-        ...
-
 
 def blob_path(checksum: str, suffix: str = "") -> str:
-    """Where a blob sits under a local root, from its checksum alone.
+    """Where a blob sits under a local root, from its checksum alone: two levels of fan-out.
 
-    Module level because the layout outlives the local backend: anything
-    serving files off a root keeps resolving after a repack. Two levels of
-    fan-out. See ``docs/adr/0001``.
+    See ``docs/adr/0001``.
     """
     return f"{checksum[:2]}/{checksum[2:4]}/{checksum}{suffix}"
 
@@ -83,12 +68,7 @@ def checksum_of(path: Path) -> str:
 
 
 class LocalBackend:
-    """Bytes as files under a root directory.
-
-    A file is a shard of one: the location is ``(relative path, 0, size)``.
-    Laid out by checksum, so :meth:`put` is idempotent and identical bytes
-    cost one copy.
-    """
+    """Bytes as files under a root directory, laid out by checksum; a file is a shard of one."""
 
     def __init__(self, root: Path):
         self.root = Path(root)
@@ -104,12 +84,10 @@ class LocalBackend:
         if not target.exists():
             target.parent.mkdir(parents=True, exist_ok=True)
             try:
-                # Linked, not copied: editing the source in place is the
-                # accepted cost. docs/adr/0002
+                # Linked, not copied: editing the source in place is accepted. docs/adr/0002
                 os.link(source, target)
             except OSError:
-                # A different filesystem: copied via a temporary name.
-                # docs/adr/0002
+                # A different filesystem: copied via a temporary name. docs/adr/0002
                 partial = target.with_name(target.name + ".partial")
                 shutil.copyfile(source, partial)
                 partial.replace(target)
@@ -129,9 +107,8 @@ class LocalBackend:
         """Nothing to do: a file exists the moment it is written."""
 
     def path_for(self, location: Location) -> Path:
-        """The file behind a location.
+        """The file behind a location; not on :class:`BlobBackend`, since a tar member has no path.
 
-        Not on :class:`BlobBackend`: a tar member in a bucket has no path.
-        For the Label Studio mount and the repack. See ``docs/adr/0002``.
+        See ``docs/adr/0002``.
         """
         return self.root / location.container

@@ -8,25 +8,22 @@ from ..storage.blobs import BlobBackend, Location, blob_path
 
 
 def link_or_copy(source: Path, target: Path) -> None:
-    """Put ``source``'s bytes at ``target``, sharing them if the filesystem can.
+    """Put ``source``'s bytes at ``target``, sharing the inode if the filesystem can.
 
-    A blob is immutable and addressed by its content, and anything derived
-    from it is the same bytes, so the two can share an inode. See
-    ``docs/adr/0002``.
+    See ``docs/adr/0002``.
     """
     try:
         os.link(source, target)
     except OSError:
-        # A different filesystem, or one that will not link. Correctness
-        # does not depend on the link, only disk usage.
+        # A different filesystem, or one that will not link; only disk usage depends on it
         shutil.copyfile(source, target)
 
 
 def materialised_name(row) -> str:
-    """What a sample is called inside a materialised dataset.
+    """What a sample is called inside a materialised dataset: its checksum, with the recorded source
+    path's extension.
 
-    Its checksum, not its container. The extension comes from the recorded
-    source path, because a checksum has none. See ``docs/adr/0001``.
+    See ``docs/adr/0001``.
     """
     suffix = Path((row.metadata or {}).get("source_path") or "").suffix
     return f"{row.checksum}{suffix.lower()}"
@@ -40,12 +37,8 @@ def write_out(
 ) -> None:
     """Put every wanted blob where the manifest says it is.
 
-    Split by what the backend can do rather than done uniformly. A
-    backend with files behind it links them, so a dataset version costs
-    no disk. One with blobs packed in a bucket is asked for them
-    together, so a shard is pulled once instead of range-requested per
-    member — which is the difference between one object and a thousand
-    requests for a dataset that lives in one shard.
+    A backend with files behind it links them; one with shards is asked for
+    them together. See ``docs/adr/0002``.
     """
     if not wanted:
         return
@@ -61,10 +54,7 @@ def write_out(
         if on_progress is not None:
             on_progress(done, total)
 
-    # The cache first, because a hit costs a link and a miss costs a
-    # network round trip. A materialised file is named for its checksum,
-    # so where it would live in the cache is derivable from where it is
-    # going — no second lookup, and no need to carry checksums here.
+    # The cache first; a file is named for its checksum, so its cache path derives from its target
     remaining = wanted
     if cache is not None:
         cache = Path(cache)
@@ -78,8 +68,7 @@ def write_out(
                 remaining[location] = target
 
     if not remaining:
-        # Everything came from the cache. Asking a backend for nothing
-        # is a round trip that can only fail.
+        # Asking a backend for nothing is a round trip that can only fail
         return
 
     path_for = getattr(blobs, "path_for", None)
@@ -89,9 +78,7 @@ def write_out(
             if cache is None:
                 target.write_bytes(body)
             else:
-                # Written to the cache and linked from it, via a temporary
-                # name so an interrupted write leaves no short file at the
-                # address of a whole one. docs/adr/0026
+                # Via a temporary name, so an interrupted write leaves no short file. docs/adr/0026
                 cached = cache / blob_path(target.stem, target.suffix)
                 cached.parent.mkdir(parents=True, exist_ok=True)
                 partial = cached.with_name(cached.name + ".partial")
@@ -121,8 +108,7 @@ def fetch_into(
     if path_for is None:
         for location, body in blobs.fetch(list(wanted)):
             target = wanted[location]
-            # Through a temporary name, so an interrupted write leaves no
-            # short file at the address of a whole one. docs/adr/0026
+            # Via a temporary name, so an interrupted write leaves no short file. docs/adr/0026
             partial = target.with_name(target.name + ".partial")
             partial.write_bytes(body)
             partial.replace(target)

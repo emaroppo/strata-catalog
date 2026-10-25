@@ -1,35 +1,8 @@
 """Answers carried from one catalog into another, through a file, as an import run.
 
-``merge`` folds a copy back into the catalog it came from. This is for two
-catalogs built apart, where a sample id means nothing across them and a
-sample is known only by its bytes (records 0001, 0008). An export writes
-one label set's answers to a file, keyed by checksum, with every row of
-their history. An import reads it into another catalog as one run, and
-writes the run's id on every row (records 0045, 0048).
-
-**History moves with the answer.** Each sample's rows arrive in their
-order, with their source, batch and times (record 0027). The rows that
-were replaced are written as replaced. The current one goes through the
-target's own ranking: it lands where the target has nothing or holds less,
-it is left out where the target holds more, and where the target holds a
-different answer of equal standing the target keeps its own and the
-dispute is recorded, as a merge does (record 0009). An answer's history is
-written only with the answer.
-
-**A sample is its bytes and its type** (record 0052). Each sample in the
-file carries its type, and lands only on the target's sample of that type
-and checksum; one the target lacks is unmatched, as unknown bytes are. A
-file exported before samples carried a type lands where one live sample
-has the bytes, and is unmatched where several types hold them.
-
-**A sample whose bytes changed** is paired to its successor by a pairs
-file (old checksum, new checksum). The successor is the sample of the
-same type at the new checksum. Its spans are carried through an
-alignment of the two texts, and only those that still slice to their own
-text are kept. The rest are counted, never stored askew.
-
-**An import run again writes nothing.** A row already present, by sample,
-label set, time, source, state and value, is not written twice.
+History moves with the answer, the current one lands by the target's ranking, a
+sample is matched by checksum and type, and a run again writes nothing.
+See ``docs/adr/0009``, ``docs/adr/0027``, ``docs/adr/0048``, ``docs/adr/0052``.
 """
 
 import difflib
@@ -41,7 +14,7 @@ from datetime import datetime
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy import and_, insert, select, update
+from sqlalchemy import and_, insert, select
 
 from strata.common.canonical import content_hash
 from strata.contracts import Span, Spans
@@ -74,11 +47,9 @@ class ExportedSample(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     checksum: str
-    #: ``text/email``. None in a file exported before a sample's type was
-    #: half its identity. docs/adr/0052
+    #: ``text/email``; None in a file exported before a type was half the identity. docs/adr/0052
     type: str | None = None
-    #: The sample's text, for a span label set: what a remap aligns
-    #: against when the sample's bytes changed in the target.
+    #: The sample's text, for a span label set: what a remap aligns against.
     text: str | None = None
     rows: list[ExportedRow]
 
@@ -112,12 +83,9 @@ class ImportReport:
     matched: int = 0
     paired: int = 0
     unmatched: int = 0
-    #: Of the unmatched, those carrying no type whose bytes several types
-    #: hold here, so which sample they meant is unknown. docs/adr/0052
+    #: Of the unmatched, those carrying no type whose bytes several types hold here. docs/adr/0052
     ambiguous: int = 0
-    #: Current answers: copied where the target had none or a skip, replacing
-    #: or confirming one the target ranked lower, agreeing, outranked, in
-    #: dispute, or a skip landing where the target had an answer.
+    #: Current answers, by what the target's ranking made of each. docs/adr/0009
     copied: int = 0
     superseded: int = 0
     confirmed: int = 0
@@ -129,19 +97,13 @@ class ImportReport:
     rows: int = 0
     history: int = 0
     already: int = 0
-    #: Spans through a remap: carried, and lost because no place in the new
-    #: text slices to their own text.
+    #: Spans through a remap: carried, and lost because nowhere in the new text reads the same.
     spans_carried: int = 0
     spans_lost: int = 0
     unmatched_checksums: list[str] = field(default_factory=list)
 
     def counts(self) -> dict[str, int]:
         return {k: v for k, v in asdict(self).items() if isinstance(v, int)}
-
-
-# ----------------------------------------------------------------------
-# Export
-# ----------------------------------------------------------------------
 
 
 def export_answers(catalog, label_set: str, sources: Iterable[str] = ()) -> AnswersFile:
@@ -154,21 +116,7 @@ def export_answers(catalog, label_set: str, sources: Iterable[str] = ()) -> Answ
     spans = schema.label_type == "span"
 
     stmt = (
-        select(
-            t.sample.c.id,
-            t.sample.c.checksum,
-            t.sample.c.media,
-            t.sample.c.subtype,
-            t.sample.c.location,
-            t.sample.c.offset,
-            t.sample.c.length,
-            t.annotation.c.state,
-            t.annotation.c.value,
-            t.annotation.c.source,
-            t.annotation.c.batch,
-            t.annotation.c.created_at,
-            t.annotation.c.superseded_at,
-        )
+        select(*t.SAMPLE_LOCATION, *t.ANSWER_COLUMNS)
         .select_from(t.annotation.join(t.sample, t.annotation.c.sample_id == t.sample.c.id))
         .where(and_(t.annotation.c.label_set_id == label_set_id, live()))
         .order_by(t.sample.c.id, t.annotation.c.created_at, t.annotation.c.id)
@@ -207,11 +155,6 @@ def export_answers(catalog, label_set: str, sources: Iterable[str] = ()) -> Answ
     )
 
 
-# ----------------------------------------------------------------------
-# Import
-# ----------------------------------------------------------------------
-
-
 def read_pairs(lines: Iterable[str]) -> dict[str, str]:
     """``old new`` checksum pairs, one a line. A checksum paired twice is refused."""
     pairs: dict[str, str] = {}
@@ -237,10 +180,8 @@ def import_answers(
     dry_run: bool = False,
     on_sample: Callable[[int, int], None] | None = None,
 ) -> ImportReport:
-    """Write ``answers`` into ``catalog`` as one import run.
-
-    ``dry_run`` does everything inside the transaction and rolls it back,
-    so the report says what an import would do and nothing is kept.
+    """Write ``answers`` into ``catalog`` as one import run; ``dry_run`` rolls the transaction back
+    and reports.
     """
     try:
         return _import(
@@ -338,7 +279,7 @@ def _one(catalog, conn, schema, label_set_id, sample_id, rows, remap, origin, ru
     present = _present(conn, sample_id, label_set_id)
 
     if not now:
-        # Only history: the answer was withdrawn. The past is still the past.
+        # Only history: the answer was withdrawn there
         _history(conn, schema, sample_id, label_set_id, history, run_id, present, report)
         return
     incoming = now[-1]
@@ -370,8 +311,7 @@ def _one(catalog, conn, schema, label_set_id, sample_id, rows, remap, origin, ru
         elif rank > standing:
             verdict = "confirmed"
         else:
-            # A skip on a skip says nothing new: known by its standing, not its
-            # time, which a skip made afresh by a rule does not carry
+            # A skip on a skip is ranked by standing, not time, which a rule's skip does not carry
             verdict = "outranked" if rank < standing else "agreed"
     elif here is None or here.state == t.SKIPPED:
         verdict = "outranked" if standing > rank else "copied"
@@ -401,7 +341,7 @@ def _one(catalog, conn, schema, label_set_id, sample_id, rows, remap, origin, ru
         source=incoming.source, batch=incoming.batch, run_id=run_id,
         created_at=incoming.created_at,
     )  # fmt: skip
-    # Settled, whichever way it went, as a person's answer settles it
+    # Settled whichever way it went. docs/adr/0009
     conflicts.clear(conn, sample_id, label_set_id)
     if written is not None and value is not None:
         catalog.annotations._index_classes(conn, written, schema.classes_asserted(value))
@@ -409,10 +349,8 @@ def _one(catalog, conn, schema, label_set_id, sample_id, rows, remap, origin, ru
 
 
 def _history(conn, schema, sample_id, label_set_id, rows, run_id, present, report) -> None:
-    """Rows that were replaced, written as replaced, unless already there.
-
-    Each is an event as well: a row that arrived superseded was never the
-    answer here, which its id alone would not say. See ``docs/adr/0050``.
+    """Rows that were replaced, written as replaced unless already there; each is an event,
+    since its id alone would not say it was never the answer here. See ``docs/adr/0050``.
     """
     for row in rows:
         if _key(row) in present:
@@ -463,12 +401,8 @@ def _carried(row: ExportedRow, remap: "_Remap | None", report: ImportReport) -> 
 
 
 class _Remap:
-    """Where each character of an old text went in a new one, by their common runs.
-
-    A span's offsets are what it means; its ``text`` is a convenience, and
-    may be empty (``strata.contracts.Span``). So what a span
-    covers is read from the old text, and it is carried only to a place in
-    the new text that reads the same.
+    """Where each character of an old text went in a new one, by their common runs; a span
+    is carried only to a place that reads the same.
     """
 
     def __init__(self, old: str | None, new: str):
@@ -575,23 +509,12 @@ def _text_of(catalog, conn, sample_id: int, checksum: str) -> str:
 
 def _dispute(conn, sample_id, label_set_id, kept, other, origin) -> None:
     """Record that two catalogs answered differently, in the import's transaction."""
-    payload = {"kept_value": kept, "other_value": other, "other_origin": origin}
-    updated = conn.execute(
-        update(t.annotation_conflict)
-        .where(
-            and_(
-                t.annotation_conflict.c.sample_id == sample_id,
-                t.annotation_conflict.c.label_set_id == label_set_id,
-            )
-        )
-        .values(**payload)
-    ).rowcount
-    if not updated:
-        conn.execute(
-            insert(t.annotation_conflict).values(
-                sample_id=sample_id, label_set_id=label_set_id, **payload
-            )
-        )
+    conflicts.upsert_conflict(
+        conn,
+        sample_id,
+        label_set_id,
+        {"kept_value": kept, "other_value": other, "other_origin": origin},
+    )
 
 
 __all__ = [

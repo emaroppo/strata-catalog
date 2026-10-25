@@ -1,12 +1,11 @@
 """``strata-catalog remove``: tombstone samples, and their annotations with them."""
 
+from ..admin import remove
+from ..selection import typed
 from ._shared import Refused, _emit, _open
 
 
 def _remove(args) -> int:
-    from ..admin import remove
-    from ..selection import typed
-
     where = {}
     for pair in args.where or ():
         key, sep, value = pair.partition("=")

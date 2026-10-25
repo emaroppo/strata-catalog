@@ -25,6 +25,7 @@ from strata.contracts import (
     ManifestSample,
 )
 
+from . import commit_run, raw_ingest, transfer
 from .index import answers
 from .index import tables as t
 from .index.annotations import Annotations
@@ -34,7 +35,7 @@ from .index.label_sets import LabelSets
 from .index.lists import Lists
 from .index.locks import claim, lock
 from .index.raw import Raw
-from .index.runs import Runs
+from .index.runs import DERIVE, GENERATE, Runs
 from .index.samples import Samples
 from .index.schema_version import MIGRATIONS
 from .purposes import refuse_stored_generated
@@ -75,21 +76,14 @@ def _rejections(counts: dict) -> str:
 def _canonical_source(
     path: Path, canonicalise: Callable[[bytes], bytes], scratch: Path, entry: dict | None
 ) -> tuple[Path, dict | None]:
-    """The file to catalogue, and what to record if it is not the one given.
-
-    A file already in canonical form is catalogued as it stands, which keeps
-    the hardlink path and means a corpus prepared properly pays nothing for
-    this. Where the bytes do differ, the canonical ones are what the catalog
-    holds — but the original's checksum is recorded, so a sample can still
-    be traced to the file on disk it came from.
+    """The file to catalogue, and what to record if it is not the one given: the canonical
+    bytes, with the original's ``source_checksum``. See ``docs/adr/0010``.
     """
     data = path.read_bytes()
     try:
         canonical = canonicalise(data)
     except Exception as e:
-        # Broad on purpose: this is a sample type's code, it may raise
-        # anything, and the one thing missing from whatever it raised is
-        # which of forty thousand files it was looking at.
+        # Broad on purpose: a sample type's code may raise anything, and only this knows which file
         raise CatalogError(f"Cannot canonicalise {path}: {e}") from None
     if canonical == data:
         return path, entry
@@ -118,6 +112,7 @@ class Catalog:
         self.raw = Raw(engine)
         self.runs = Runs(engine)
         self.lists = Lists(engine)
+        self._id: str | None = None
 
     @classmethod
     def local(cls, root: Path) -> "Catalog":
@@ -131,11 +126,10 @@ class Catalog:
 
     @classmethod
     def connect(cls, url: str, blobs: BlobBackend) -> "Catalog":
-        """Open a catalog that exists. Nothing is created, and nothing is written.
+        """Open a catalog that exists; nothing is created or written, and an index behind the code
+        is refused.
 
-        An index with no catalog in it is :class:`CatalogMissing`; one
-        behind the code is refused with the command that brings it up to
-        date. Creating is :meth:`create`. See ``docs/adr/0018``.
+        See ``docs/adr/0018``.
         """
         catalog = cls(database.engine(url), blobs)
         catalog._verify()
@@ -143,11 +137,10 @@ class Catalog:
 
     @classmethod
     def create(cls, url: str, blobs: BlobBackend) -> "Catalog":
-        """A catalog on ``url``, built if the index holds none, opened if it does.
+        """A catalog on ``url``, built and stamped at head if the index holds none, opened if it
+        does.
 
-        Only a database this call found empty is built and stamped at head;
-        one that already held tables is opened, and the migration guard
-        decides whether it is current. See ``docs/adr/0018``.
+        See ``docs/adr/0018``.
         """
         catalog = cls(database.engine(url), blobs)
         if catalog._exists():
@@ -172,12 +165,9 @@ class Catalog:
         require_current(self.engine, MIGRATIONS, "catalog")
 
     def _mint_identity(self) -> None:
-        """Give a catalog its name when it comes into existence.
+        """Give a catalog its identity when it comes into existence, not on first ask.
 
-        Not on first ask. A catalog nobody had questioned would have no
-        identity, and a copy of it would carry none — so whether two
-        databases are the same corpus would depend on whether anyone had
-        happened to look.
+        See ``docs/adr/0008``.
         """
         with self.engine.begin() as conn:
             if conn.execute(select(t.catalog_identity.c.id)).scalar() is not None:
@@ -190,13 +180,14 @@ class Catalog:
 
     @property
     def id(self) -> str:
-        """Which catalog this is. Sortable by time, unique without coordination."""
-        with self.engine.connect() as conn:
-            return conn.execute(select(t.catalog_identity.c.id)).scalar_one()
+        """Which catalog this is; read once, since an open catalog's identity never changes.
 
-    # ------------------------------------------------------------------
-    # Ingest
-    # ------------------------------------------------------------------
+        See ``docs/adr/0008``.
+        """
+        if self._id is None:
+            with self.engine.connect() as conn:
+                self._id = str(conn.execute(select(t.catalog_identity.c.id)).scalar_one())
+        return self._id
 
     def ingest(
         self,
@@ -209,35 +200,12 @@ class Catalog:
         on_sample: Callable[[Path], None] | None = None,
         canonicalise: Callable[[bytes], bytes] | None = None,
     ) -> list[int]:
-        """Register files, storing their bytes and returning their sample ids.
+        """Register files, storing their bytes and returning their sample ids, in one transaction.
 
-        Idempotent on content and type: a file whose bytes are already
-        catalogued as this type returns the existing id rather than a
-        duplicate, which is what makes re-running ingest over a growing
-        directory safe. The same bytes as another type are a second sample
-        over the stored blob, and the first is left as it was. See
-        ``docs/adr/0052``.
-
-        ``metadata`` applies to the whole batch; ``metadata_for`` supplies it
-        per file. A grouping is a metadata key like any other, respected
-        only by a version frozen with ``group_by`` naming it. A known sample
-        has its ``metadata`` brought up to date rather than left alone; a
-        dataset already built is undisturbed. See ``docs/adr/0023``.
-
-        ``collections`` says where these samples came from, as paths. They
-        are added rather than replaced. See ``docs/adr/0022``.
-
-        ``canonicalise`` is a sample type's canonical form, passed in rather
-        than resolved here. Where it changes a file's bytes, those are what
-        is stored and what the checksum addresses; the sample records
-        ``canonicalised`` and the original's ``source_checksum``. Omitted, no
-        file is read at all. See ``docs/adr/0010``.
-
-        The whole batch is one transaction; ``on_sample`` is how a caller
-        reports progress without breaking that up. See ``docs/adr/0032``.
-
-        Generated media is refused: it arrives only through a generate run.
-        See ``docs/adr/0053``.
+        Idempotent on content and type, and a known sample has its metadata brought up to
+        date; ``metadata_for`` supplies metadata per file, ``canonicalise`` a type's
+        canonical form, ``collections`` where the samples came from. See ``docs/adr/0010``,
+        ``docs/adr/0022``, ``docs/adr/0023``, ``docs/adr/0052``, ``docs/adr/0053``.
         """
         refuse_stored_generated(media, subtype, "An ingest")
         ids: list[int] = []
@@ -253,9 +221,7 @@ class Catalog:
                 checksum = checksum_of(source)
                 known = self.samples.find(conn, checksum, media=media, subtype=subtype)
                 if known is None:
-                    # The blob of another type's sample or of a raw file, if
-                    # one holds these bytes: one copy per checksum.
-                    # docs/adr/0045, docs/adr/0052
+                    # One copy per checksum, whichever row holds it. docs/adr/0045, docs/adr/0052
                     location = self.raw.stored(conn, [checksum]).get(checksum)
                     if location is None:
                         location = self.blobs.put(source, checksum)
@@ -275,30 +241,21 @@ class Catalog:
 
             self.samples.collect(conn, ids, collections)
 
-            # Inside the transaction and before it commits: a backend that
-            # packs has not made its objects exist yet, and rows naming a
-            # shard that failed to upload would be worse than no rows.
+            # Before the commit, or rows could name a shard that never uploaded. docs/adr/0002
             self.blobs.flush()
         return ids
 
     def export_answers(self, label_set: str, sources: Iterable[str] = ()):
-        """One label set's answers, every row of their history, keyed by checksum.
-
-        For another catalog to import. See :mod:`strata.catalog.transfer`.
+        """One label set's answers, every row of their history, keyed by checksum. See
+        :mod:`strata.catalog.transfer`.
         """
-        from .transfer import export_answers
-
-        return export_answers(self, label_set, sources)
+        return transfer.export_answers(self, label_set, sources)
 
     def import_answers(self, answers, *, into=None, pairs=None, dry_run=False, on_sample=None):
-        """Another catalog's answers, written as one import run.
-
-        Matched by checksum, or through ``pairs`` where a sample's bytes
-        changed. See :mod:`strata.catalog.transfer` and ``docs/adr/0045``.
+        """Another catalog's answers, written as one import run; ``pairs`` matches samples whose
+        bytes changed. See :mod:`strata.catalog.transfer`.
         """
-        from .transfer import import_answers
-
-        return import_answers(
+        return transfer.import_answers(
             self, answers, into=into, pairs=pairs, dry_run=dry_run, on_sample=on_sample
         )
 
@@ -309,16 +266,10 @@ class Catalog:
         files: Iterable[str] | None = None,
         on_file: Callable[[int, int], None] | None = None,
     ):
-        """Store files as they are, under ``collection``, as one ingest run.
-
-        ``files`` lists paths under ``root``; without it, every file under
-        the root goes in. A name already held with the same bytes writes
-        nothing, and one held with other bytes refuses the whole ingest. See
-        :mod:`strata.catalog.raw_ingest` and ``docs/adr/0045``.
+        """Store files as they are, under ``collection``, as one ingest run; ``files`` lists
+        paths under ``root``, else every file goes in. See ``docs/adr/0045``.
         """
-        from .raw_ingest import ingest_raw
-
-        return ingest_raw(self, root, collection, files, on_file)
+        return raw_ingest.ingest_raw(self, root, collection, files, on_file)
 
     def commit_derived(
         self,
@@ -331,19 +282,11 @@ class Catalog:
         code: dict | None = None,
         left_out: dict[str, int] | None = None,
     ):
-        """Samples made outside the catalog from samples it holds, as one derive run.
-
-        Each output names the samples it was made from, by checksum and type,
-        and the facts of each occurrence. Every input has to exist, and the
-        type's metadata contract has to hold for each origin; otherwise
-        nothing is written. ``left_out`` counts, per reason, what the
-        producer made nothing from. See :mod:`strata.catalog.commit_run` and
+        """Samples made outside the catalog from samples it holds, as one derive run; ``left_out``
+        counts, per reason, what made nothing. See :mod:`strata.catalog.commit_run`,
         ``docs/adr/0053``.
         """
-        from .commit_run import commit
-        from .index.runs import DERIVE
-
-        return commit(
+        return commit_run.commit(
             self,
             DERIVE,
             outputs,
@@ -366,18 +309,10 @@ class Catalog:
         code: dict | None = None,
         left_out: dict[str, int] | None = None,
     ):
-        """A model's outputs, as one generate run, each with a record of what made it.
-
-        The type has to be generated media. Each output names the samples
-        the model was given, by role, and its generation record names the
-        template, system prompt and settings by the digest of what ``spec``
-        holds in full. See :mod:`strata.catalog.commit_run` and
-        ``docs/adr/0053``.
+        """A model's outputs, as one generate run, each with a record of what made it. See
+        :mod:`strata.catalog.commit_run`, ``docs/adr/0053``.
         """
-        from .commit_run import commit
-        from .index.runs import GENERATE
-
-        return commit(
+        return commit_run.commit(
             self,
             GENERATE,
             outputs,
@@ -390,17 +325,10 @@ class Catalog:
         )
 
     def commit_directory(self, root: Path):
-        """The derive or generate run a directory describes, committed whole or not at all.
-
-        See :mod:`strata.catalog.commit_run` for the directory's layout.
+        """The derive or generate run a directory describes, committed whole or not at all. See
+        :mod:`strata.catalog.commit_run`.
         """
-        from .commit_run import commit_directory
-
-        return commit_directory(self, root)
-
-    # ------------------------------------------------------------------
-    # Datasets
-    # ------------------------------------------------------------------
+        return commit_run.commit_directory(self, root)
 
     def create_dataset(
         self,
@@ -419,38 +347,11 @@ class Catalog:
     ) -> int:
         """Freeze a selection into a new version, inheriting the previous split.
 
-        Every sample the previous version placed keeps its side; only what
-        is new is decided. ``holdout_ratio`` is zero unless asked for.
-        ``group_by`` names a metadata key whose values are kept on one side
-        — ``video`` for frames — and none means every sample is its own
-        group.
-
-        ``given`` is a split the corpus arrived with, read off a metadata
-        key: the samples it names are fixed on their side before anything
-        is drawn, and the rest are drawn by ratio. A given side that
-        contradicts an inherited one is refused.
-
-        ``inherit=False`` re-splits: every side is drawn afresh, under this
-        call's grouping and seed, and the version records that its sides
-        start here. A warm start never reaches back past such a version.
-        See ``docs/adr/0024``.
-
-        Samples with the same bytes, which two types make, are always one
-        group, with ``group_by`` or without, and a given side reaches all of
-        them. See ``docs/adr/0052``.
-
-        ``spec`` selects the members, and the version records it with the
-        watermark it ran at. Without one, ``collections`` stands for the
-        spec that says what a freeze always did: every sample there with a
-        current answer in the label set. Members named outright as
-        ``sample_ids`` record no spec, and cannot be verified. While the
-        selection reads, writers wait. See ``docs/adr/0050``.
-
-        A fine-tuning example carries one input, so where a member's origins
-        disagree on it ``disagreeing_inputs`` decides: ``drop`` leaves it out,
-        ``first`` keeps its first origin's input. Either is counted, and
-        recorded on a version with such members as part of its identity.
-        See :mod:`strata.catalog.versions.inputs` and ``docs/adr/0053``.
+        ``spec`` selects the members (``collections`` alone stands for the default spec,
+        ``sample_ids`` record none); ``given`` fixes sides before the draw and may not
+        contradict an inherited one; ``inherit=False`` re-splits; ``disagreeing_inputs``
+        settles a fine-tuning sample's input. See ``docs/adr/0024``, ``docs/adr/0050``,
+        ``docs/adr/0052``, ``docs/adr/0053``.
         """
         check_option(disagreeing_inputs)
         if sample_ids is not None and spec is not None:
@@ -516,10 +417,7 @@ class Catalog:
                 disagreeing_inputs=settled.option,
             )
             if existing is not None:
-                # A version describes a selection, not an attempt at one. A
-                # round that crashed after freezing its dataset should be
-                # retried against the same version rather than minting a
-                # second one that says exactly the same thing.
+                # A version describes a selection, not an attempt at one. docs/adr/0003
                 return existing
             version = self.datasets.next_version(conn, name)
             inherited, origin = self.datasets.previous_split(conn, name)
@@ -577,8 +475,7 @@ class Catalog:
             return self._given_sides(conn, given, list(sample_ids))
 
     def _given_sides(self, conn, given: GivenSplit, sample_ids: Sequence[int]) -> dict[int, str]:
-        # Every member's bytes and type, lists or not: a side reaches every
-        # sample with the bytes of one it names. docs/adr/0052
+        # A side reaches every sample with the bytes of one it names. docs/adr/0052
         try:
             return given.sides_for(
                 self.samples.metadata(conn, sample_ids),
@@ -588,21 +485,13 @@ class Catalog:
         except ValueError as e:
             raise CatalogError(f"The given split cannot be applied: {e}") from None
 
-    # ------------------------------------------------------------------
-    # Materialise
-    # ------------------------------------------------------------------
-
     def ensure_cached(
         self, checksums: Sequence[str], cache: Path, on_progress=None
     ) -> dict[str, Path]:
-        """Files on this host for these samples, fetching what is missing.
+        """Files on this host for these samples, fetching what is missing into a cache shared with
+        :meth:`materialise`; a checksum the catalog has never seen is absent.
 
-        For work that is not a dataset, such as scoring a review pool. The
-        cache is content-addressed and shared with :meth:`materialise`. See
-        ``docs/adr/0002``.
-
-        Returns only what the catalog knows. A checksum it has never seen is
-        absent rather than an error.
+        See ``docs/adr/0002``.
         """
         cache = Path(cache)
         paths: dict[str, Path] = {}
@@ -634,32 +523,12 @@ class Catalog:
         cache: Path | None = None,
         features: "Sequence[FeatureSpec] | None" = None,
     ) -> Path:
-        """Write a dataset version out as files plus a manifest.
+        """Write a dataset version out as files plus a manifest, needing no catalog to train from.
 
-        The result needs no database and no catalog to train from, which is
-        what makes a dataset version the portable unit. Files are addressed
-        by checksum, so re-materialising after a labelling round rewrites the
-        manifest and copies nothing.
-
-        ``on_progress(done, total)`` is called as blobs land. See
-        ``docs/adr/0031``.
-
-        ``cache`` is a directory of blobs by checksum, consulted before the
-        backend and filled from it. Successive versions of a dataset share
-        almost all their samples, so without one every version re-fetches a
-        corpus it already has on disk. A hit costs a hard link.
-
-        ``features`` are values the model is to be told alongside each
-        sample. Resolved here rather than by the trainer because they come
-        out of the catalog and a materialised directory has to be readable
-        without one. A sample missing a declared feature is written with it
-        absent — counted and reported by the caller rather than filled in,
-        since a zero is an answer and "not known" is not.
-
-        A fine-tuning example's input is written as its features, its first
-        origin's, which is the one a freeze kept. The project declares none
-        of them, and one it declares under an input's name is refused. See
-        ``docs/adr/0053`` and ``docs/adr/0054``.
+        ``on_progress(done, total)`` is called as blobs land; ``cache`` is consulted before
+        the backend and filled from it; ``features`` are resolved here, a missing one left
+        absent, and a fine-tuning input is written as features of its own. See
+        ``docs/adr/0011``, ``docs/adr/0026``, ``docs/adr/0031``, ``docs/adr/0053``.
         """
         dest = Path(dest)
         files = dest / FILES_DIR
@@ -668,8 +537,7 @@ class Catalog:
         info = self.datasets.info(dataset_id)
         rows = self.datasets.members(dataset_id, info.label_set_id)
 
-        # A member whose feature is under dispute is left out and named in
-        # the manifest. docs/adr/0011
+        # A member whose feature is disputed is left out and named in the manifest. docs/adr/0011
         disputed = self._disputed_features(features, [row.id for row in rows])
         left_out = [row.checksum for row in rows if row.id in disputed]
         rows = [row for row in rows if row.id not in disputed]
@@ -686,8 +554,7 @@ class Catalog:
 
         wanted: dict[Location, Path] = {}
         relatives: dict[int, str] = {}
-        # One file per checksum: two types' rows over the same bytes share
-        # it, named after the first. docs/adr/0052
+        # One file per checksum: two types' rows over the same bytes share it. docs/adr/0052
         named: dict[str, str] = {}
         for row in rows:
             name = named.setdefault(row.checksum, materialised_name(row))
@@ -770,26 +637,14 @@ class Catalog:
     def features_for(
         self, sample_ids: list[int], specs: "Sequence[FeatureSpec]"
     ) -> dict[int, dict]:
-        """What each sample's declared features currently say.
-
-        The read behind a review queue, where ``materialise`` is the read
-        behind a round. Same resolution, different moment: one is scoring
-        an unlabelled pool, the other is freezing a dataset.
-        """
+        """What each sample's declared features currently say: the read behind a review queue."""
         return self._resolve_features(specs, list(sample_ids))
 
     def _resolve_features(
         self, specs: "Sequence[FeatureSpec] | None", sample_ids: list[int]
     ) -> dict[int, dict]:
-        """Read each declared feature for each sample.
-
-        One query per declaration rather than per sample. See
-        ``docs/adr/0032``.
-
-        A sample the declaration does not cover is simply absent from its
-        entry. Filling in a default would be inventing an answer, and the
-        caller is better placed to decide whether missing means "skip this
-        one" or "refuse the round".
+        """Read each declared feature for each sample, one query per declaration; a sample a
+        declaration does not cover is absent. See ``docs/adr/0011``, ``docs/adr/0032``.
         """
         if not specs or not sample_ids:
             return {}

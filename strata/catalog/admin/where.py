@@ -16,6 +16,7 @@ class Strict(BaseModel):
 
 def redacted(url: str) -> str:
     """An index URL safe to print, its password hidden. See ``docs/adr/0030``."""
+    # A string helper: kept lazy so this module reads without the engine behind it
     from sqlalchemy.engine import make_url
 
     try:

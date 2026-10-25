@@ -1,12 +1,5 @@
-"""Deciding which side each sample is on, once.
-
-Three sides: ``train`` and ``val`` are what a round uses, ``holdout`` never
-reaches a model and is drawn first. A new version inherits every side its
-predecessor decided. A standalone sample is a group of one. See
-``docs/adr/0003``.
-
-Samples with the same bytes are one group, always, joined with whatever
-groups a key makes. See ``docs/adr/0052``.
+"""Deciding which side each sample is on, once: holdout drawn first, inherited sides
+kept, samples with the same bytes one group. See ``docs/adr/0003``, ``docs/adr/0052``.
 """
 
 import random
@@ -39,21 +32,9 @@ def assign(
 ) -> tuple[dict[int, str], Achieved]:
     """Decide a side per sample id, and report the ratios actually reached.
 
-    ``members`` maps sample id to group id, where ``None`` means the sample
-    is its own group. ``inherited`` carries the previous version's
-    decisions, which are never overruled. ``given`` carries sides the
-    corpus arrived with, fixed before anything else and outside the
-    grouping. Whether a given side may contradict an inherited one is the
-    caller's policy; here the given side wins.
-
-    The achieved ratios are returned because grouping can make a target
-    unreachable (the fallback below). See ``docs/adr/0024``.
-
-    ``checksums`` maps sample id to checksum. Samples sharing one are one
-    group, and groups they span are joined: the same bytes under two types
-    never sit on both sides, whatever ``members`` says. Not a key a version
-    opts into, so a caller that has the checksums passes them. See
-    ``docs/adr/0052``.
+    ``members`` maps sample id to group id (``None`` is a group of one); ``inherited``
+    sides are kept and ``given`` ones fixed first; samples sharing a ``checksums``
+    entry are one group. See ``docs/adr/0024``, ``docs/adr/0052``.
     """
     if not members:
         return {}, Achieved(0.0, 0.0)
@@ -71,8 +52,7 @@ def assign(
     for sample_id, group_id in members.items():
         if sample_id in assigned:
             continue
-        # A null group id is the sample's own group, and has to be namespaced
-        # or two samples could collide with a real group's name
+        # Namespaced, or a sample's own group could collide with a real group's name
         key = f"g:{group_id}" if group_id is not None else f"s:{sample_id}"
         groups.setdefault(key, []).append(sample_id)
     if checksums:
@@ -83,10 +63,7 @@ def assign(
     for key, ids in groups.items():
         sides = {inherited[i] for i in ids if i in inherited}
         if len(sides) > 1:
-            # A group straddling sides is the leak this exists to prevent. It
-            # cannot have come from here, so something else put it there;
-            # train removes the leak rather than preserving it, and this is
-            # the only case where an inherited decision is overruled.
+            # A straddling group leaks; train removes it, overruling inheritance. docs/adr/0003
             sides = {TRAIN}
         if not sides:
             undecided.append(key)
@@ -100,9 +77,7 @@ def assign(
     rng.shuffle(undecided)
     total = len(members)
 
-    # Holdout first, so validation is drawn from what holdout left. Forced
-    # only when three groups exist. A side the corpus gave counts towards
-    # the target, so nothing more is drawn for it. docs/adr/0024
+    # Holdout first, forced only with three groups; given sides count towards it. docs/adr/0024
     undecided = _fill(
         HOLDOUT,
         round(total * holdout_ratio),
@@ -125,11 +100,9 @@ def assign(
 
 
 def _joined(groups: dict[str, list[int]], checksums: Mapping[int, str]) -> dict[str, list[int]]:
-    """``groups`` with every two that hold the same bytes made one.
+    """``groups`` with every two that hold the same bytes made one, under the earliest part's key.
 
-    A joined group keeps the key of its earliest part, and the order the
-    parts came in, so where no bytes are shared nothing moves and the draw
-    is the one it always was. See ``docs/adr/0052``.
+    See ``docs/adr/0052``.
     """
     order = {key: n for n, key in enumerate(groups)}
     parent = {key: key for key in groups}
@@ -167,11 +140,9 @@ def _fill(
     *,
     force: bool,
 ) -> list[str]:
-    """Move whole groups from ``undecided`` onto ``side`` until the target is met.
+    """Move whole groups from ``undecided`` onto ``side`` while doing so lands closer to the target.
 
-    Aims at the deficit rather than flipping a coin per sample. A group is
-    taken only while doing so lands closer to the target than skipping it
-    would. See ``docs/adr/0024``.
+    See ``docs/adr/0024``.
     """
     have = counts[side]
     remaining: list[str] = []
@@ -186,8 +157,7 @@ def _fill(
             remaining.append(key)
 
     if have == 0 and remaining and force:
-        # No group could improve on taking nothing. Overshooting the ratio
-        # beats an empty side, and the achieved ratio says so. docs/adr/0024
+        # Overshooting the ratio beats an empty side, and the achieved ratio says so. docs/adr/0024
         closest = min(remaining, key=lambda k: abs(len(groups[k]) - target))
         for i in groups[closest]:
             assigned[i] = side

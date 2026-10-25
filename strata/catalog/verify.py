@@ -1,16 +1,5 @@
-"""Checking that a run is still what it recorded.
-
-Four checks. The checksums it was given still hash to its digest. Its
-counts add up, by input checksum. Everything it wrote is present. And,
-deep, that each blob behind it still hashes to its checksum. A training
-run can then show that the preparation behind its data is the one it
-trained against, without either store reading the other. See
-``docs/adr/0045``.
-
-A dataset version is checked the same way: its spec run again at its
-watermark gives its members back. See ``docs/adr/0050``. A version over
-fine-tuning samples settles their inputs again as it recorded. See
-``docs/adr/0053``.
+"""Checking that a run is still what it recorded, and that a version's spec run again at
+its watermark gives its members back. See ``docs/adr/0045``, ``docs/adr/0050``, ``docs/adr/0053``.
 """
 
 import hashlib
@@ -19,9 +8,12 @@ from dataclasses import dataclass, field
 from sqlalchemy import func, or_, select
 
 from .index import tables as t
+from .index.locks import lock
 from .index.runs import DERIVE, GENERATE, IMPORT, INGEST, PREPARE, files_digest
 from .rows import CatalogError, chunks, live
+from .selection import SelectionSpec, run_selection
 from .storage.blobs import Location
+from .versions.inputs import settle
 
 
 @dataclass(frozen=True)
@@ -103,8 +95,7 @@ def _prepared(conn, run, given: list[str], report: VerifyReport) -> None:
     ).scalar_one()
     emptied = sum((counts.get("emptied") or {}).values())
     already = counts.get("already", 0)
-    # Counted by input, as the run went: a crash or an input lost without
-    # a trace breaks it. docs/adr/0045
+    # Counted by input, as the run went. docs/adr/0045
     adds_up = len(given) == counts.get("inputs") == produced + already + emptied
     report.add(
         "counts",
@@ -247,15 +238,8 @@ class DatasetVerifyReport:
 def verify_dataset(catalog, name: str, version: int) -> DatasetVerifyReport:
     """Run a version's spec again at its watermark, and compare the members.
 
-    Reproducibility rests on the rows; this answers whether the rows are
-    what the spec chose. A version frozen before specs were recorded, or
-    from samples named outright, has nothing to run, and says so. See
-    ``docs/adr/0050``.
+    A version recording no spec has nothing to run, and is refused. See ``docs/adr/0050``.
     """
-    from .index.locks import lock
-    from .selection import SelectionSpec, run_selection
-    from .versions.inputs import settle
-
     report = DatasetVerifyReport(name=name, version=version)
     with catalog.engine.begin() as conn:
         row = conn.execute(
@@ -279,13 +263,11 @@ def verify_dataset(catalog, name: str, version: int) -> DatasetVerifyReport:
             f"hash {spec.spec_hash[:12]}"
             + ("" if spec.spec_hash == row.spec_hash else f", recorded {row.spec_hash[:12]}"),
         )
-        # Under the freeze's lock, so a change in place cannot land between
-        # reading a row and reading the event that dates it
+        # Under the freeze's lock, so no change lands between a row and its event. docs/adr/0050
         lock(conn)
         again = run_selection(conn, spec, row.watermark)
         if row.disagreeing_inputs is not None:
-            # Settled as the freeze settled them, over the origins it read.
-            # docs/adr/0053
+            # Settled as the freeze settled them, over the origins it read. docs/adr/0053
             settled = settle(
                 conn, again.members, row.disagreeing_inputs, row.watermark.get("origin")
             )

@@ -1,14 +1,7 @@
-"""Folding one catalog's answers back into another.
+"""Folding one catalog's answers back into another: annotations and lists move, nothing else, and an
+answer is matched by checksum and type.
 
-Annotations move, and lists of checksums with them (``docs/adr/0050``).
-Nothing else does. An answer the target lacks is copied; the same
-answer is nothing; a different answer of equal standing is a conflict the
-target keeps its own side of and records; an answer that outranks what the
-target holds replaces or confirms it, and one that is outranked is left
-out (``tables.AUTHORITY``). See ``docs/adr/0009``.
-
-An answer is matched to the target's sample by checksum and type, since
-the same bytes can be two samples (``docs/adr/0052``).
+See ``docs/adr/0009``, ``docs/adr/0050``, ``docs/adr/0052``.
 """
 
 from __future__ import annotations
@@ -38,18 +31,13 @@ class MergeReport:
     conflicted: int = 0
     #: Skips copied, where the target had nothing at all.
     skipped: int = 0
-    #: Answers the target had that an arriving source outranking them
-    #: replaced — an import superseded by a person's answer.
+    #: Answers the target had, replaced by an arriving source that outranks them. docs/adr/0009
     superseded: int = 0
-    #: Answers the target had that an arriving source outranking them
-    #: confirmed unchanged, which raises their standing: a person agreed
-    #: with what was only an import.
+    #: Answers the target had, confirmed by an outranking source, which raises their standing.
     confirmed: int = 0
-    #: Arriving answers left alone because what the target holds outranks
-    #: them — an import landing where a person already answered.
+    #: Arriving answers left alone because what the target holds outranks them.
     outranked: int = 0
-    #: Source answers whose sample, its checksum and type, is not in the
-    #: target, by checksum.
+    #: Source answers whose sample, by checksum and type, is not in the target, by checksum.
     unknown_samples: list[str] = field(default_factory=list)
     #: Label sets present in the source and not in the target, by name.
     unknown_label_sets: list[str] = field(default_factory=list)
@@ -80,8 +68,7 @@ class MergeReport:
             f"{self.conflicted} conflicting",
             f"{self.skipped} skips copied",
         ]
-        # Only when they happen: a merge between two catalogs nobody
-        # imported into never sees them, and four zeros are noise
+        # Only when they happen: four zeros are noise
         if self.superseded:
             out.append(f"{self.superseded} imported answers replaced by a person's")
         if self.confirmed:
@@ -105,10 +92,8 @@ def merge_annotations(
 ) -> MergeReport:
     """Fold ``source``'s annotations into ``target``.
 
-    Both must be the same catalog: the same identity, meaning one was
-    copied from the other (``docs/adr/0008``). ``dry_run`` reads everything
-    and writes nothing, so the report can be shown before anything is
-    committed (``docs/adr/0009``).
+    Both must share an identity; ``dry_run`` reads everything and writes nothing.
+    See ``docs/adr/0008``, ``docs/adr/0009``.
     """
     if source.id != target.id:
         raise MergeError(
@@ -153,9 +138,7 @@ def _merge_one(
 ) -> None:
     sample = target.samples.by_checksum(checksum, type_)
     if sample is None:
-        # By content and type, so a file renamed on the laptop still finds
-        # its sample; unknown bytes, or bytes made another type, were
-        # ingested there and never here. docs/adr/0001, docs/adr/0052
+        # By content and type, so a renamed file finds its sample. docs/adr/0001, docs/adr/0052
         report.unknown_samples.append(checksum)
         return
 
@@ -173,9 +156,7 @@ def _merge_one(
     standing = None if here is None else t.AUTHORITY.get(here.source, 0)
 
     if here is None or here.state == t.SKIPPED:
-        # Absent, or skipped there and answered here: an answer beats a
-        # skip, unless the skip was a person's and the answer an import's.
-        # docs/adr/0009
+        # An answer beats a skip, unless the skip's source outranks the answer's. docs/adr/0009
         if standing is not None and standing > rank:
             report.outranked += 1
             return
@@ -189,16 +170,14 @@ def _merge_one(
     theirs = VALUE.validate_python(here.value)
     if theirs == value:
         if rank > standing:
-            # The same answer from an outranking source confirms it.
-            # docs/adr/0009
+            # The same answer from an outranking source confirms it. docs/adr/0009
             report.confirmed += 1
             if not dry_run:
                 target.annotations.annotate(sample.id, target_set_id, value, source=answered_by)
         else:
             report.agreed += 1
     elif rank > standing:
-        # A person's answer against an import's is not a conflict.
-        # docs/adr/0009
+        # An outranking answer against an outranked one is not a conflict. docs/adr/0009
         report.superseded += 1
         if not dry_run:
             schema.validate_value(value)
@@ -214,10 +193,10 @@ def _merge_one(
 
 
 def _merge_lists(source: Catalog, target: Catalog, report: MergeReport, dry_run: bool) -> None:
-    """Every list version the target lacks, copied; one it holds otherwise, refused.
+    """Every list version the target lacks, copied; one it holds otherwise, refused before anything
+    is written.
 
-    Refused before anything is written, as a raw name held with other bytes
-    is: a name and version mean one set. See ``docs/adr/0050``.
+    See ``docs/adr/0050``.
     """
     held = {row.ref: row for row in target.lists.every()}
     arriving = source.lists.every()
@@ -238,11 +217,10 @@ def _merge_lists(source: Catalog, target: Catalog, report: MergeReport, dry_run:
 
 
 def _clash(held, arriving) -> bool:
-    """Two versions under one ref that say different things.
+    """Two versions under one ref that say different things; a type one side does not record is no
+    contradiction.
 
-    A type one side does not record is not a contradiction: a copy
-    migrated apart may have typed a list the other could not. See
-    ``docs/adr/0052``.
+    See ``docs/adr/0052``.
     """
     if held.digest != arriving.digest:
         return True
@@ -257,9 +235,9 @@ def _label_sets(catalog: Catalog) -> list[tuple[str, int]]:
 
 
 def _answers(catalog: Catalog, label_set_id: int) -> list[tuple[str, str, str, dict | None, str]]:
-    """Every answer in a label set, keyed by content and type rather than by id, with its source.
+    """Every current answer in a label set, keyed by content and type, with its source.
 
-    See ``docs/adr/0001``, ``docs/adr/0009`` and ``docs/adr/0052``.
+    See ``docs/adr/0001``, ``docs/adr/0052``.
     """
     with catalog.engine.connect() as conn:
         return [

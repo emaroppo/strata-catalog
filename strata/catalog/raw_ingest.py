@@ -1,11 +1,5 @@
-"""Ingesting raw files: a directory's files into the store, as they are.
-
-A one-off, apart from preparation. The files are hashed before anything is
-written, so a name already held with other bytes, or a listed file that is
-not there, refuses the whole ingest with every such name listed. Then one
-transaction opens the run, stores each new checksum once, writes the raw
-rows and closes the run with its counts. Run again over the same files,
-it writes nothing but the run. See ``docs/adr/0045``.
+"""Ingesting raw files as they are: hashed before anything is written, then one
+transaction opens the run, stores each new checksum once and closes it. See ``docs/adr/0045``.
 """
 
 from collections.abc import Callable, Iterable
@@ -65,11 +59,10 @@ def producer() -> tuple[str, dict]:
 
 
 def files_under(root: Path, files: Iterable[str] | None) -> list[str]:
-    """The paths to ingest, relative to ``root`` and in POSIX form, sorted.
+    """The paths to ingest, relative to ``root`` in POSIX form, sorted: every regular file when no
+    list is given.
 
-    Every regular file under the root when no list is given. A listed path
-    is relative to the root, or absolute inside it; one outside it, or not
-    there, refuses the ingest.
+    A listed path outside the root, or not there, refuses the ingest.
     """
     if files is None:
         return sorted(
@@ -173,7 +166,6 @@ def ingest_raw(
             blobs=blobs,
         )
         catalog.runs.finish(conn, run_id, report.counts())
-        # Before the commit: rows naming a shard that failed to upload
-        # would be worse than no rows. docs/adr/0002
+        # Before the commit, or rows could name a shard that never uploaded. docs/adr/0002
         catalog.blobs.flush()
     return report

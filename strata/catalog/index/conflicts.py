@@ -1,7 +1,6 @@
 """Disagreement, recorded rather than resolved: two answers for one sample, kept side by side.
 
-Only a merge records one, and a fresh answer clears it, whichever way it
-went. See ``docs/adr/0009``.
+Only a merge records one, and a fresh answer clears it. See ``docs/adr/0009``.
 """
 
 import json
@@ -27,6 +26,30 @@ def clear(conn, sample_id: int, label_set_id: int) -> None:
     )
 
 
+def upsert_conflict(conn, sample_id: int, label_set_id: int, payload: dict) -> None:
+    """The one conflict row for a sample under a label set, written or rewritten within a caller's
+    transaction.
+
+    ``payload`` is ``kept_value``, ``other_value`` and ``other_origin`` in stored form.
+    """
+    updated = conn.execute(
+        update(t.annotation_conflict)
+        .where(
+            and_(
+                t.annotation_conflict.c.sample_id == sample_id,
+                t.annotation_conflict.c.label_set_id == label_set_id,
+            )
+        )
+        .values(**payload)
+    ).rowcount
+    if not updated:
+        conn.execute(
+            insert(t.annotation_conflict).values(
+                sample_id=sample_id, label_set_id=label_set_id, **payload
+            )
+        )
+
+
 class Conflicts:
     """The catalog's disputed answers."""
 
@@ -41,11 +64,9 @@ class Conflicts:
         other: AnyValue | None,
         other_origin: str | None = None,
     ) -> None:
-        """Note that two origins answered this sample differently.
+        """Note that two origins answered this sample differently; the answer already held is kept.
 
-        Called by whatever merges one catalog into another, never by
-        :meth:`annotate`. The catalog keeps the answer it already had and
-        remembers the other. See ``docs/adr/0009``.
+        See ``docs/adr/0009``.
         """
         payload = {
             "kept_value": None if kept is None else json.loads(kept.model_dump_json()),
@@ -53,22 +74,7 @@ class Conflicts:
             "other_origin": other_origin,
         }
         with self.engine.begin() as conn:
-            updated = conn.execute(
-                update(t.annotation_conflict)
-                .where(
-                    and_(
-                        t.annotation_conflict.c.sample_id == sample_id,
-                        t.annotation_conflict.c.label_set_id == label_set_id,
-                    )
-                )
-                .values(**payload)
-            ).rowcount
-            if not updated:
-                conn.execute(
-                    insert(t.annotation_conflict).values(
-                        sample_id=sample_id, label_set_id=label_set_id, **payload
-                    )
-                )
+            upsert_conflict(conn, sample_id, label_set_id, payload)
 
     def disputed(self, label_set_id: int, collections) -> list[dict]:
         """Samples whose answer is disputed, and what the two answers were."""

@@ -1,16 +1,5 @@
-"""Selection specs: which samples a dataset version draws, written down.
-
-A spec names its sample types, optionally its collections, the label set
-whose answers count, conditions on metadata and on labels, and lists to
-include or exclude. A freeze runs it at a watermark, the highest id of
-each appended table it read, and records all three; running it again at
-that watermark gives the same members. The format names no metadata key
-of its own: a key is data in the spec, checked against the contracts of
-the types it names. See ``docs/adr/0050``.
-
-Filtering is in Python, as every metadata query is (``docs/adr/0021``).
-This module is that filter, and :meth:`Samples.matching` runs the same
-comparisons.
+"""Selection specs: which samples a dataset version draws, written down and run at a
+watermark; filtering is in Python. See ``docs/adr/0021``, ``docs/adr/0050``.
 """
 
 import json
@@ -38,17 +27,13 @@ from strata.contracts import sample_types
 from strata.contracts.sample_types import PLAIN, SampleType, SampleTypeError
 
 from .index import tables as t
-from .rows import CatalogError, chunks
+from .rows import CatalogError, chunks, current, live, scoped
 
 #: The comparisons a metadata condition can make. Nothing else.
 OPERATORS = ("==", "!=", "<", "<=", ">", ">=", "in", "exists")
 ORDERED = ("<", "<=", ">", ">=")
 
-#: The appended tables a freeze reads, each covered by the watermark. The
-#: class index is keyed by annotation row, so the annotation's id covers it.
-#: Origins are where a fine-tuning sample's inputs are compared. A
-#: watermark written before they were read has none, and every origin
-#: counts. docs/adr/0053
+#: The appended tables a freeze reads; a mark without origin counts every origin. docs/adr/0053
 WATERMARKED = ("sample", "sample_collection", "annotation", "event", "origin")
 
 
@@ -131,8 +116,7 @@ def _which(value: Any) -> str | None:
     return None
 
 
-#: Grouped with all, any and not, nested as deep as needed; nothing else
-#: combines them.
+#: Grouped with all, any and not, nested as deep as needed.
 Condition = Annotated[
     Union[  # noqa: UP007 - a tagged union needs the Union form
         Annotated[Compare, Tag("compare")],
@@ -164,8 +148,7 @@ class Lists(_Strict):
 
 class Select(_Strict):
     types: list[str] = Field(min_length=1)
-    #: Omitted means every collection; the freeze counts candidates by
-    #: collection, so a selection wider than meant shows.
+    #: Omitted means every collection; candidates are counted per collection. docs/adr/0036
     collections: list[str] | None = None
     label_set: str = Field(min_length=1)
     #: Which answers count. Omitted means any.
@@ -218,10 +201,10 @@ class SelectionSpec(_Strict):
         return cls.model_validate(canonical)
 
     def canonical(self) -> dict:
-        """The content a version stores: defaults written out, every set sorted.
+        """The content a version stores: defaults written out, every set sorted, ``all`` and ``any``
+        children too.
 
-        The children of ``all`` and ``any`` sort too, so the same conditions
-        in another order are the same spec. Never a path.
+        See ``docs/adr/0050``.
         """
         dumped = self.model_dump(mode="json", by_alias=True, exclude_none=True)
         where = dumped["select"].get("where")
@@ -264,11 +247,6 @@ def parse_ref(ref: str) -> tuple[str, int]:
     return name, int(version)
 
 
-# ----------------------------------------------------------------------
-# Comparing typed values
-# ----------------------------------------------------------------------
-
-
 def _kind(value: Any) -> str:
     if isinstance(value, bool):
         return "boolean"
@@ -286,11 +264,8 @@ def _equal(found: Any, wanted: Any) -> bool:
 
 
 def compares(condition: Compare, metadata: dict | None) -> bool:
-    """Whether one sample's metadata meets one comparison.
-
-    Values keep their type: ``2000`` is a number and ``"2000"`` a string,
-    and they are not equal. A sample that lacks the key fails every
-    comparison but ``exists``, ``!=`` included.
+    """Whether one sample's metadata meets one comparison; values keep their type, and a
+    sample lacking the key fails everything but ``exists``.
     """
     metadata = metadata or {}
     if condition.op == "exists":
@@ -320,20 +295,12 @@ def compares(condition: Compare, metadata: dict | None) -> bool:
 
 
 def typed(value: str) -> Scalar:
-    """A value typed at a command line, with its type: JSON where it parses, else a string.
-
-    So ``2000`` is a number, ``true`` a boolean, and ``"2000"`` the string.
-    """
+    """A value typed at a command line, with its type: JSON where it parses, else a string."""
     try:
         parsed = json.loads(value)
     except ValueError:
         return value
     return parsed if isinstance(parsed, (bool, int, float, str)) else value
-
-
-# ----------------------------------------------------------------------
-# The catalog as it stood at a watermark
-# ----------------------------------------------------------------------
 
 
 @dataclass(frozen=True)
@@ -424,14 +391,9 @@ def _annotation_kind(annotation) -> str | None:
 
 
 def default_spec(conn, label_set: str, label_set_id: int, collections) -> SelectionSpec:
-    """The spec a freeze with none records: what a freeze did before specs.
-
-    Every sample in ``collections`` with a current answer in the label set.
-    Its types are the plain case of each media those samples are, which
-    covers every subtype. See ``docs/adr/0050``.
+    """The spec a freeze with none records: every answered sample in ``collections``, as
+    the plain case of each media. See ``docs/adr/0050``.
     """
-    from .rows import current, live, scoped
-
     names = [collections] if isinstance(collections, str) else list(collections)
     stmt = (
         select(t.sample.c.media)
@@ -470,12 +432,8 @@ def default_spec(conn, label_set: str, label_set_id: int, collections) -> Select
 
 
 def run_selection(conn, spec: SelectionSpec, mark: dict[str, int]) -> Selection:
-    """The members ``spec`` selects from the catalog as it stood at ``mark``.
-
-    The same code at freeze and at verify, so the two cannot disagree on
-    what a condition means. Refuses a spec that cannot be meant: a key no
-    candidate carries, a value of the wrong type, a label set or list the
-    catalog lacks.
+    """The members ``spec`` selects from the catalog as it stood at ``mark``; a spec that
+    cannot be meant is refused. See ``docs/adr/0050``.
     """
     chosen = spec.select
     types = [_resolve_type(name) for name in chosen.types]
@@ -599,10 +557,8 @@ def _keys(where) -> set[str]:
 
 
 def _check_keys(where, declared: dict[str, str], pool: list[Candidate]) -> None:
-    """Refuse a key that cannot mean what it says.
-
-    A declared key is checked against its type; an undeclared one has to
-    occur on some candidate, so a misspelt key cannot pass silently.
+    """Refuse a key that cannot mean what it says: a declared key against its type, an undeclared
+    one has to occur on a candidate.
     """
     carried = {key for c in pool for key in c.metadata}
     for condition in _walk(where):
@@ -639,7 +595,7 @@ def _candidates(conn, types: list[_Type], collections, mark) -> list[Candidate]:
         ).where(and_(t.sample.c.id <= mark["sample"], t.sample.c.media.in_(medias)))
     ).all()
 
-    # What changed in place after the mark, read back to before it
+    # What changed in place after the mark, read back to before it. docs/adr/0050
     later = conn.execute(
         select(t.event.c.sample_id, t.event.c.kind, t.event.c.before)
         .where(
@@ -699,11 +655,8 @@ def _by_collection(pool: list[Candidate], collections) -> dict[str, int]:
 
 
 def _answers(conn, label_set_id: int, mark) -> dict[int, Answer]:
-    """Each sample's answer in a label set as it stood at ``mark``.
-
-    The newest row under the mark, unless it arrived superseded or was
-    withdrawn by an event under the mark; then none. A row that arrived
-    superseded was never the answer here.
+    """Each sample's answer in a label set as it stood at ``mark``: the newest row under it,
+    unless it arrived superseded or was withdrawn under the mark. See ``docs/adr/0050``.
     """
     events = conn.execute(
         select(t.event.c.annotation_id, t.event.c.kind).where(
@@ -753,13 +706,10 @@ class ListMembers:
     type: str | None = None
 
     def holds(self, checksum: str, type_: str) -> bool:
-        """Whether the sample with these bytes and this type is a member.
+        """Whether the sample with these bytes and this type is a member; an untyped list matches on
+        the checksum alone.
 
-        A typed list matches on both. An untyped one matches on the checksum
-        alone, so where two types hold its bytes it holds both samples.
-        That is right for a split, which has to keep the two on one side
-        anyway, and a selection names its types besides. See
-        ``docs/adr/0052``.
+        See ``docs/adr/0052``.
         """
         return checksum in self.checksums and (self.type is None or self.type == type_)
 
